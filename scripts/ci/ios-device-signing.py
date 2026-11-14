@@ -235,6 +235,77 @@ def assert_profile(profile, bundle, state, devices=None):
         assert profile['Entitlements']['aps-environment'] == 'development'
 
 
+def entitlement_permitted(value, allowed):
+    if isinstance(value, str) and isinstance(allowed, str):
+        return value == allowed or (allowed.endswith('*') and '*' not in allowed[:-1]
+                                   and value.startswith(allowed[:-1]))
+    if isinstance(value, list) and isinstance(allowed, list):
+        return all(any(entitlement_permitted(item, grant) for grant in allowed) for item in value)
+    if isinstance(value, dict) and isinstance(allowed, dict):
+        return all(key in allowed and entitlement_permitted(item, allowed[key]) for key, item in value.items())
+    return type(value) is type(allowed) and value == allowed
+
+
+def assert_entitlements_allowed(entitlements, allowed):
+    assert 'beta-reports-active' not in entitlements
+    assert all(key in allowed and entitlement_permitted(value, allowed[key])
+               for key, value in entitlements.items())
+
+
+def development_entitlements(original, allowed):
+    entitlements = {}
+    for key, value in original.items():
+        if key == 'beta-reports-active' or key not in allowed:
+            continue
+        if isinstance(value, list) and isinstance(allowed[key], list):
+            entitlements[key] = [item for item in value if any(entitlement_permitted(item, grant) for grant in allowed[key])]
+        elif entitlement_permitted(value, allowed[key]):
+            entitlements[key] = value
+    for key in ('application-identifier', 'com.apple.developer.team-identifier', 'get-task-allow', 'aps-environment'):
+        if key in allowed:
+            entitlements[key] = allowed[key]
+    assert_entitlements_allowed(entitlements, allowed)
+    return entitlements
+
+
+def pin_build(source, report):
+    config_path = source/'eas.json'
+    original = config_path.read_bytes()
+    config = json.loads(original)
+    app = json.loads((source/'app.json').read_text())['expo']
+    number = str(app['ios']['buildNumber'])
+    assert number.isdigit() and int(number) >= 194
+    # Local, explicitly recorded build-config override only. No app source or
+    # app.json changes; no collision with the next real TestFlight number.
+    candidate = config['build']['production-candidate']
+    candidate['autoIncrement'] = False
+    candidate.setdefault('ios', {})['autoIncrement'] = False
+    write_json(config_path, config)
+    value = {'expectedBuildNumber': number, 'expectedVersion': app['version'],
+             'rebuildOfSource': True, 'testFlightBinaryReused': False,
+             'buildConfigOverride': {'profile': 'production-candidate', 'autoIncrement': False,
+                                     'ios.autoIncrement': False},
+             'originalEasJsonSha256': hashlib.sha256(original).hexdigest(),
+             'buildEasJsonSha256': hashlib.sha256(config_path.read_bytes()).hexdigest()}
+    write_json(report, value)
+
+
+def preflight_app(app, report):
+    provenance = json.loads(report.read_text())
+    plugins = list(app.glob('PlugIns/*.appex'))
+    assert len(plugins) == 1
+    # Reject an unexpected nested app/extension before any Apple mutation.
+    assert not list(app.glob('Watch/*'))
+    assert not list(app.glob('AppClips/*'))
+    for path in [app, *plugins]:
+        info = plistlib.loads((path/'Info.plist').read_bytes())
+        assert info['CFBundleIdentifier'] == ('app.wafra.ios' if path == app else 'app.wafra.ios.widget')
+        assert str(info['CFBundleVersion']) == provenance['expectedBuildNumber']
+        assert info['CFBundleShortVersionString'] == provenance['expectedVersion']
+    provenance['storeIpaVersionsAndPluginSetVerified'] = True
+    write_json(report, provenance)
+
+
 def resign(root, app):
     state = json.loads((root/'state.json').read_text())
     identity = state['identitySha1']
@@ -249,10 +320,7 @@ def resign(root, app):
         profile_file = root/(bundle + '.mobileprovision')
         profile = plistlib.loads(run('security', 'cms', '-D', '-i', str(profile_file)))
         original = plistlib.loads(run('codesign', '-d', '--entitlements', ':-', str(bundle_path)))
-        entitlements = dict(original)
-        for key in ('application-identifier', 'com.apple.developer.team-identifier', 'get-task-allow', 'aps-environment'):
-            if key in profile['Entitlements']:
-                entitlements[key] = profile['Entitlements'][key]
+        entitlements = development_entitlements(original, profile['Entitlements'])
         ent_path = root/(bundle + '.entitlements.plist')
         ent_path.write_bytes(plistlib.dumps(entitlements))
         shutil.copyfile(profile_file, bundle_path/'embedded.mobileprovision')
@@ -270,12 +338,15 @@ def verify(root, app):
         profile = plistlib.loads(run('security', 'cms', '-D', '-i', str(path/'embedded.mobileprovision')))
         assert_profile(profile, bundle, state)
         ent = plistlib.loads(run('codesign', '-d', '--entitlements', ':-', str(path)))
+        assert_entitlements_allowed(ent, profile['Entitlements'])
         assert ent['get-task-allow'] is True and ent['application-identifier'] == TEAM + '.' + bundle
         if bundle in BUNDLES[1:]:
             assert 'group.app.wafra.ios' in ent['com.apple.security.application-groups']
         if bundle == 'app.wafra.ios':
             assert ent['aps-environment'] == 'development'
-            assert int(info['CFBundleVersion']) >= 194
+            provenance = json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'ios-build-provenance.json').read_text())
+            assert str(info['CFBundleVersion']) == provenance['expectedBuildNumber']
+            assert info['CFBundleShortVersionString'] == provenance['expectedVersion']
         cert_prefix = root/'verified-cert'
         run('codesign', '-d', '--extract-certificates', str(cert_prefix), str(path))
         assert hashlib.sha1(pathlib.Path(str(cert_prefix)+'0').read_bytes()).hexdigest().upper() == state['identitySha1']
@@ -291,6 +362,10 @@ if __name__ == '__main__':
         root = pathlib.Path(directory)
         if command == 'prepare':
             prepare(root)
+        elif command == 'pin-build':
+            pin_build(root, pathlib.Path(args[0]))
+        elif command == 'preflight-app':
+            preflight_app(root, pathlib.Path(args[0]))
         elif command == 'resign':
             resign(root, pathlib.Path(args[0]))
         elif command == 'verify':

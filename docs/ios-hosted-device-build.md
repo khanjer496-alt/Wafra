@@ -5,12 +5,31 @@ then dispatches on the merged workflow ref with a full merged release SHA and
 `signing_approval=CREATE_QA_SIGNING`. The SHA must contain TestFlight 194's
 `a51d0be2` source. No App Store submission occurs.
 
-The hosted macOS runner builds `production-candidate` using the existing
-`EXPO_TOKEN` EAS signing. It then replaces the distribution signatures on that
-same app with development signatures. There is no dev client, Metro dependency,
-founder grant or source edit. Record results as **dev-signed build of <commit>**:
-same app code, different signing and development push environment. This does
-not prove TestFlight distribution or real sandbox purchasing.
+Both jobs use the `ios-device-qa` protected environment. It requires the
+repository owner `khanjer496-alt` (the GitHub identity used for CEO approvals),
+disallows administrator bypass, and permits only protected branches. CEO must
+approve each build or separate cleanup deployment. Existing repository-scoped
+EAS/ASC secrets are retained because the other release workflows use them;
+this PR does not migrate or remove them. The environment gate protects these
+two jobs, not access from every existing workflow in the repository.
+
+The hosted macOS runner rebuilds `production-candidate` using the existing
+`EXPO_TOKEN` EAS signing, which temporarily downloads EAS's distribution signing
+material to the ephemeral runner. Its raw build logs stay private. The workflow
+explicitly overrides both candidate autoIncrement settings to false in the
+runner's `eas.json`, records original/overridden hashes, and requires both app
+and widget versions to equal `app.json` at the pinned source commit. This does
+not reserve or consume the next real TestFlight build number.
+
+It then replaces the distribution signatures with development signatures.
+Entitlements are intersected with the development profile; store-only
+`beta-reports-active` is removed explicitly. Verification rejects every signed
+key/value not granted by that profile, including unauthorized app/keychain
+groups. There is no dev client, Metro dependency, founder grant or app-source
+edit. Record results as **dev-signed build of <commit>**: a fresh rebuild of
+that source, not the original TestFlight IPA, with different signing and
+development push environment. This does not prove TestFlight distribution or
+real sandbox purchasing.
 
 The old development identity cannot leave the local keychain. With the existing
 `EXPO_ASC_API_KEY_P8`, `EXPO_ASC_KEY_ID` and `EXPO_ASC_ISSUER_ID` secrets, the
@@ -31,6 +50,14 @@ folder is sealed, including the runner app, test plug-in, frameworks and
 generated xctestrun. Its source tar SHA-256 and every regular product-file
 SHA-256 are recorded. This is the upstream package route, rather than App QA's
 locally patched tarball; both use the same version.
+
+Before creating signing resources, the workflow fetches and verifies WDA,
+builds its complete Products unsigned, validates the store IPA's signature,
+and checks the exact app/widget bundle set and versions. After creation it
+binds the new WDA profile and performs the incremental signed build, then
+re-signs Wafra. A later signing failure can still leave new account resources;
+each attempt creates a new set, recorded in the receipt. Inspect that receipt
+before any approved retry, and use separate cleanup only with CEO go.
 
 The #239 public recipient certificate `.github/android-artifact-recipient.pem`
 is reused for CMS AES-256-CBC envelopes. Its private key stays on this Mac at

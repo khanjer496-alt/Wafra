@@ -5,7 +5,9 @@ import base64
 import datetime
 import hashlib
 import importlib.util
+import json
 import pathlib
+import plistlib
 import unittest
 import tempfile
 from unittest.mock import patch
@@ -145,6 +147,90 @@ class CleanupTests(unittest.TestCase):
                 module.cleanup(self.receipt, 'NEWCERT', ['NEWPROFILE'],
                                '00000000-0000-0000-0000-000000000000', pathlib.Path(tmp)/'report.json')
         self.assertEqual(self.deleted, [])
+
+
+class EntitlementTests(unittest.TestCase):
+    def setUp(self):
+        self.allowed = {'application-identifier': module.TEAM + '.app.wafra.ios',
+                        'com.apple.developer.team-identifier': module.TEAM,
+                        'get-task-allow': True, 'aps-environment': 'development',
+                        'keychain-access-groups': [module.TEAM + '.*'],
+                        'com.apple.security.application-groups': ['group.app.wafra.ios']}
+
+    def test_store_only_entitlements_removed_and_development_values_applied(self):
+        original = dict(self.allowed, **{'beta-reports-active': True, 'unknown-store-key': True,
+                                        'get-task-allow': False, 'aps-environment': 'production'})
+        actual = module.development_entitlements(original, self.allowed)
+        self.assertNotIn('beta-reports-active', actual)
+        self.assertNotIn('unknown-store-key', actual)
+        self.assertIs(actual['get-task-allow'], True)
+        self.assertEqual(actual['aps-environment'], 'development')
+        module.assert_entitlements_allowed(actual, self.allowed)
+
+    def test_verify_rejects_entitlement_absent_from_profile(self):
+        with self.assertRaises(AssertionError):
+            module.assert_entitlements_allowed(dict(self.allowed, **{'beta-reports-active': True}), self.allowed)
+
+    def test_verify_allows_keychain_wildcard_without_granting_other_teams(self):
+        module.assert_entitlements_allowed({'keychain-access-groups': [module.TEAM + '.app.wafra.ios']}, self.allowed)
+        with self.assertRaises(AssertionError):
+            module.assert_entitlements_allowed({'keychain-access-groups': ['OTHER.app']}, self.allowed)
+
+    def test_app_groups_intersection_drops_ungranted_group(self):
+        actual = module.development_entitlements({'com.apple.security.application-groups':
+                                                 ['group.app.wafra.ios', 'group.other']}, self.allowed)
+        self.assertEqual(actual['com.apple.security.application-groups'], ['group.app.wafra.ios'])
+
+    def test_verify_rejects_value_mismatch_and_boolean_integer_confusion(self):
+        for entitlement in [{'aps-environment': 'production'}, {'get-task-allow': 1}]:
+            with self.assertRaises(AssertionError): module.assert_entitlements_allowed(entitlement, self.allowed)
+
+
+class BuildProvenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        (self.root/'app.json').write_text(json.dumps({'expo': {'version': '1.0.0', 'ios': {'buildNumber': '194'}}}))
+        self.original_app = (self.root/'app.json').read_bytes()
+        (self.root/'eas.json').write_text(json.dumps({'build': {'production': {'autoIncrement': True},
+                                                            'production-candidate': {'extends': 'production'}}}))
+        self.report = self.root/'provenance.json'
+        module.pin_build(self.root, self.report)
+        self.app = self.root/'Wafra.app'
+        self.widget = self.app/'PlugIns/Widget.appex'
+        self.widget.mkdir(parents=True)
+        for path, bundle in [(self.app, 'app.wafra.ios'), (self.widget, 'app.wafra.ios.widget')]:
+            (path/'Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': bundle,
+                'CFBundleVersion': '194', 'CFBundleShortVersionString': '1.0.0'}))
+
+    def test_pins_both_increment_settings_without_changing_app_source(self):
+        candidate = json.loads((self.root/'eas.json').read_text())['build']['production-candidate']
+        self.assertIs(candidate['autoIncrement'], False)
+        self.assertIs(candidate['ios']['autoIncrement'], False)
+        self.assertEqual((self.root/'app.json').read_bytes(), self.original_app)
+        self.assertEqual(json.loads(self.report.read_text())['expectedBuildNumber'], '194')
+
+    def test_accepts_exact_rebuild_version(self):
+        module.preflight_app(self.app, self.report)
+        self.assertTrue(json.loads(self.report.read_text())['storeIpaVersionsAndPluginSetVerified'])
+
+    def test_rejects_incremented_app_or_widget(self):
+        for path in [self.app, self.widget]:
+            with self.subTest(path=path.name):
+                original = (path/'Info.plist').read_bytes()
+                info = plistlib.loads(original); info['CFBundleVersion'] = '195'
+                (path/'Info.plist').write_bytes(plistlib.dumps(info))
+                with self.assertRaises(AssertionError): module.preflight_app(self.app, self.report)
+                (path/'Info.plist').write_bytes(original)
+
+    def test_rejects_missing_or_unexpected_widget(self):
+        self.widget.rename(self.app/'Unexpected.appex')
+        with self.assertRaises(AssertionError): module.preflight_app(self.app, self.report)
+
+    def test_rejects_unexpected_extra_appex(self):
+        (self.app/'PlugIns/Other.appex').mkdir()
+        with self.assertRaises(AssertionError): module.preflight_app(self.app, self.report)
 
 
 if __name__ == '__main__': unittest.main()

@@ -23,6 +23,7 @@ def main():
     manifest = {'schema': 'wafra-ios-device-sealed-v1', 'sourceCommit': os.environ['SOURCE_COMMIT'],
                 'workflowCommit': os.environ['GITHUB_SHA'], 'runId': os.environ['GITHUB_RUN_ID'],
                 'label': 'dev-signed build of ' + os.environ['SOURCE_COMMIT'],
+                'buildProvenance': json.loads((temp/'ios-build-provenance.json').read_text()),
                 'wdaSource': {'package': 'appium-webdriveragent', 'version': '16.12.5',
                               'sha256': sha256(temp/'wda.tgz')},
                 'signing': json.loads((signing/'state.json').read_text()), 'files': []}

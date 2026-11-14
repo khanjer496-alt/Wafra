@@ -22,6 +22,7 @@ concurrency:
 jobs:
   github-macos:
     runs-on: macos-26
+    environment: ios-device-qa
     timeout-minutes: 100
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -53,8 +54,8 @@ jobs:
           git merge-base --is-ancestor "$SHA" origin/release/1.0.0-rc1-reconciled
           git merge-base --is-ancestor a51d0be2e106a9de6271f4adee8c82e0e04ed36f "$SHA"
           echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
-          # Same profile/environment as the TestFlight candidate; no dev client,
-          # founder grants or JS edits. Only signatures are changed afterward.
+          # Same app/runtime environment as the TestFlight candidate. Version
+          # auto-increment is disabled explicitly and recorded before building.
           node -e 'const e=require("./eas.json").build.production.env; for(const [k,v] of Object.entries(e)) console.log(`${k}=${v}`)' >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
@@ -88,6 +89,8 @@ jobs:
           node scripts/generate-ios-background-parser.cjs --check
       - name: Check signing and cleanup refusal guards (mock API only)
         run: python3 scripts/test/ios-device-signing.test.py
+      - name: Preserve committed build number for this QA rebuild
+        run: python3 scripts/ci/ios-device-signing.py pin-build source "$RUNNER_TEMP/ios-build-provenance.json"
       - name: Build unchanged release IPA using existing EAS signing
         working-directory: source
         env:
@@ -99,13 +102,6 @@ jobs:
           eas build --platform ios --profile production-candidate --local --non-interactive \
             --freeze-credentials --output "$RUNNER_TEMP/store.ipa" \
             > "$RUNNER_TEMP/eas-private.log" 2>&1
-      - name: Create runner-local development key and device profiles
-        env:
-          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
-        run: |
-          "$RUNNER_TEMP/signing-venv/bin/python" scripts/ci/ios-device-signing.py prepare "$SIGNING_DIR"
       - name: Fetch pinned App QA WebDriverAgent version
         run: |
           set -euo pipefail
@@ -116,14 +112,45 @@ jobs:
           node -e 'const f=require("fs"),c=require("crypto"); const got=c.createHash("sha512").update(f.readFileSync(process.argv[1])).digest("base64"); if(got!=="nbRew3haPfDCHUG+bxP1FKrBkZYnzM5Ey0FYXEQhW5pWjE9t77X6n22MZ2QrWXoy15fmuJk7WVgG2CEWzYCn+Q==")process.exit(1)' "$RUNNER_TEMP/wda.tgz"
           tar -xzf "$RUNNER_TEMP/wda.tgz" -C "$RUNNER_TEMP/wda" --strip-components=1
           ruby <<'RUBY'
+          require 'xcodeproj'
+          project=Xcodeproj::Project.open(File.join(ENV.fetch('RUNNER_TEMP'),'wda/WebDriverAgent.xcodeproj'))
+          target=project.targets.find { |t| t.name=='WebDriverAgentRunner' }; raise 'Missing runner' unless target
+          target.build_configurations.each do |config|
+            config.build_settings.merge!({'CODE_SIGN_STYLE'=>'Manual','DEVELOPMENT_TEAM'=>'UV7YN4GQ66',
+              'PRODUCT_BUNDLE_IDENTIFIER'=>'app.wafra.qa.wda','CODE_SIGN_IDENTITY[sdk=iphoneos*]'=>'Apple Development',
+              'PROVISIONING_PROFILE_SPECIFIER'=>''})
+          end
+          project.save
+          RUBY
+      - name: Preflight unsigned WDA and store IPA before Apple mutations
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project "$RUNNER_TEMP/wda/WebDriverAgent.xcodeproj" \
+            -scheme WebDriverAgentRunner -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/wda-build" CODE_SIGNING_ALLOWED=NO \
+            > "$RUNNER_TEMP/wda-private.log" 2>&1
+          test -d "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentRunner-Runner.app"
+          test -d "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentLib.framework"
+          find "$RUNNER_TEMP/wda-build/Build/Products" -name '*.xctestrun' | grep -q .
+          ditto -x -k "$RUNNER_TEMP/store.ipa" "$RUNNER_TEMP/wafra"
+          codesign --verify --deep --strict "$RUNNER_TEMP/wafra/Payload/Wafra.app"
+          python3 scripts/ci/ios-device-signing.py preflight-app "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$RUNNER_TEMP/ios-build-provenance.json"
+      - name: Create runner-local development key and device profiles
+        env:
+          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          "$RUNNER_TEMP/signing-venv/bin/python" scripts/ci/ios-device-signing.py prepare "$SIGNING_DIR"
+      - name: Bind validated WDA to the new development profile
+        run: |
+          ruby <<'RUBY'
           require 'json'; require 'xcodeproj'
           state=JSON.parse(File.read(File.join(ENV.fetch('SIGNING_DIR'),'state.json')))
           project=Xcodeproj::Project.open(File.join(ENV.fetch('RUNNER_TEMP'),'wda/WebDriverAgent.xcodeproj'))
           target=project.targets.find { |t| t.name=='WebDriverAgentRunner' }; raise 'Missing runner' unless target
           target.build_configurations.each do |config|
-            config.build_settings.merge!({'CODE_SIGN_STYLE'=>'Manual','DEVELOPMENT_TEAM'=>state.fetch('team'),
-              'PRODUCT_BUNDLE_IDENTIFIER'=>'app.wafra.qa.wda','CODE_SIGN_IDENTITY[sdk=iphoneos*]'=>'Apple Development',
-              'PROVISIONING_PROFILE_SPECIFIER'=>state.fetch('profiles').fetch('app.wafra.qa.wda.xctrunner').fetch('uuid')})
+            config.build_settings['PROVISIONING_PROFILE_SPECIFIER']=state.fetch('profiles').fetch('app.wafra.qa.wda.xctrunner').fetch('uuid')
           end
           project.save
           RUBY
@@ -132,9 +159,7 @@ jobs:
           set -euo pipefail
           xcodebuild build-for-testing -project "$RUNNER_TEMP/wda/WebDriverAgent.xcodeproj" \
             -scheme WebDriverAgentRunner -configuration Debug -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/wda-build" > "$RUNNER_TEMP/wda-private.log" 2>&1
-          ditto -x -k "$RUNNER_TEMP/store.ipa" "$RUNNER_TEMP/wafra"
-          codesign --verify --deep --strict "$RUNNER_TEMP/wafra/Payload/Wafra.app"
+            -derivedDataPath "$RUNNER_TEMP/wda-build" CODE_SIGNING_ALLOWED=YES > "$RUNNER_TEMP/wda-private.log" 2>&1
           python3 scripts/ci/ios-device-signing.py resign "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app"
           python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wafra/Payload/Wafra.app" "$SIGNING_DIR/wafra-verified.json"
           python3 scripts/ci/ios-device-signing.py verify "$SIGNING_DIR" "$RUNNER_TEMP/wda-build/Build/Products/Debug-iphoneos/WebDriverAgentRunner-Runner.app" "$SIGNING_DIR/wda-verified.json"
