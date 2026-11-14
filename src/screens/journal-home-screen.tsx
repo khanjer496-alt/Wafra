@@ -262,7 +262,7 @@ let manualReminderTail: Promise<void> = Promise.resolve();
  * one of those helpers starts reading it.
  */
 export const HOME_STATE_FIELDS = [
-  'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut',
+  'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut', 'androidCaptureSources',
   'pro', 'founderPro', 'complimentaryIssuedAt', 'trialStartTs', 'marketId', 'ledgerMoney',
   'transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'notSubscriptions', 'cancelledSubscriptions',
   'merchantOverrides', 'billAliases', 'transferInternalIds', 'transferNormalizationVersion',
@@ -809,19 +809,25 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts,
     state.transferInternalIds, state.transferNormalizationVersion]));
+  // Saved import cursors can exist even after the person chooses manual entry.
+  // Per-source settings are absent on legacy installs, where SMS remains enabled.
+  const smsHistoryEnabled = !state.captureOptOut &&
+    (Platform.OS !== 'android' || state.androidCaptureSources?.sms !== false);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
+  // Keep notification setup separate from an unavailable SMS-import cursor.
+  const importHistory = smsHistoryEnabled ? history : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
-  const moneyPicture = moneyPictureProgress({
+  const moneyPicture = !state.captureOptOut ? moneyPictureProgress({
     nowMs: now.getTime(),
     trialStartTs: state.trialStartTs,
-    history: state.historyImport,
+    history: smsHistoryEnabled ? state.historyImport : null,
     transactionCount: state.transactions.length,
     activeAccountCount: state.accounts.reduce((count, account) => count + (account.archived ? 0 : 1), 0),
     obligationCount: state.bills.length + state.cardDues.length,
     captureReady: status === 'waiting-for-alert' || status === 'first-alert-captured' ||
       (Platform.OS === 'android' && !state.captureOptOut && !needsPermission),
-  });
+  }) : null;
 
   useEffect(() => {
     if (!state.hydrated || state.privateMode) return;
@@ -1045,7 +1051,7 @@ export default function JournalHomeScreen() {
   // last for good, so they stay with the dismissable Needs you pill and in
   // the section; so does the offer to fill in the past.
   const captureNeeded = state.hydrated && state.onboarded && (trackingNeed === 'off' || trackingNeed === 'stopped'
-    || (!history && moneyPicture !== null));
+    || (!importHistory && moneyPicture !== null));
   const drawnWidgets = withNeededHomeSections(homeWidgets, captureNeeded ? ['capture'] : []);
   // Transfers still waiting that the Needs you pill does not name (no question
   // the card can ask: a likely card repayment, an archived account): one quiet
@@ -1188,7 +1194,7 @@ export default function JournalHomeScreen() {
     tile: band.glyphGround, bandMark: band.textSecondary, bandRule: band.rule };
   const renderCapture = () => (<View style={styles.captureBlock}>
     {captureStoppedNotice}
-    {!history && moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} /> : null}
+    {!importHistory && moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} /> : null}
         {captureSetUp && !hasLiveCapture && !history ? <View testID="home-capture-ready" accessible accessibilityRole="text"
           accessibilityLabel={`${Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}. ${summaryWords.readyBody}`}
           style={[styles.readyCard, { borderColor: theme.cardBorder }]}>
@@ -1293,8 +1299,8 @@ export default function JournalHomeScreen() {
         {pillInline ? needsYouPill : null}
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
-        {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
-          : <HistoryReadingStatus progress={history} onResume={retryHistory} />) : null}
+        {importHistory ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
+          : <HistoryReadingStatus progress={importHistory} onResume={retryHistory} />) : null}
 
 
         {/* The band holds the greeting and the Spent hero. The sheet leads
