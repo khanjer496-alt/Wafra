@@ -24,9 +24,10 @@ const PENDING = new RegExp(`${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STAT
 export const REFUND_REQUEST_NOUN_RE = /\b(?:(?:refund|reversal|chargeback)\s+(?:requests?|claims?|applications?)|requests?\s+(?:for|to)\s+(?:(?:a|the|your)\s+)?(?:refund|reversal|reverse|chargeback))\b|(?<![ء-ي])(?:طلب(?:ك|كم)?\s+(?:ال)?(?:ل?استرداد|ل?استرجاع|ل?عكس|اعاده|اعتراض)|طلبك\s+لاسترداد)(?![ء-ي])/iu;
 export const isRefundRequest = (source: string): boolean => REFUND_REQUEST_NOUN_RE.test(normalizeCreditText(source).replace(/\|/g, ' '));
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
+const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process(?:ed|ing)?|progress|review(?:ed|ing)?|request\w*|requir\w*|approv\w*|verif\w*|clearance|eligible|may|can|will)\b/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|requests?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
 const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|و?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب(?:ك|كم)?|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|(?:ال|بال|لل)(?:شرط|انتظار|طلب|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
@@ -75,9 +76,23 @@ export const hasPastCreditEvent = (text: string): boolean => {
   return withoutPastEvents(scope) !== scope;
 };
 export const CREDIT_CONDITION_SOURCE = String.raw`\b(?:subject\s+to|conditional\s+(?:on|upon)|contingent\s+(?:on|upon)|depending\s+on|assuming|(?:as|so)\s+long\s+as|on\s+condition(?:\s+that)?|in\s+(?:the\s+)?event(?:\s+of)?|in\s+case(?:\s+of)?|provided(?:\s+that)?|providing(?:\s+that)?|if|unless|until|whether|till|should)\b|\b(?:once|when|after|upon)\s+|\bon\s+(?:(?:successful|final|merchant|bank)\s+)*(?:approval|verification|clearance|confirmation|receipt)\b|(?<![ء-ي])(?:if_ar|اذا|لو|في\s+حال(?:ه)?|بشرط|شريطه|شرط|رهن|مرهون|لحين|حتي|ريثما|بمجرد|عند|عندما|متي|حينما|حين)(?![ء-ي])|(?<![ء-ي])بعد\s+(?:ال)?(?:موافقه|اعتماد)(?![ء-ي])`;
-const CONDITION = new RegExp(CREDIT_CONDITION_SOURCE, 'iu');
+const CONDITION_SCAN = new RegExp(CREDIT_CONDITION_SOURCE, 'giu');
 export function hasCreditCondition(source: string): boolean {
-  return CONDITION.test(normalizeCreditText(source));
+  const original = normalizeCreditText(source);
+  // Detect on the whole original. An additional, unrelated reporting sentence
+  // (for example a business period ending "till <date>") is not a condition
+  // on the completed credit. No merchant/company/request text is masked.
+  CONDITION_SCAN.lastIndex = 0;
+  try {
+    for (let match = CONDITION_SCAN.exec(original); match; match = CONDITION_SCAN.exec(original)) {
+      const prior = original.lastIndexOf('||', match.index);
+      const end = original.indexOf('||', match.index);
+      const sentence = original.slice(prior < 0 ? 0 : prior + 2, end < 0 ? original.length : end).trim();
+      if (prior < 0 || CREDIT_MENTION.test(sentence) || OWN_REFERENCE.test(sentence) ||
+        OWN_REFERENCE.test(original.slice(match.index + match[0].length).trim())) return true;
+    }
+    return false;
+  } finally { CONDITION_SCAN.lastIndex = 0; }
 }
 export function hasPendingCreditStatus(source: string): boolean {
   const text = normalizeCreditText(source);
@@ -107,7 +122,11 @@ export function hasSettledCreditReceipt(source: string): boolean {
 export type CreditSourceDisposition = 'post' | 'review' | 'not-credit';
 export function creditSourceDisposition(source: string): CreditSourceDisposition {
   const text = normalizeCreditText(source);
-  if (CREDIT_MENTION.test(text) && hasUnsettledCreditToken(source)) return 'review';
+  // Headline completion is a refund/reversal rule. Typed account credits,
+  // payroll and deposits retain their mature receipt grammar; the final
+  // original-text token guard still governs ANY incoming transaction.
+  if (!REFUND_MENTION.test(text)) return 'not-credit';
+  if (hasUnsettledCreditToken(source)) return 'review';
   if (/\b(?:cash\s*back|rewards?|points|miles|bonus)\b|(?:استرداد|استرجاع)\s+(?:ال)?نقدي/iu.test(text)) return 'not-credit';
   const sentences = text.split(/\s*\|\|\s*/);
   const index = sentences.findIndex(sentence => CREDIT_MENTION.test(sentence) && /(?:\b[A-Z]{3}\s*\d|\d[\d,.]*\s*(?:[A-Z]{3}\b|درهم|ريال))|(?:درهم|ريال)\s*\d/iu.test(sentence));
@@ -121,7 +140,8 @@ export function creditSourceDisposition(source: string): CreditSourceDisposition
 
 /** The existing Review contract: retain uncertain credit evidence, never confirmation authority. */
 export function informationalCreditReview(source: string, event: UniversalBankEvent): UniversalBankEvent {
-  if (event.family === 'authentication' || event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
+  if (event.family === 'authentication' || event.family === 'card-payment' ||
+    event.issues.some(issue => /^(?:authentication|promotion)-not-posting$/.test(issue))) return event;
   const transactionFields = event.observations.filter(o => o.role === 'transaction' && o.field.evidence === 'explicit');
   let amount = event.amount.evidence !== 'missing' ? event.amount
     : transactionFields.length === 1 ? transactionFields[0].field : event.amount;
