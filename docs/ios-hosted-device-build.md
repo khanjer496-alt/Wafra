@@ -195,7 +195,13 @@ binary names/values and symlink-node identity through an injected native ABI
 double; refusal on unavailable/failed native calls; verified empty enumeration;
 actual early source-state error reporting without recipe entry; and safe partial
 setup cleanup/evidence with prior records retained. They do not load libSystem,
-run xattr/tar or establish native execution. All tests remain unexecuted under
-the current preparation/resource hold. Hosted43680457959 exceptions were not
-retained: this source portability defect is not a proven historical exception
-or archive cause. Production runtime/source NO-GO and all execution gates remain.
+run xattr/tar or establish native execution.
+
+At preparation on 2026-11-15, these tests were unexecuted. Authenticated
+[hosted run43682374982](https://github.com/khanjer496-alt/Wafra/actions/runs/43682374982)
+tested source `f3d9ef9068f77a4da03abf46ce64ea64645c37ab`: 14 executed,
+0 failures/errors/skips; six corrected observations canonical, with four
+complete legacy path-set findings retained. This proof is inherited only when
+the fixture/helper/sealer/workflow bytes are unchanged. Real product seal/build,
+signing, device and release outcomes remain unproved. Historical runner
+exceptions and the real archive member/upstream cause remain unknown.
