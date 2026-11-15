@@ -1,0 +1,568 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "provenance",
+    "inputs",
+    "producer",
+    "tools",
+    "source",
+    "parser",
+    "files",
+    "limits"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wafra-android-static-v1"
+    },
+    "status": {
+      "const": "passed"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "source",
+        "ref",
+        "role",
+        "runId",
+        "runAttempt",
+        "versionCode"
+      ],
+      "properties": {
+        "repository": {
+          "const": "khanjer496-alt/Wafra"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "[a-f0-9]{40}"
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "android/final-(?:rc|control)-[a-f0-9]{12}"
+        },
+        "role": {
+          "enum": [
+            "rc",
+            "control"
+          ]
+        },
+        "runId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740992
+        },
+        "runAttempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740992
+        },
+        "versionCode": {
+          "type": "integer",
+          "minimum": 407,
+          "maximum": 9007199254740992
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle",
+        "corpus",
+        "founder_unlock",
+        "auto_pro",
+        "architecture",
+        "capture_trace"
+      ],
+      "properties": {
+        "bundle": {
+          "type": "boolean"
+        },
+        "corpus": {
+          "const": false
+        },
+        "founder_unlock": {
+          "const": false
+        },
+        "auto_pro": {
+          "const": false
+        },
+        "architecture": {
+          "const": "universal"
+        },
+        "capture_trace": {
+          "const": false
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflowBlob",
+        "helperSha256",
+        "schemaSha256",
+        "flagsCheckerSha256"
+      ],
+      "properties": {
+        "workflowBlob": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "[a-f0-9]{40}"
+        },
+        "helperSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "schemaSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "flagsCheckerSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "node",
+        "java",
+        "apksigner",
+        "bundletool",
+        "bundletoolSha256",
+        "sdkBuildTools",
+        "manifestReader"
+      ],
+      "properties": {
+        "python": {
+          "type": "string",
+          "maxLength": 30,
+          "pattern": "[0-9.]+"
+        },
+        "node": {
+          "type": "string",
+          "maxLength": 30,
+          "pattern": "22\\.[0-9]+\\.[0-9]+"
+        },
+        "java": {
+          "type": "string",
+          "maxLength": 30,
+          "pattern": "17\\.[0-9.]+"
+        },
+        "apksigner": {
+          "type": "string",
+          "maxLength": 30,
+          "pattern": "[0-9.]+"
+        },
+        "bundletool": {
+          "const": "1.18.3"
+        },
+        "bundletoolSha256": {
+          "const": "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
+        },
+        "sdkBuildTools": {
+          "const": "36.0.0"
+        },
+        "manifestReader": {
+          "const": "apkanalyzer-manifest-print"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trackedFileCount",
+        "beforeSha256",
+        "afterSha256",
+        "onlyVersionStamp"
+      ],
+      "properties": {
+        "trackedFileCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "beforeSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "afterSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "onlyVersionStamp": {
+          "const": true
+        }
+      }
+    },
+    "parser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "moduleCount",
+        "sourceHash",
+        "generatedSha256",
+        "metadataSha256",
+        "binding"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740992
+        },
+        "moduleCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "sourceHash": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "generatedSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "metadataSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "[a-f0-9]{64}"
+        },
+        "binding": {
+          "const": "checkout-and-payload-hash-not-standalone-Android-parser-proof"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "sha256",
+          "bytes",
+          "signerSha256",
+          "signatureVerified",
+          "abis",
+          "flags",
+          "manifest",
+          "payload"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "apk",
+              "aab"
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "[a-f0-9]{64}"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1073741824
+          },
+          "signerSha256": {
+            "const": "782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b"
+          },
+          "signatureVerified": {
+            "const": true
+          },
+          "abis": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "enum": [
+                "arm64-v8a",
+                "armeabi-v7a",
+                "x86",
+                "x86_64"
+              ]
+            }
+          },
+          "flags": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "founder-unlock",
+              "auto-founder-pro",
+              "sms-corpus-export",
+              "parser-research",
+              "sms-corpus-native"
+            ],
+            "properties": {
+              "founder-unlock": {
+                "const": "off"
+              },
+              "auto-founder-pro": {
+                "const": "off"
+              },
+              "sms-corpus-export": {
+                "const": "off"
+              },
+              "parser-research": {
+                "const": "off"
+              },
+              "sms-corpus-native": {
+                "const": "off"
+              }
+            }
+          },
+          "manifest": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "package",
+              "versionName",
+              "versionCode",
+              "minSdk",
+              "targetSdk",
+              "debuggable",
+              "permissions",
+              "components",
+              "productionChannel",
+              "overlayPermission",
+              "xmlSha256",
+              "permissionDetails"
+            ],
+            "properties": {
+              "package": {
+                "const": "app.wafra.android"
+              },
+              "versionName": {
+                "const": "1.0.0"
+              },
+              "versionCode": {
+                "type": "integer",
+                "minimum": 407,
+                "maximum": 9007199254740992
+              },
+              "minSdk": {
+                "const": 24
+              },
+              "targetSdk": {
+                "const": 36
+              },
+              "debuggable": {
+                "const": false
+              },
+              "permissions": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "components": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "name",
+                    "exported",
+                    "enabled",
+                    "permission",
+                    "authorities",
+                    "structureSha256"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "activity",
+                        "activity-alias",
+                        "service",
+                        "receiver",
+                        "provider"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 250
+                    },
+                    "exported": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "permission": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 300
+                    },
+                    "authorities": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 300
+                    },
+                    "structureSha256": {
+                      "type": "string",
+                      "pattern": "[a-f0-9]{64}",
+                      "maxLength": 64
+                    }
+                  }
+                }
+              },
+              "productionChannel": {
+                "type": "boolean"
+              },
+              "overlayPermission": {
+                "type": "boolean"
+              },
+              "xmlSha256": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "[a-f0-9]{64}"
+              },
+              "permissionDetails": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "name",
+                    "structureSha256"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "uses-permission",
+                        "uses-permission-sdk-23",
+                        "permission"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "structureSha256": {
+                      "type": "string",
+                      "pattern": "[a-f0-9]{64}",
+                      "maxLength": 64
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "bundleSha256",
+              "dexSha256",
+              "dexCount",
+              "sourceMarkerPresent",
+              "sqlcipherSymbolNameBytesPresent",
+              "nativeClassNameMarkersPresent",
+              "nativeClassDefinitionsVerified",
+              "sqlcipherSymbolDefinitionsVerified",
+              "nativeRegistrationVerified"
+            ],
+            "properties": {
+              "bundleSha256": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "[a-f0-9]{64}"
+              },
+              "dexSha256": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "[a-f0-9]{64}"
+              },
+              "dexCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30
+              },
+              "sourceMarkerPresent": {
+                "type": "boolean"
+              },
+              "sqlcipherSymbolNameBytesPresent": {
+                "const": true
+              },
+              "nativeClassNameMarkersPresent": {
+                "const": true
+              },
+              "nativeClassDefinitionsVerified": {
+                "const": false
+              },
+              "sqlcipherSymbolDefinitionsVerified": {
+                "const": false
+              },
+              "nativeRegistrationVerified": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "staticOnly",
+        "deviceAcceptance",
+        "billingRestoreAcceptance",
+        "reproducibleBuildClaim"
+      ],
+      "properties": {
+        "staticOnly": {
+          "const": true
+        },
+        "deviceAcceptance": {
+          "const": false
+        },
+        "billingRestoreAcceptance": {
+          "const": false
+        },
+        "reproducibleBuildClaim": {
+          "const": false
+        }
+      }
+    }
+  }
+}
