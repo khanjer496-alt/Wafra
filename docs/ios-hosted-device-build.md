@@ -33,6 +33,21 @@ workflow provenance, plaintext/encrypted SHA256, build provenance, WDA source
 hash and complete product-file hashes; qaSigningPerformed=false. Tar packaging
 dereferences links; local extraction refuses links and special files.
 
+Both production packaging calls use the shared `scripts/ci/ios-device-package.sh`
+recipe. BSD tar's process-scoped `--no-mac-metadata` omits copyfile/AppleDouble
+packaging records; `-h`, normal paths, file bytes, modes and layout are retained.
+This does not clear source xattrs, strip arbitrary members, skip unknown
+prefixes, switch crypto or relax any archive guard. Unsupported tar options or
+unsafe inputs still fail; tar error prose is withheld and a fixed return-code
+summary is emitted. Existing sealing receipts and atomic publication remain.
+
+`scripts/test/ios-device-package.test.py` reads and executes the actual old
+ab62 and proposed production packaging steps against tiny synthetic trees.
+It checks xattr reproduction, normal file/path/mode preservation, clean trees,
+dereference parity and unchanged malformed-archive refusals. It does not
+identify the withheld offending member of run43672407533; that run's proven
+boundary remains first-member wrong-prefix, with upstream cause unknown.
+
 CMS uses the existing #239 recipient; its private key stays on this Mac.
 Download only the exact dispatched run, verify GitHub artifact archive digests,
 compare encrypted hashes, decrypt locally with OpenSSL3, then compare plaintext

@@ -139,8 +139,8 @@ jobs:
       - name: Package inputs for local signing (no QA signing account changes)
         run: |
           set -euo pipefail
-          tar -czhf "$RUNNER_TEMP/Wafra-resignable.tar.gz" -C "$RUNNER_TEMP/wafra" Payload
-          tar -czhf "$RUNNER_TEMP/WDA-Products-unsigned.tar.gz" -C "$RUNNER_TEMP/wda-build/Build" Products
+          bash scripts/ci/ios-device-package.sh "$RUNNER_TEMP/Wafra-resignable.tar.gz" "$RUNNER_TEMP/wafra" Payload
+          bash scripts/ci/ios-device-package.sh "$RUNNER_TEMP/WDA-Products-unsigned.tar.gz" "$RUNNER_TEMP/wda-build/Build" Products
       - name: Seal re-signable Wafra and unsigned WDA to this Mac
         run: python3 scripts/ci/ios-device-seal.py
       - name: Upload only sealed installers and verification
