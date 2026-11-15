@@ -39,6 +39,26 @@ compare encrypted hashes, decrypt locally with OpenSSL3, then compare plaintext
 hashes. CMS does not authenticate its sender; the exact GitHub run is the
 provenance boundary. Never upload plaintext products, keys, profiles or logs.
 
+Sealing failures preserve the fixed `RUNNER_TEMP/ios-seal-failure.json` as a
+separate one-day `ios-seal-failure-<run>-<attempt>` artifact before cleanup.
+It contains only phase/error-class/numeric failure categories, fixed-label
+availability/nonempty booleans, parsed CLI identity/CMS-help recognition, and
+archive rejection reason/ordinal/type/counts. No member names, exception prose,
+argv, environment values or subprocess output are retained. Receipt-write
+failure still exits nonzero and emits only a fixed-field safe summary.
+Ciphertext/manifest publication is atomic after both archive checks; partial
+or rejected outputs remain in a disposable private staging directory and are
+not successful installer artifacts. Cipher, recipient and archive refusal
+policy are unchanged.
+
+`ios-seal-fixture.yml` is a manual-only preparation for an independently
+authorized macos-26 fixture run. It builds no app and uses no private key,
+decryption, Apple API or signing. It compares default/system CLI behavior on
+small synthetic archives using the existing public recipient. The BSD xattr
+fixture reproduces an archive-policy rejection without identifying the cause
+of the historical failed build. Publish/run only after exact-head reviews and
+new CEO go; do not treat a synthetic pass as a successful installer rebuild.
+
 ## Local profiles
 
 Using local asc automation, first save an account inventory and read reference

@@ -152,6 +152,14 @@ jobs:
             sealed/verification.json
           if-no-files-found: error
           retention-days: 1
+      - name: Preserve bounded sealing failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-seal-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-seal-failure.json
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Remove temporary build products and private logs
         if: always()
         run: |
