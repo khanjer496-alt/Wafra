@@ -143,3 +143,29 @@ and proving absence from the before-inventory immediately before deletion.
 Log each deletion. Keep2DY4K5NUMM active. Do NOT use ios-device-cleanup.yml for
 this route: that legacy workflow handles disposable runner-created certificates;
 its guards remain unchanged and do not authorize revoking reused certificates.
+
+
+## Producer fixture reconciliation (preparation only)
+
+The seven producer cases remain required. Two pure control-flow cases additionally
+verify that a legacy observation error/mismatch cannot prevent corrected entry,
+and that a corrected mismatch still fails. No historical assertion is inferred.
+The clean and alias cases characterize the legacy recipe separately, then check
+the actual corrected workflow recipe directly against the intended filesystem:
+regular bytes, modes, complete path/type set, empty directories and ordinary `._`
+files. File, empty-directory and populated-directory aliases must be dereferenced
+into regular files/directories accepted by the unchanged consumer. No archive
+link is accepted or filtered. Original lstat kinds/modes, readlink targets,
+regular bytes and source xattrs must also remain unchanged.
+
+The v2 synthetic report contains only fixed case/origin/prefix/check labels,
+correctedEntered (observation entry), booleans, member-kind counts, allowlisted consumer reasons and
+parsed tar implementation/version categories. A complete but noncanonical legacy
+result is an explicit legacyFindings entry, never the corrected oracle. An
+incomplete legacy observation still fails, after corrected measurement. All
+corrected checks must pass; legacy findings still need review reconciliation.
+No exception text, source/member paths, raw command output or assertion prose is
+exported. Missing/failed measurements remain failures. Seven native cases plus
+two pure cases must execute with zero errors/failures/skips for suite success;
+this does not establish historical cause, universal tar compatibility or release
+approval. Native execution remains held pending separate authorization/admission.
