@@ -1,6 +1,7 @@
 import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
 import { CURRENCY_MINOR_UNITS, CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 import { getActiveMarket } from '@/lib/markets';
+import { compileBrandTable, matchBrandCategory, normalizeBrandDescriptor } from '@/lib/brand-categories';
 
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
@@ -130,6 +131,114 @@ function firstStatedPrice(text: string): number | null {
   return null;
 }
 
+/** A pure quoted price annotates this movement, wherever its descriptors put it. */
+function withoutPriceAnnotations(text: string): string {
+  return text.replace(/\(([^()]*)\)/gu, (whole, inner: string) => {
+    const money = /^\s*([^\d()]+?)\s*\d[\d,.]*\s*$|^\s*\d[\d,.]*\s*([^\d()]+?)\s*$/u.exec(inner);
+    const label = (money?.[1] ?? money?.[2] ?? '').trim().toUpperCase();
+    return label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
+      getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label)) ? ' '.repeat(whole.length) : whole;
+  });
+}
+
+/**
+ * A merchant is an entity, not an open-ended suffix of a receipt. Consume a
+ * single descriptor token, a named business type, or an EXACT existing brand
+ * alias. Later words still need their own field or a completed predicate.
+ * No merchant word (MAY, NOT, etc.) is a posting veto.
+ */
+function receiptMerchantLength(text: string, knownOnly = false): number {
+  const atom = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(text);
+  if (!atom) return 0;
+  let length = atom[0].length, brandLength = 0;
+  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|llc|ltd)\b/iu.exec(text);
+  if (business) length = Math.max(length, business[0].length);
+  const words = [...text.matchAll(/\S+/gu)].slice(0, 8);
+  for (const word of words) {
+    const end = word.index! + word[0].length;
+    const prefix = text.slice(0, end);
+    const brand = matchBrandCategory(prefix, getActiveMarket().id);
+    if (!brand) continue;
+    const entry = compileBrandTable().find(row => row.table === brand.table && row.pattern === brand.pattern);
+    const normalized = normalizeBrandDescriptor(prefix);
+    const match = entry?.regex.exec(normalized);
+    if (match?.index === 0 && match[0].length === normalized.length) brandLength = Math.max(brandLength, end);
+  }
+  // A known identity ends before later prose. Existing brand aliases can
+  // consume several words, but business nouns cannot swallow a later verb.
+  if (brandLength) return brandLength;
+  if (knownOnly) return 0;
+  // A rendered merchant field is delimited by another typed field or the
+  // acquirer's comma/location boundary. Its words are not a new sentence.
+  // Regular finite/aspect inflections AFTER its name still need monetary
+  // completion; an unfamiliar stem does not become a noun by being unlisted.
+  const boundary = text.search(/,|\s+(?:(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit|mada|covered|prepaid)\s+)?card\b|on\s+\d|\d{1,2}:\d{2}\b)/iu);
+  const record = text.slice(0, boundary < 0 ? text.length : boundary).trim();
+  const words = [...record.matchAll(/[\p{L}\p{N}'’.-]+/gu)];
+  const noun = /^(?:services|technologies|electronics|spices|sports|cinemas|trading|building|clothing|holdings|systems|solutions)$/iu;
+  if (words.some((word, index) => index > 0 && /^[a-z]{3,}(?:s|ed|ing)$/iu.test(word[0]) && !noun.test(word[0]))) return atom[0].length;
+  // No free punctuation or sentence instruction can be accepted as a field.
+  if (record && /^[\p{L}\p{N}\s.*&'’/+#@_%():·-]+$/u.test(record) &&
+    !/\b(?:to\s+be|to\s+have|not\s+been|not\s+made)\b/iu.test(record)) return record.length;
+  return length;
+}
+
+/**
+ * Positively consume a terse receipt's fields through its END. Unknown words
+ * cannot become a merchant continuation merely because an auxiliary scanner
+ * did not recognise them. A closed partial receipt may keep the mature
+ * source reader's decision; only the complete instrument+merchant form is
+ * positive proof for relaxing a native/paired-refund refusal.
+ */
+function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean): { closed: boolean; complete: boolean } {
+  let rest = tail.replace(/^\s*(?:purchase|payment|transfer|withdrawal|transaction)\b/iu, '').trim();
+  let instrument = CLOSED_OWN_CARD_PREFIX.test(lead), merchant = false;
+  for (let field = 0; field < 12 && rest; field++) {
+    rest = rest.replace(/^[\s,:|=-]+/u, '');
+    if (!rest) break;
+    // Financial fields and warning footers have their own ownership. They
+    // cannot supply completion for an unparsed suffix before that boundary.
+    if (hasNextPrice && NEXT_MONEY_FIELD.exec(rest)?.index === 0) return { closed: true, complete: instrument && merchant };
+    if (/^if\b[^.!?]{0,100}\b(?:by\s+you|not\s+you)\b[^.!?]{0,60}\b(?:call|contact|ignore|report|block)\b/iu.test(rest)) return { closed: true, complete: instrument && merchant };
+    if (instrument && merchant && /^(?:approved|successful|completed|processed|posted|done)$/iu.test(rest)) return { closed: true, complete: true };
+    const card = /^(?:(?:with|using|on|from)\s+)?(?:(?:your|the)\s+)?(?:(?:debit|credit|covered|prepaid|mada|payroll)\s+)?(?:card|account|acct|a\/c)\s*(?:(?:ending(?:\s+(?:with|in))?|number|no\.?)\s*)?[*xX•\d-]{1,32}(?![\p{L}\p{N}])/iu.exec(rest);
+    if (card) { instrument = true; rest = rest.slice(card[0].length).trim(); continue; }
+    const entity = /^(?:at|to|from|merchant\s*:?)\s+/iu.exec(rest);
+    if (entity) {
+      const start = entity[0].length;
+      const length = receiptMerchantLength(rest.slice(start));
+      if (!length) return { closed: false, complete: false };
+      merchant = true; rest = rest.slice(start + length).trim(); continue;
+    }
+    if (merchant) {
+      const processor = /^\*\s*/u.exec(rest);
+      if (processor) {
+        const length = receiptMerchantLength(rest.slice(processor[0].length));
+        if (!length) return { closed: false, complete: false };
+        rest = rest.slice(processor[0].length + length).trim(); continue;
+      }
+      const alias = receiptMerchantLength(rest, true);
+      if (alias) { rest = rest.slice(alias).trim(); continue; }
+    }
+    const qualifier = /^(?:pay|food|com|network|insurance|coffee|subscription|subscr|trading|technologies|llc|ltd|tr|sp|br)(?![\p{L}\p{N}])/iu.exec(rest);
+    if (merchant && qualifier) { rest = rest.slice(qualifier[0].length).trim(); continue; }
+    const mall = /^mall\s+of\s+(?:emirates|arabia)(?![\p{L}\p{N}])/iu.exec(rest);
+    if (merchant && mall) { rest = rest.slice(mall[0].length).trim(); continue; }
+    const location = /^(?:Dubai|Abu\s+Dhabi|Sharjah|Ajman|Fujairah|Riyadh|Jeddah|DIFC|AE|ARE|UAE|SA|SAU|KSA|GBR|USA|GB|US|DE|DEU|SGP|HKG|IND|JPN|FRA)(?![\p{L}\p{N}])/iu.exec(rest);
+    if (location) { rest = rest.slice(location[0].length).trim(); continue; }
+    const phone = /^(?:\+|00)\d[\d -]{5,20}(?!\d)/u.exec(rest);
+    if (phone) { rest = rest.slice(phone[0].length).trim(); continue; }
+    const date = /^(?:(?:on|date\s*:)\s*)?\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?!\d)/iu.exec(rest);
+    if (date) { rest = rest.slice(date[0].length).trim(); continue; }
+    const time = /^(?:(?:at|time\s*:)\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?(?!\d)/iu.exec(rest);
+    if (time) { rest = rest.slice(time[0].length).trim(); continue; }
+    const reference = /^(?:ref(?:erence)?|auth(?:orisation|orization)?|approval)\s*(?:no\.?|number|code)?\s*[:#-]?\s*[A-Z0-9]*\d[A-Z0-9-]*(?![\p{L}\p{N}])/iu.exec(rest);
+    if (reference) { rest = rest.slice(reference[0].length).trim(); continue; }
+    return { closed: false, complete: false };
+  }
+  return { closed: !rest && (instrument || merchant || /^\s*(?:(?:your|a|an)\s+)?(?:(?:card|cash|pos)\s+)?(?:purchase|payment|withdrawal|transfer|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead)), complete: !rest && instrument && merchant };
+}
+
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
 function completedPredicate(fragment: string, debitOnly = false, feePredicate = false): boolean {
   // A new explicit auxiliary reopens polarity: "not credited and was debited"
@@ -157,15 +266,7 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
 
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false): boolean | null {
-  // A parenthetical stated FX price is an amount annotation, not the selected
-  // amount's verb. Never inspect its value as completion or select that quote.
-  const quote = /^\s*\(([^()]*)\)\s*/u.exec(tail);
-  if (quote) {
-    const money = /^\s*([^\d()]+?)\s*\d[\d,.]*\s*$|^\s*\d[\d,.]*\s*([^\d()]+?)\s*$/u.exec(quote[1]);
-    const label = (money?.[1] ?? money?.[2] ?? '').trim().toUpperCase();
-    if (label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
-      getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label))) tail = tail.slice(quote[0].length);
-  }
+  tail = withoutPriceAnnotations(tail);
   // A descriptor bounds a predicate, but does not end its ownership: "using
   // card 1234 has not been made" still predicates this selected purchase.
   // A distinct stated price is a money boundary. Metadata words can also be
@@ -243,8 +344,8 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // price. Its predicate ends at that first stated money, not at the quote.
     bridge = bridge.slice(0, firstStatedPrice(bridge) ?? bridge.length);
     bridge = bridge.split(PREDICATE_DESCRIPTOR)[0].trim();
-    if (/^(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
-      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
+    if (/^(?:fees?|charges?|commission|tax|levy|payment|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
+      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|payment|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
     const nominalSubject = subject && /^(?:payment|purchase|transaction|transfer|withdrawal)$/iu.test(subject[0]);
     active = completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly && !nominalSubject);
   }
@@ -263,11 +364,11 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     const ownedFee = feePredicate || followingFees.has(finite);
     if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee)) return false;
   }
-  // This is the established terse bank receipt: the own-card field precedes
-  // the selected price, followed by a purchase label and merchant. The label
-  // is not a failed attempt at a verb, nor does a generic offer gain this proof.
-  if (nounLabel && CLOSED_OWN_CARD_PREFIX.test(lead) && /^\s*purchase\s+at\s+\S/iu.test(ownedTail) &&
-    !following.length && !unknownFollowing.length) return true;
+  if (active === null && !following.length && (nominal || nounLabel) && (!predicate || nounLabel)) {
+    const receipt = closedNominalReceipt(lead, ownedTail, firstStatedPrice(tail) !== null);
+    if (!receipt.closed) return false;
+    return receipt.complete ? true : null;
+  }
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   // Bare past verbs also govern a price-first receipt ("AED300 debited").
   // Prove that closed predicate before looking at an unrelated later footer.
@@ -296,12 +397,6 @@ export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan 
   const lead = source.slice(clause.start, span.start);
   const completion = selectedPredicateCompletion(lead, source.slice(span.end, clause.end), true);
   if (completion !== null) return completion;
-  // A closed mature card-purchase receipt states its rail, instrument and
-  // merchant without a finite verb. It is positive receipt evidence, rather
-  // than allowing every unknown predicate to relax a separate-note refusal.
-  const tail = source.slice(span.end, clause.end);
-  if (/\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) &&
-    /^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+\S/iu.test(tail)) return true;
   // Existing Arabic completed debit receipts also provide positive evidence.
   // Unknown/negated/modal text never becomes proof merely by being unrefused.
   const arabic = lead.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه');
