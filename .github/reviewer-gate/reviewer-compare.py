@@ -17,6 +17,8 @@ for row in current:
     expected = 'none' if row['expected'] == 'none' else row['expected'] + ':' + amount
     session = row.get('sessionExpected', row['expected'])
     expected_session = 'none' if session == 'none' else session + ':' + amount
+    if row.get('incompleteExpense') and paths[2] != 'ignore:':
+        errors.append((row['id'], 'incomplete-expense-money-preview', paths))
     if row.get('rejectBorrowedReview') and (paths[2] != 'ignore:' or review):
         errors.append((row['id'], 'borrowed-purchase-review', paths, review))
     if row.get('nativeKnownBoundary'):

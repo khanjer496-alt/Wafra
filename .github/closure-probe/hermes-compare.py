@@ -10,6 +10,8 @@ for engine, rows in [('Node', node['rows']), ('Hermes013', hermes['rows'])]:
         amount = str(case.get('minorUnits', 25000))
         review = result.get('review') or {}
         informational = review.get('decision') == 'review' and review.get('status') == 'informational'
+        if case.get('incompleteExpense') and (result['nativeRoute'] != 'ignore' or review.get('direction') == 'credit'):
+            errors.append((engine, case['id'], 'incomplete-expense-money-preview', result))
         if case.get('rejectBorrowedReview') and (result['nativeRoute'] != 'ignore' or review):
             errors.append((engine, case['id'], 'borrowed-purchase-review', result))
         if case.get('reviewMinorUnits') is not None and (review.get('minorUnits') != str(case['reviewMinorUnits']) or result.get('nativeMinorUnits') != str(case['reviewMinorUnits'])):

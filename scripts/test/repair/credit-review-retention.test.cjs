@@ -17,6 +17,7 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   for (const channel of ['inbox', 'delivery', 'push']) {
     const decision = inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt: at, channel, session });
     if (row.rejectBorrowedReview) assert.notEqual(decision.kind, 'review', `${row.id} ${channel}: no purchase-to-credit Review`);
+    if (decision.kind === 'review') assert.notEqual(decision.candidate.kind === 'universal' ? decision.candidate.event.direction : decision.candidate.direction, 'credit', `${row.id} ${channel}: expense money cannot fill a credit Review`);
     if (decision.kind === 'review') assert.equal(isMoneyMovementReview(decision.candidate), false, `${row.id} ${channel}: ${JSON.stringify(decision.candidate)}`);
     if (decision.kind === 'review' && decision.candidate.kind === 'universal') {
       const event = decision.candidate.event;
@@ -30,6 +31,7 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   assert.equal(history.parsed.length, 0, row.id);
   if (row.rejectBorrowedReview) assert.equal(history.reviewCandidates.length, 0, `${row.id}: no borrowed refund facts in history`);
   assert.ok(!history.reviewCandidates.some(item => isMoneyMovementReview(item)), row.id);
+  assert.ok(!history.reviewCandidates.some(item => item.kind === 'universal' ? item.event.direction === 'credit' : item.direction === 'credit'), `${row.id}: no purchase-to-credit money in history`);
 });
 for (const [index, [body, sender, amount]] of [
   ['Your refund request for AED 50.00 is under process.', 'ENBD', '5000'],
