@@ -24,6 +24,10 @@ jobs:
         run: node node_modules/typescript/bin/tsc --noEmit > typecheck.txt 2>&1
       - name: Compile shipping modules
         run: bash scripts/test/build.sh > compile.txt 2>&1
+      - name: Restore actual shipping automation inputs for contract inspection
+        run: |
+          git fetch --depth=1 origin 967315725b7e7ad7cb53b4a07d41d34d99335d04
+          node .github/patch-probe/restore-shipping-ci-inputs.cjs
       - name: Original independent reviewer harnesses
         if: ${{ !cancelled() }}
         run: |
@@ -41,7 +45,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/observer-proof
-          NODE_OPTIONS: --require ./.github/patch-probe/parse-trace.cjs
+          NODE_OPTIONS: --require ${{ github.workspace }}/.github/patch-probe/parse-trace.cjs
         run: node --test --test-concurrency=1 scripts/test/repair/ios-background-parser-generator.test.cjs scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > observer-proof.txt 2>&1
       - name: Three-path closure
         if: ${{ !cancelled() }}
@@ -85,6 +89,8 @@ jobs:
             typecheck.txt
             predicate.txt
             observer-proof.txt
+            transport-workflow.yml
+            shipping-ci-inputs.json
             semantic-matrix.txt
             semantic-interpreter.txt
             global-alert-adversarial.txt
