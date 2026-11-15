@@ -20,7 +20,10 @@ Module.prototype._compile = function(code, file) {
   if (file.endsWith('/scripts/test/build/principal-posting-guards.js')) {
     const start = code.indexOf('function closedNominalReceipt('), end = code.indexOf('function completedPredicate(', start);
     if (start < 0 || end < 0) throw Error('unexpected receipt observer anchor');
-    const body = code.slice(start, end).replaceAll('closed: false, complete: false', 'closed: false, complete: false, remaining: rest');
+    const rawBody = code.slice(start, end);
+    const declaration = rawBody.indexOf('let rest = ');
+    if (declaration < 0) throw Error('missing receipt state declaration');
+    const body = rawBody.slice(0, declaration) + rawBody.slice(declaration).replaceAll('closed: false, complete: false', 'closed: false, complete: false, remaining: rest');
     code = code.slice(0, start) + body + code.slice(end);
     code += `\nexports.__principalDetail = function(source, span) {
       const clause=principalClause(source,span);if(!clause)return {missingSpan:true};

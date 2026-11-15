@@ -1,7 +1,7 @@
 name: Parser inbox receipt diagnosis
 on:
   push:
-    branches: [patch/port190-pr7-inbox-detail-r14d]
+    branches: [patch/port190-pr7-inbox-detail-r14e]
 permissions:
   contents: read
 jobs:
