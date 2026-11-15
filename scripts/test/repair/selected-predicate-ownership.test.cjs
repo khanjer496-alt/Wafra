@@ -29,7 +29,7 @@ test('a masked card cannot consume the integer part of an explicit decimal price
 // The instrument/merchant may precede, follow or interrupt the predicate.
 // Its spelling is not settlement evidence and cannot hide finite wording.
 const rows = require('./credit-settlement-review-probes.json').filter(row =>
-  row.incompleteExpense && (row.id.startsWith('cross-family-f406-') || row.id.startsWith('owned-descriptor-order:') || row.origin === 'trace-967-owned-unknown-finite'));
+  row.incompleteExpense && (row.id.startsWith('cross-family-f406-') || row.id.startsWith('owned-descriptor-order:') || row.origin === 'trace-967-owned-unknown-finite' || row.origin === 'cross-family-Grok-047caf3b-and-owned-closure'));
 for (const row of rows) test(`${row.id}: owned finite aspect is refused`, () => {
   const price = ['AED 250.00', '250.00 AED', 'AED 50.00'].find(value => row.body.includes(value));
   assert.ok(price, row.id);
@@ -83,4 +83,35 @@ for (const body of [
 ]) test(`a genuine receipt supplies positive debit evidence: ${body}`, () => {
   const start = body.indexOf('AED 50.00');
   assert.equal(guards.isCompletedExpensePrincipal(body, { start, end: start + 'AED 50.00'.length }), true, body);
+});
+
+// A pure same-movement FX quote is annotation at every descriptor position.
+for (const descriptor of ['(USD 68.00) using card ending 1234', 'using card ending 1234 (USD 68.00)', 'using card ending 1234 at AMAZON.AE (USD 68.00)', 'using card ending 1234 (68.00 USD) at AMAZON.AE']) {
+  test(`FX annotation cannot cut the selected affirmative predicate: ${descriptor}`, () => {
+    const body = `A purchase of AED 250.00 ${descriptor} was made.`;
+    const start = body.indexOf('AED 250.00');
+    const span = { start, end: start + 'AED 250.00'.length };
+    assert.equal(guards.isIncompletePrincipal(body, span, true), false, body);
+    assert.equal(guards.isCompletedExpensePrincipal(body, span), true, body);
+  });
+}
+for (const sender of [undefined, 'ENBD', 'Tabby', 'Tamara']) test(`received-payment receipt retains its source identity boundary: ${sender}`, () => {
+  const body = 'We have received your payment of AED 120.00 for your order from Namshi.';
+  const got = load('@/lib/sms-parser').parseSms(body, {}, { sender });
+  if (sender === 'Tabby' || sender === 'Tamara') assert.equal(got, null);
+  else { assert.equal(got?.type, 'expense'); assert.equal(got.amountFils, 12000); }
+});
+
+for (const words of ['have not received', 'have never received', 'will soon have received', 'are receiving']) test(`received-payment bridge cannot erase polarity/aspect: ${words}`, () => {
+  const body = `We ${words} your payment of AED 120.00 for your order from Namshi.`;
+  const start = body.indexOf('AED 120.00');
+  assert.equal(guards.isIncompletePrincipal(body, { start, end: start + 'AED 120.00'.length }, true), true, body);
+  assert.equal(load('@/lib/sms-parser').parseSms(body, {}, { sender: 'ENBD' }), null, body);
+});
+
+for (const row of require('./credit-settlement-review-probes.json').filter(row => row.origin === 'received-request-owned')) test(`${row.id}: a received request is not completed money`, () => {
+  const start = row.body.indexOf('AED 120.00');
+  const span = { start, end: start + 'AED 120.00'.length };
+  assert.equal(guards.isIncompletePrincipal(row.body, span, true), true, row.body);
+  assert.equal(guards.isCompletedExpensePrincipal(row.body, span), false, row.body);
 });
