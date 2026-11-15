@@ -22,14 +22,23 @@ const marker = (flag, state) => `wafra-build-flag:${flag}=${state}`;
 const bundleWith = (states) => Buffer.from(`\0hbc\0${Object.entries(states).map(([f, s]) => marker(f, s)).join('\0')}\0`, 'latin1');
 const allOff = Object.fromEntries(flags.FLAGS.map((flag) => [flag, 'off']));
 
-test('the only artifact upload is the sealed directory, kept for one day', () => {
+test('artifact uploads contain only sealed binaries and fixed final-pair JSON, kept for one day', () => {
   const uploads = steps.filter((step) => /actions\/upload-artifact@/.test(step.uses || ''));
-  assert.equal(uploads.length, 1);
-  const [upload] = uploads;
-  assert.equal(upload.with['retention-days'], 1);
-  assert.equal(upload.with['if-no-files-found'], 'error');
+  assert.deepEqual(uploads.map((step) => step.name), ['Upload sealed artifact', 'Upload final pair static report']);
+  const [upload, report] = uploads;
+  for (const step of uploads) {
+    assert.equal(step.with['retention-days'], 1);
+    assert.equal(step.with['if-no-files-found'], 'error');
+  }
+  assert.equal(upload.with.name, 'wafra-android-sealed-${{ github.run_number }}');
   assert.deepEqual(String(upload.with.path).trim().split('\n').map((line) => line.trim()),
     ['sealed/*.enc', 'sealed/verification.json']);
+  assert.equal(report.if, "startsWith(github.ref_name, 'android/final-')");
+  assert.equal(report.with.name, 'wafra-android-static-${{ github.run_number }}');
+  assert.deepEqual(String(report.with.path).trim().split('\n').map((line) => line.trim()), [
+    '${{ runner.temp }}/android-static-report/report.json',
+    '${{ runner.temp }}/android-static-report-submit/metadata.json',
+  ]);
   assert.doesNotMatch(workflowSource, /path:\s*wafra\.(apk|aab)\b/);
   const seal = stepIndex('Seal outputs for the public artifact store');
   assert.ok(seal > stepIndex('Rename outputs') && seal < steps.indexOf(upload));
