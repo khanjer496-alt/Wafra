@@ -1,0 +1,36 @@
+name: Exact note comma ownership probe
+on:
+  push:
+    branches: [patch/port190-pr7-note-comma-probe-r23]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Bind exact unchanged feature source
+        run: |
+          test "$(git rev-parse HEAD^)" = a9e12bf698ee4031e3ec758570c608d96c83b2d7
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Check committed resources and execute actual consumers
+        run: |
+          node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
+          node .github/patch-probe/note-comma-probe.cjs > probe-summary.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: note-comma-probe-${{ github.sha }}
+          path: |
+            out/
+            generation-check.txt
+            probe-summary.txt
+          retention-days: 7
