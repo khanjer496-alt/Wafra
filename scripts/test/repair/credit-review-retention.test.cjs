@@ -16,6 +16,8 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   assert.equal(session.parse(row.body, row.sender, session.inspect(row.body, row.sender), undefined, at), null);
   for (const channel of ['inbox', 'delivery', 'push']) {
     const decision = inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt: at, channel, session });
+    if (row.rejectBorrowedReview) assert.notEqual(decision.kind, 'review', `${row.id} ${channel}: no purchase-to-credit Review`);
+    if (decision.kind === 'review') assert.notEqual(decision.candidate.kind === 'universal' ? decision.candidate.event.direction : decision.candidate.direction, 'credit', `${row.id} ${channel}: expense money cannot fill a credit Review`);
     if (decision.kind === 'review') assert.equal(isMoneyMovementReview(decision.candidate), false, `${row.id} ${channel}: ${JSON.stringify(decision.candidate)}`);
     if (decision.kind === 'review' && decision.candidate.kind === 'universal') {
       const event = decision.candidate.event;
@@ -27,7 +29,9 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   const input = JSON.stringify({ v: 1, id: require('node:crypto').createHash('sha256').update(row.id).digest('hex'), text: row.body, sender: row.sender, receivedAt: new Date(at).toISOString() });
   const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
   assert.equal(history.parsed.length, 0, row.id);
+  if (row.rejectBorrowedReview) assert.equal(history.reviewCandidates.length, 0, `${row.id}: no borrowed refund facts in history`);
   assert.ok(!history.reviewCandidates.some(item => isMoneyMovementReview(item)), row.id);
+  assert.ok(!history.reviewCandidates.some(item => item.kind === 'universal' ? item.event.direction === 'credit' : item.direction === 'credit'), `${row.id}: no purchase-to-credit money in history`);
 });
 for (const [index, [body, sender, amount]] of [
   ['Your refund request for AED 50.00 is under process.', 'ENBD', '5000'],
@@ -35,7 +39,7 @@ for (const [index, [body, sender, amount]] of [
   ['If approved, AED 250.00 has been refunded to your card.', 'ENBD', '25000'],
   ['ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB', '4000'],
   ['نود اعلامك، ان تم استرداد مبلغ AED 250.00 إلى بطاقتك. فِيرجى تجاهل هذه الرسالة.', 'ENBD', '25000'],
-].concat(require('./credit-settlement-review-probes.json').filter(row => (row.id.startsWith('cross-family-91-') && row.requireReview) || row.id === 'reviewer-ebc:NU17').map(row => [row.body, row.sender, String(row.minorUnits)])).entries()) test(`uncertain credit is retained through capture and history ${index}`, () => {
+].concat(require('./credit-settlement-review-probes.json').filter(row => (row.id.startsWith('cross-family-91-') && row.requireReview) || (row.id.startsWith('credit-owned-purchase-principal:') && row.requireReview) || row.id === 'reviewer-ebc:NU17').map(row => [row.body, row.sender, String(row.minorUnits)])).entries()) test(`uncertain credit is retained through capture and history ${index}`, () => {
   load('@/lib/country').setActiveCountry('AE');load('@/lib/markets').setActiveMarket('AE');load('@/lib/markets').setLedgerCurrency('AED', 2);
   const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED', bestEffort: { enabled: true, country: 'AE' } });
   assert.equal(session.parse(body, sender, session.inspect(body, sender), undefined, at), null);

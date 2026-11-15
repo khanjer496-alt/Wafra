@@ -3,6 +3,7 @@ import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammar
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import { MARKETS } from '@/lib/markets';
 import { isNonCashNotice, nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
+import { isIncompletePrincipal } from '@/lib/principal-posting-guards';
 
 export const UNPARSED_LAUNCH_REVIEW_VERSION = 1;
 
@@ -127,6 +128,7 @@ const candidateContext = (text: string, start: number, end: number): string =>
 const primaryMoney = (
   source: string,
   market: 'AE' | 'SA',
+  expensePredicate = false,
 ): UnparsedLaunchAlertReview['amount'] | null => {
   const localCurrency = market === 'AE' ? 'AED' : 'SAR';
   const aliases: CurrencyAliasMap = market === 'AE'
@@ -155,6 +157,10 @@ const primaryMoney = (
   });
   if (eligible.length !== 1) return null;
   const candidate = eligible[0];
+  // Keep selection and ambiguity refusal unchanged. A legacy Review template
+  // cannot restore authority for this selected incomplete debit or substitute
+  // another amount after refusing it.
+  if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return null;
   return {
     currency: localCurrency,
     minorUnits: candidate.minorUnits as string,
@@ -222,7 +228,7 @@ export const inspectUnparsedLaunchSemantics = (
   const debit = forcedDebit || (!refundCredit &&
     (DEBIT.test(bounded) || COMPACT_LEDGER_DEBIT.test(bounded)));
   if (credit === debit) return { outcome: 'refuse', reason: 'unclear-direction' };
-  const amount = primaryMoney(bounded, market);
+  const amount = primaryMoney(bounded, market, debit);
   if (!amount) return { outcome: 'refuse', reason: 'unclear-amount' };
   const direction = credit ? 'credit' as const : 'debit' as const;
   return {
