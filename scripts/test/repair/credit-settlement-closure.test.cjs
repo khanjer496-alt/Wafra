@@ -114,6 +114,14 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
 
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
   const got = paths(row.body, row.sender);
+  if (row.rejectBorrowedReview) {
+    assert.equal(got.review, null, `${row.id}: an unfinished purchase is not refund money ${JSON.stringify(got)}`);
+    assert.equal(got.nativeRoute, 'ignore', `${row.id}: native must not borrow a purchase amount ${JSON.stringify(got)}`);
+  }
+  if (row.reviewMinorUnits !== undefined) {
+    assert.equal(got.review?.minorUnits, String(row.reviewMinorUnits), JSON.stringify(got));
+    assert.equal(got.nativeMinorUnits, String(row.reviewMinorUnits), JSON.stringify(got));
+  }
   if (row.id === 'reviewer-focused:S5' && got.sms !== 'none') assert.equal(got.merchant, 'أمازون', row.body);
   if (row.nativeKnownBoundary) {
     assert.ok(['preauthorisation', 'multiple-money-fields', 'untrusted-sender', 'unresolved-direction'].includes(row.nativeKnownBoundary), row.id);

@@ -16,6 +16,7 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   assert.equal(session.parse(row.body, row.sender, session.inspect(row.body, row.sender), undefined, at), null);
   for (const channel of ['inbox', 'delivery', 'push']) {
     const decision = inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt: at, channel, session });
+    if (row.rejectBorrowedReview) assert.notEqual(decision.kind, 'review', `${row.id} ${channel}: no purchase-to-credit Review`);
     if (decision.kind === 'review') assert.equal(isMoneyMovementReview(decision.candidate), false, `${row.id} ${channel}: ${JSON.stringify(decision.candidate)}`);
     if (decision.kind === 'review' && decision.candidate.kind === 'universal') {
       const event = decision.candidate.event;
@@ -27,6 +28,7 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   const input = JSON.stringify({ v: 1, id: require('node:crypto').createHash('sha256').update(row.id).digest('hex'), text: row.body, sender: row.sender, receivedAt: new Date(at).toISOString() });
   const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
   assert.equal(history.parsed.length, 0, row.id);
+  if (row.rejectBorrowedReview) assert.equal(history.reviewCandidates.length, 0, `${row.id}: no borrowed refund facts in history`);
   assert.ok(!history.reviewCandidates.some(item => isMoneyMovementReview(item)), row.id);
 });
 for (const [index, [body, sender, amount]] of [
