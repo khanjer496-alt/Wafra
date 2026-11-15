@@ -1,7 +1,7 @@
 name: Parser inbox receipt diagnosis
 on:
   push:
-    branches: [patch/port190-pr7-inbox-diagnosis-r14c]
+    branches: [patch/port190-pr7-inbox-detail-r14d]
 permissions:
   contents: read
 jobs:
@@ -21,18 +21,19 @@ jobs:
           node scripts/generate-ios-background-parser.cjs --check >> generation.txt 2>&1
           bash scripts/test/build.sh > compile.txt 2>&1
       - name: Read actual selected receipt predicates
-        run: node .github/patch-probe/inbox-diagnose.cjs > diagnosis-summary.txt
+        run: node --require ./.github/patch-probe/inbox-observer.cjs .github/patch-probe/inbox-diagnose.cjs > diagnosis-summary.txt
       - name: Existing inbox first-import test
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/android396-first-import-balance.test.cjs > inbox.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: inbox-predicate-diagnosis-${{ github.sha }}
+          name: inbox-predicate-detail-${{ github.sha }}
           path: |
             generation.txt
             compile.txt
             inbox-diagnosis.json
+            principal-diagnostics.json
             diagnosis-summary.txt
             inbox.txt
           retention-days: 7
