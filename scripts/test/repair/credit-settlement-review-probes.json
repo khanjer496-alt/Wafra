@@ -9330,5 +9330,15 @@
     "expected": "income",
     "minorUnits": 25000,
     "reviewMinorUnits": 25000
+  },
+  {
+    "id": "credit-owned-purchase-principal:4",
+    "body": "Your purchase of AED 250.00 using card ending 1234 at NOON will be refunded.",
+    "sender": "ENBD",
+    "origin": "independent-credit-predicate-after-descriptor-retention-control",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireReview": true,
+    "reviewMinorUnits": 25000
   }
 ]

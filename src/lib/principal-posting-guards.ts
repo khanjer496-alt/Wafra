@@ -330,7 +330,7 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
 }
 
 /** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
-function completedPredicate(fragment: string, debitOnly = false, feePredicate = false): boolean {
+function completedPredicate(fragment: string, debitOnly = false, feePredicate = false, directions?: Set<'credit' | 'debit'>): boolean {
   // A new explicit auxiliary reopens polarity: "not credited and was debited"
   // states a debit; "not credited and debited" still shares the negation.
   const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
@@ -340,7 +340,7 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
   // With no new auxiliary, coordinated verbs share the original polarity:
   // "was reversed and debited" completes both; "not ... and debited" does not.
   const shared = owned.split(/\b(?:and|but)\b/iu);
-  if (shared.length > 1) return shared.every(part => completedPredicate(part, false, feePredicate));
+  if (shared.length > 1) return shared.every(part => completedPredicate(part, false, feePredicate, directions));
   const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
   const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
     .filter(word => !COMPLETION_ADVERBS.has(word));
@@ -349,13 +349,14 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
   const verb = words.pop();
   if (!verb || !COMPLETED_MONEY_WORDS.has(verb)) return false;
   if ((verb === 'applied' || verb === 'assessed') && !feePredicate) return false;
+  directions?.add(mentionsRefund(verb) || /^(?:credited|deposited)$/u.test(verb) ? 'credit' : 'debit');
   const auxiliary = words.join(' ');
   return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
     (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
 
 /** null leaves a genuinely terse receipt to the mature grammar. */
-function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false): boolean | null {
+function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false, directions?: Set<'credit' | 'debit'>): boolean | null {
   tail = withoutPriceAnnotations(tail);
   // A descriptor bounds a predicate, but does not end its ownership: "using
   // card 1234 has not been made" still predicates this selected purchase.
@@ -441,7 +442,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
       /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|payment|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
     const nominalSubject = subject && /^(?:payment|purchase|transaction|transfer|withdrawal)$/iu.test(subject[0]);
     active = requestReceipt && !EXPLICIT_DEBIT_OUTCOME.test(before[0]) ? false :
-      completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly && !nominalSubject);
+      completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly && !nominalSubject, false, directions);
   }
   if (active === false) return false;
   const nounLabel = /^(?:purchase|payment|transfer|withdrawal|transaction)$/iu.test(predicate);
@@ -456,12 +457,12 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite)) continue;
     if (followingReceipts.has(finite)) continue;
     const ownedFee = feePredicate || followingFees.has(finite);
-    if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee)) return false;
+    if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee, directions)) return false;
   }
   // Bare past verbs also govern a price-first receipt ("AED300 debited").
   // Prove that closed predicate before looking at an unrelated later footer.
   if (COMPLETED_MONEY_WORDS.has(predicate.split(/\s/u)[0]?.toLowerCase()) &&
-    completedPredicate(predicate, explicitDebitOnly, feePredicate)) return true;
+    completedPredicate(predicate, explicitDebitOnly, feePredicate, directions)) return true;
   if (active === null && !following.length && unknownFollowing.length) return false;
   if (active === null && !following.length && (nominal || nounLabel) && (!predicate || nounLabel)) {
     const receipt = closedNominalReceipt(lead, ownedTail, firstStatedPrice(tail) !== null);
@@ -470,7 +471,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   }
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
   if (predicate && !(nounLabel && following.length) && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
-    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly, feePredicate);
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly, feePredicate, directions);
   if (active === null && !following.length && unknownFollowing.length) return false;
   return following.length ? true : active;
 }
@@ -483,6 +484,18 @@ function principalClause(source: string, span: PrincipalSpan | undefined): { sta
   while (start > 0 && !boundary(start - 1)) start--;
   while (end < source.length && !boundary(end)) end++;
   return { start, end };
+}
+
+/** Direction of this money's owned predicate, including a future refund.
+ * A purchase label alone cannot turn "will be refunded" into a future debit.
+ * This is Review ownership only; it never proves settlement or posting.
+ */
+export function hasSelectedCreditPredicate(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  const directions = new Set<'credit' | 'debit'>();
+  selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), false, directions);
+  return directions.size === 1 && directions.has('credit');
 }
 
 /** Positive internal proof; missing/unknown predicates cannot relax a preview refusal. */

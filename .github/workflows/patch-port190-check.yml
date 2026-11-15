@@ -1,7 +1,7 @@
 name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-credit-owned-principal-r16]
+    branches: [patch/port190-pr7-credit-predicate-green-r16]
 permissions:
   contents: read
 jobs:

@@ -25,6 +25,10 @@ for row in current:
         if not held or paths[2] != 'ignore:':
             errors.append((row['id'], 'native-boundary', paths))
         continue
+    if row.get('requireReview') and not (review.get('status') == 'informational' and not review.get('confirmable') and paths[2].startswith('review:review:')):
+        errors.append((row['id'], 'informational-review-retention', paths, review))
+    if row.get('reviewMinorUnits') is not None and not paths[2].endswith(':' + str(row['reviewMinorUnits'])):
+        errors.append((row['id'], 'independent-credit-review-money', paths))
     if not (row['expected'] == 'income' and held) and paths[:2] != [expected, expected_session]:
         errors.append((row['id'], 'source', paths))
     if row['expected'] == 'none' and native_posted:

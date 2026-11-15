@@ -27,7 +27,7 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -309,7 +309,7 @@ export const inspectGenericBankEventForReview = (
   // This amount belongs to an unfinished debit, not the later refund note.
   // Safe refusal also protects native's informational-credit preview from
   // displaying the purchase amount as an unstated/different refund amount.
-  if (incompletePrincipal) return null;
+  if (incompletePrincipal && !event.amount.spans.every(span => hasSelectedCreditPredicate(moneySource, span))) return null;
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
   if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
