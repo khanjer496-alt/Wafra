@@ -10106,6 +10106,13 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
     // refund amount occurs earlier in the original message.
     const original = readPrincipalContext(clause, parsed);
     if (!original || !isCompletedExpensePrincipal(original.raw, original.spans[0])) return false;
+    // A comma-selected receipt can omit a denial or qualification of THIS
+    // charge. Locate its own selected money in the normalized original, then
+    // require the same completion proof there before either split may post.
+    const full = readPrincipalContext(message, parsed);
+    const offset = full?.raw.indexOf(original.raw) ?? -1;
+    if (!full || offset < 0 || full.raw.lastIndexOf(original.raw) !== offset || !original.spans[0] ||
+      !isCompletedExpensePrincipal(full.raw, { start: offset + original.spans[0].start, end: offset + original.spans[0].end })) return false;
     // Clipping a statement or completed refund into an expense-shaped field
     // cannot authorize a fallback. The legacy receipt grammar now also needs
     // the same affirmative selected predicate, even when the whole reader
