@@ -139,6 +139,17 @@ jobs:
           node-version: 22.22.3
           cache: npm
 
+      # One fixed metadata query on the RC runner only, never on the control.
+      # Its boolean-only result does not establish Play track permissions.
+      - name: Read existing Android submit metadata
+        if: startsWith(github.ref_name, 'android/final-rc-')
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-static-report-submit"
+          node scripts/ci/android-managed-submit-probe.cjs > "$RUNNER_TEMP/android-static-report-submit/metadata.json"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -488,6 +499,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wafra-android-static-${{ github.run_number }}
-          path: ${{ runner.temp }}/android-static-report/report.json
+          path: |
+            ${{ runner.temp }}/android-static-report/report.json
+            ${{ runner.temp }}/android-static-report-submit/metadata.json
           if-no-files-found: error
           retention-days: 1
