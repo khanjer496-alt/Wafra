@@ -36,6 +36,8 @@ const markets = load('@/lib/markets');
 const country = load('@/lib/country');
 const { parseSms } = load('@/lib/sms-parser');
 const { createLaunchAlertSession, inspectGenericBankEventForReview, inspectSupplementaryReversal } = load('@/lib/launch-alert-parser');
+const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
+const { planConfirmedUniversalImport } = load('@/lib/universal-import');
 const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
@@ -87,6 +89,7 @@ const shape = (p) => (p ? `${p.kind === 'transaction' ? p.type : p.kind} ${p.amo
 const nativeShape = (n) => (n.route === 'parsed' ? `${n.notification.direction} ${n.notification.amount?.minorUnits}` : n.route);
 const isIncomeRow = (expected) => expected === 'INCOME_REFUND' || expected === 'INCOME_DEBIT';
 const EXPLICIT_DEBIT_CONTROL_MINOR_UNITS = { 'CTL-05408': '25000', 'CTL-05390': '5000' };
+const EXPLICIT_NOTE_CONTROL_MINOR_UNITS = { 'CTL-05408': '10000', 'CTL-05390': null };
 
 // The class of a wrong outcome; null when the path agrees with the oracle.
 function gapClass(expected, pathName, got) {
@@ -108,16 +111,34 @@ function gapClass(expected, pathName, got) {
   return posted ? 'postedNotReview' : null;
 }
 
-function judge(row) {
-  const got = {
+const exactAed = (money, minor) => minor === null ? money === null :
+  money?.currency === 'AED' && money.exponent === 2 && money.minorUnits === minor;
+function informationalRefuses(event, marker) {
+  if (event?.decision !== 'review' || event.status !== 'informational' || !event.issues.includes(marker) ||
+    isMoneyMovementReview({ kind: 'universal', event })) return false;
+  return [event, { ...event, status: 'posted' }].every(candidate => {
+    const result = planConfirmedUniversalImport({ hydrated: true }, candidate,
+      { confirmed: true, postingStatus: 'posted', direction: 'credit', amount: { currency: 'AED', minorUnits: '25000' } });
+    return result.outcome === 'refused' && result.reason === 'not-posted';
+  });
+}
+function judge(row, evidence) {
+  const nativeResult = evidence ? evidence.nativeResult : native(row.body);
+  const got = evidence ? evidence.got : {
     parseSms: shape(parseSms(row.body, {}, { sender: 'ENBD', observedAt: at })),
     session: shape(session.parse(row.body, 'ENBD', session.inspect(row.body, 'ENBD'), undefined, at)),
-    native: nativeShape(native(row.body)),
+    native: nativeShape(nativeResult),
   };
   const gaps = {};
-  const event = inspectGenericBankEventForReview(row.body, 'ENBD');
-  const heldInformational = isIncomeRow(row.expected) && got.parseSms === 'none' && got.session === 'none' &&
+  const event = evidence ? evidence.event : inspectGenericBankEventForReview(row.body, 'ENBD');
+  const heldCandidate = isIncomeRow(row.expected) && got.parseSms === 'none' && got.session === 'none' &&
     got.native === 'review' && event?.decision === 'review' && event.status === 'informational';
+  const heldInformational = heldCandidate && event.direction === 'credit' && exactAed(event.amount.value, '25000') &&
+    informationalRefuses(event, 'unsettled-credit-not-posting') && nativeResult.route === 'review' &&
+    nativeResult.notification?.style === 'review' && nativeResult.notification.direction === 'credit' &&
+    exactAed(nativeResult.notification.amount, '25000');
+  if (heldCandidate && !heldInformational) return { got, gaps, nativeIgnoredIncome: false,
+    policyError: { id: row.id, body: row.body, reason: 'held credit money or refusal mismatch', event, nativeResult } };
   // CEO 524bd56e: retain the independently stated completed debit instead of
   // interpreting its reversal note as income. The original oracle is kept
   // pinned; this explicit product-policy overlay does not rewrite its rows.
@@ -126,11 +147,16 @@ function judge(row) {
     (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) ||
       (row.lang === 'EN' && c.subject === 'merchant') || c.trail === 'reversed'));
   if (debitWithCreditNote) {
-    const note = inspectSupplementaryReversal(row.body, 'ENBD');
+    const note = evidence ? evidence.note : inspectSupplementaryReversal(row.body, 'ENBD');
     const minor = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ?? '25000';
+    // The frozen generator states AED100 only when the separate note has its
+    // own amount. Control C13 also explicitly names AED100; C6 names none.
+    const noteMinor = Object.hasOwn(EXPLICIT_NOTE_CONTROL_MINOR_UNITS, row.id) ? EXPLICIT_NOTE_CONTROL_MINOR_UNITS[row.id]
+      : c?.debit && c.amount !== 'none' ? '10000' : null;
     if (got.parseSms !== `expense ${minor}` || got.session !== `expense ${minor}` || got.native !== `debit ${minor}` ||
-      note?.status !== 'informational' || note?.direction !== 'none') return { got, gaps, nativeIgnoredIncome: false,
-        policyError: { id: row.id, body: row.body, ...got, note: note?.status ?? null } };
+      !exactAed(nativeResult.notification?.amount, minor) || note?.direction !== 'none' ||
+      !exactAed(note?.amount.value, noteMinor) || !informationalRefuses(note, 'supplementary-reversal-info')) return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, ...got, noteMinor, note: note ?? null } };
   }
   if (heldInformational || debitWithCreditNote) return { got, gaps, nativeIgnoredIncome: false,
     policy: heldInformational ? 'held-informational' : 'debit-plus-note' };
@@ -144,6 +170,41 @@ const knownFile = JSON.parse(knownText);
 const known = knownFile.gaps;
 const rows = buildOracleRows();
 const rowById = new Map(rows.map((row) => [row.id, row]));
+// Mutation controls exercise the policy judge, not the parser oracle. The
+// unmodified payload comes from a real held-credit row; each mutation must
+// lose retention acceptance even when the route names remain unchanged.
+for (const [name, mutate] of [
+  ['generic wrong amount', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['generic wrong currency', e => { e.event.amount.value.currency = 'USD'; }],
+  ['generic debit direction', e => { e.event.direction = 'debit'; }],
+  ['generic missing refusal marker', e => { e.event.issues = []; }],
+  ['native wrong amount', e => { e.nativeResult.notification.amount.minorUnits = '1'; }],
+  ['native wrong currency', e => { e.nativeResult.notification.amount.currency = 'USD'; }],
+  ['native debit direction', e => { e.nativeResult.notification.direction = 'debit'; }],
+  ['native movement style', e => { e.nativeResult.notification.style = 'movement'; }],
+]) test(`retention policy rejects ${name}`, () => {
+  const row = rowById.get('AR-04077');
+  const e = { got: { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.notEqual(judge(row, e).policy, 'held-informational');
+});
+for (const [name, mutate] of [
+  ['borrowed amount', n => { n.amount.value = { currency: 'AED', exponent: 2, minorUnits: '25000' }; }],
+  ['wrong currency', n => { n.amount.value = { currency: 'USD', exponent: 2, minorUnits: '10000' }; }],
+  ['credit direction', n => { n.direction = 'credit'; }],
+  ['missing refusal marker', n => { n.issues = []; }],
+]) test(`debit-note policy rejects ${name}`, () => {
+  const row = rows.find(r => r.case?.debit && r.case.amount === 'before' && judge(r).policy === 'debit-plus-note');
+  assert.ok(row, 'a frozen row with an independently stated AED100 note exists');
+  const note = structuredClone(inspectSupplementaryReversal(row.body, 'ENBD'));
+  mutate(note);
+  const e = { got: { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' },
+    nativeResult: native(row.body), event: inspectGenericBankEventForReview(row.body, 'ENBD'), note };
+  assert.notEqual(judge(row, e).policy, 'debit-plus-note');
+});
+
 const groups = new Map();
 for (const row of rows) {
   const key = `${row.lang} ${row.rule.split(' ')[0]} ${row.expected}`;

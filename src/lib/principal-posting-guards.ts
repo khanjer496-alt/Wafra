@@ -220,11 +220,21 @@ export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan
   let lead = source.slice(clause.start, span.start);
   if (!/\b(?:no|false|untrue|not)\b/iu.test(lead)) return false;
   for (const entity of namedMerchantSpans(lead).reverse()) lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
-  const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
+  // A proposition negates its own selected movement whether its subject is
+  // a purchase or an instrument ("false that your card was charged ...").
+  // Keep that original frame before active-verb reduction removes subjects.
+  // A separate coordinated assertion cannot inherit an earlier frame.
+  const proposition = /^\s*it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+/iu.exec(lead);
+  if (proposition) {
+    const assertion = lead.slice(proposition[0].length);
+    if (!/[,;]|\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(assertion) === null) return true;
+  }
+  const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
   if (head) {
     const prefix = lead.slice(0, head.index);
     const negative = /\bno((?:\s+[\p{L}'’-]+){0,6})\s*$/iu.exec(prefix);
     if (negative && !PREDICATE_DESCRIPTOR.test(negative[1]) && !PREDICATE_AUXILIARY.test(negative[1])) return true;
+    if (/\bnot\s+(?:a\s+single|one|any)\s*$/iu.test(prefix)) return true;
     if (/(?:^|[.!?;:|]\s*)it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+(?:(?:a|an|the|your|this|that)\s+)?$/iu.test(prefix)) return true;
   }
   return false;
