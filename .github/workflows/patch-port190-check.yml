@@ -1,7 +1,7 @@
 name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-subject-merchant-red-r20]
+    branches: [patch/port190-pr7-subject-merchant-green-r20]
 permissions:
   contents: read
 jobs:

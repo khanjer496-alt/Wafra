@@ -108,6 +108,7 @@ const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const FINITE_AUXILIARY_SCAN = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|[a-z]+n['’]t)\b/giu;
 const PREDICATE_DESCRIPTOR = /\b(?:using|with|via|at|from|to(?!\s+be\b)|towards?|into|between|on|by|for|merchant|cards?|accounts?|wallets?)\b/iu;
 const NEXT_MONEY_FIELD = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|date|time|reference|balance)\b/iu;
+const RECEIPT_BUSINESS_PREFIX = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co(?:\s+l(?:td)?)?|corp|company|llc|ltd)\b/iu;
 const CLOSED_OWN_CARD_PREFIX = /^\s*your\s+(?:(?:credit|debit|covered|prepaid|cashback)\s+)?card\s+(?:(?:ending(?:\s+with)?|number|no\.?)\s+)?(?=[*xX•\d -]*[*xX•\d])[*xX•\d -]{1,32}\s*$/iu;
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
 const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
@@ -155,7 +156,7 @@ function receiptMerchantLength(text: string, knownOnly = false, metadata = false
   const atom = /^(?:%\s*)?[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(text);
   if (!atom) return 0;
   let length = atom[0].length, brandLength = 0;
-  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co(?:\s+l(?:td)?)?|corp|company|llc|ltd)\b/iu.exec(text);
+  const business = RECEIPT_BUSINESS_PREFIX.exec(text);
   if (business) length = Math.max(length, business[0].length);
   const words = [...text.matchAll(/\S+/gu)].slice(0, 8);
   for (const word of words) {
@@ -193,6 +194,40 @@ function receiptInstitutionTitle(title: string): boolean {
   return /^transaction\s+alert$/iu.test(title) || hasUniversalInstitutionSender(title) ||
     /^[\p{L}\p{N} .&'’-]{2,40}bank$/iu.test(title) || getActiveMarket().banks.some(bank =>
       bank.name.toLowerCase() === title.toLowerCase() || new RegExp(`^(?:${bank.re.source})$`, bank.re.flags.replace(/[gy]/gu, '')).test(title));
+}
+
+/** Positive entity spans, not masked text: later predicates still see the original. */
+function namedMerchantSpans(text: string): PrincipalSpan[] {
+  const spans: PrincipalSpan[] = [];
+  for (const marker of text.matchAll(/\b(?:at|to|from|merchant)(?:\s*:\s*|\s+)/giu)) {
+    const start = marker.index! + marker[0].length;
+    const after = text.slice(start);
+    const descriptor = predicateDescriptor(after)?.index ?? after.length;
+    const separator = after.search(/[,;\n]/u);
+    const field = after.slice(0, Math.min(descriptor, separator < 0 ? after.length : separator)).trimEnd();
+    const named = RECEIPT_BUSINESS_PREFIX.exec(field)?.[0].length ?? 0;
+    const branded = receiptMerchantLength(field, true);
+    const length = Math.max(named, branded);
+    if (length) spans.push({ start, end: start + length });
+  }
+  return spans;
+}
+
+/** Negation belongs to the selected monetary subject, never a merchant word. */
+export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  let lead = source.slice(clause.start, span.start);
+  if (!/\b(?:no|false|untrue|not)\b/iu.test(lead)) return false;
+  for (const entity of namedMerchantSpans(lead).reverse()) lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
+  const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
+  if (head) {
+    const prefix = lead.slice(0, head.index);
+    const negative = /\bno((?:\s+[\p{L}'’-]+){0,6})\s*$/iu.exec(prefix);
+    if (negative && !PREDICATE_DESCRIPTOR.test(negative[1]) && !PREDICATE_AUXILIARY.test(negative[1])) return true;
+    if (/(?:^|[.!?;:|]\s*)it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+(?:(?:a|an|the|your|this|that)\s+)?$/iu.test(prefix)) return true;
+  }
+  return false;
 }
 
 /**
@@ -358,12 +393,25 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
 /** null leaves a genuinely terse receipt to the mature grammar. */
 function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false, directions?: Set<'credit' | 'debit'>): boolean | null {
   tail = withoutPriceAnnotations(tail);
+  if (hasNegatedPrincipalAssertion(lead + tail, { start: lead.length, end: lead.length })) return false;
   // A descriptor bounds a predicate, but does not end its ownership: "using
   // card 1234 has not been made" still predicates this selected purchase.
   // A distinct stated price is a money boundary. Metadata words can also be
   // merchant descriptors ("at BALANCE CAFE"), so they cannot erase a later
   // finite predicate either.
   const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
+  // A later explicit reference predicates this SAME charge, not a different
+  // refund. An uncompleted/negated reference cannot be skipped as metadata.
+  for (const reference of ownedTail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)) {
+    const assertion = reference[1].slice(0, predicateDescriptor(reference[1])?.index ?? reference[1].length).trim();
+    if (!completedPredicate(assertion)) return false;
+  }
+  // Unrecognized assertion adverbs after a closed field are not affirmative
+  // completion. Inside a declared named merchant they remain name text.
+  let entities: PrincipalSpan[] | undefined;
+  for (const qualifier of ownedTail.matchAll(/,\s*([a-z]+ly)\s*$/giu)) {
+    if (!COMPLETION_ADVERBS.has(qualifier[1].toLowerCase())) return false;
+  }
   const descriptor = predicateDescriptor(ownedTail);
   const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const following: string[] = [];
@@ -372,6 +420,10 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   const followingReceipts = new Set<string>();
   if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
     if (auxiliary.index! < descriptor.index + descriptor[0].length) continue;
+    // An auxiliary spelling wholly inside a positively named entity is not
+    // the movement predicate; a later auxiliary outside that span still is.
+    entities ??= namedMerchantSpans(ownedTail);
+    if (entities.some(entity => auxiliary.index! >= entity.start && auxiliary.index! < entity.end)) continue;
     const before = ownedTail.slice(0, auxiliary.index);
     const rest = ownedTail.slice(auxiliary.index);
     // These predicates own a separate reversal or a conditional contact
@@ -517,6 +569,11 @@ export function isIncompletePrincipal(source: string, span: PrincipalSpan | unde
   const clause = principalClause(source, span);
   if (!clause || !span) return false;
   const { start, end } = clause;
+  if (hasNegatedPrincipalAssertion(source, span)) return true;
+  // A question that ends the selected completion verb is not an assertion.
+  // Ordinary fraud-contact questions after a completed receipt remain scoped
+  // to their own footer, not to the earlier monetary predicate.
+  if (source[end] === '?' && COMPLETED_MONEY_VERB.test(source.slice(start, end).trim().split(/\s/u).pop() ?? '')) return true;
   // The selected purchase's own passive predicate must be completed too.
   // A later refund/request sentence cannot make "will be made" or
   // "was not made" prove an independently completed expense.
