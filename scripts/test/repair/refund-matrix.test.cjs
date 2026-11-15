@@ -89,6 +89,7 @@ const shape = (p) => (p ? `${p.kind === 'transaction' ? p.type : p.kind} ${p.amo
 const nativeShape = (n) => (n.route === 'parsed' ? `${n.notification.direction} ${n.notification.amount?.minorUnits}` : n.route);
 const isIncomeRow = (expected) => expected === 'INCOME_REFUND' || expected === 'INCOME_DEBIT';
 const EXPLICIT_DEBIT_CONTROL_MINOR_UNITS = { 'CTL-05408': '25000', 'CTL-05390': '5000' };
+const EXPLICIT_NOTE_CONTROL_MINOR_UNITS = { 'CTL-05408': '10000', 'CTL-05390': null };
 
 // The class of a wrong outcome; null when the path agrees with the oracle.
 function gapClass(expected, pathName, got) {
@@ -149,8 +150,9 @@ function judge(row, evidence) {
     const note = evidence ? evidence.note : inspectSupplementaryReversal(row.body, 'ENBD');
     const minor = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ?? '25000';
     // The frozen generator states AED100 only when the separate note has its
-    // own amount; its amount-free notes and the two control notes own none.
-    const noteMinor = c?.debit && c.amount !== 'none' ? '10000' : null;
+    // own amount. Control C13 also explicitly names AED100; C6 names none.
+    const noteMinor = Object.hasOwn(EXPLICIT_NOTE_CONTROL_MINOR_UNITS, row.id) ? EXPLICIT_NOTE_CONTROL_MINOR_UNITS[row.id]
+      : c?.debit && c.amount !== 'none' ? '10000' : null;
     if (got.parseSms !== `expense ${minor}` || got.session !== `expense ${minor}` || got.native !== `debit ${minor}` ||
       !exactAed(nativeResult.notification?.amount, minor) || note?.direction !== 'none' ||
       !exactAed(note?.amount.value, noteMinor) || !informationalRefuses(note, 'supplementary-reversal-info')) return { got, gaps, nativeIgnoredIncome: false,

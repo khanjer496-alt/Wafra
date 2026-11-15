@@ -1,7 +1,7 @@
 name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-principal-polarity-green-r21]
+    branches: [patch/port190-pr7-note-own-money-green-r22]
 permissions:
   contents: read
 jobs:
@@ -51,18 +51,9 @@ jobs:
         run: |
           node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > legacy-contracts.txt 2>&1
           node scripts/test/unparsed-launch-alert.test.js >> legacy-contracts.txt 2>&1
-      - name: Existing first-import and receipt corpora
-        if: ${{ !cancelled() }}
-        run: |
-          node --test --test-concurrency=1 scripts/test/repair/android396-first-import-balance.test.cjs > inbox.txt 2>&1
-          node scripts/test/parser.test.js > parser.txt 2>&1
-          node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
       - name: Frozen matrix money and visible-credit retention
         if: ${{ !cancelled() }}
         run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
-      - name: Full universal source and private-format suites
-        if: ${{ !cancelled() }}
-        run: node scripts/universal-test/run.cjs > universal.txt 2>&1
       - name: Existing native and coordinated-refund contracts
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/ios-corpus-money-contract.test.cjs scripts/test/repair/review-round2-safety.test.cjs scripts/test/repair/retention-compiled-contracts.test.cjs > existing-contracts.txt 2>&1

@@ -9832,5 +9832,71 @@
     "requireDebitParity": true,
     "requireSupplementaryNote": true,
     "noteMinorUnits": 4000
+  },
+  {
+    "id": "note-apposition-money:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It, AED 100.00, has been refunded to your card.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000
+  },
+  {
+    "id": "note-apposition-money:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000
+  },
+  {
+    "id": "note-apposition-money:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. If it, AED 100.00, was processed and credited to your card, you will receive an SMS.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000
+  },
+  {
+    "id": "note-apposition-money:4",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your card.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "note-apposition-money:5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your available balance is AED 5000.00. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "note-apposition-money:6",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A fee of AED 5.00 was charged. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
   }
 ]

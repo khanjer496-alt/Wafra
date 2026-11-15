@@ -48,7 +48,14 @@ export function inspectSupplementaryReversal(source: string, sender: string): Un
     : market === 'SA' ? { 'ريال': ['SAR'] } : {};
   // Read money from the reversal note ONLY. The debit's amount is never
   // borrowed to fill an unstated refund amount.
-  const event = inspectUniversalBankEvent(pair.credit, { sender, currencyAliases });
+  // The posting splitter separates commas too. An appositional own amount
+  // ("It, AED 100.00, has been refunded") still belongs to its note sentence.
+  // Recover that verbatim sentence for informational facts only; the selected
+  // debit sentence is excluded and the posting proof above is unchanged.
+  const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).filter(sentence =>
+    !sentence.includes(pair.debit) && sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part =>
+      part.trim() && mentionsCredit(part) && pair.credit.includes(part.trim())));
+  const event = inspectUniversalBankEvent(notes.length ? notes.join(' ') : pair.credit, { sender, currencyAliases });
   return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
     amount: event.amount.evidence === 'explicit' ? event.amount : missingUniversalField(),
     statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
