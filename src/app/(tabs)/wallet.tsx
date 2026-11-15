@@ -198,9 +198,13 @@ function WalletScreen() {
     const accounts = state.accounts.filter(
       (account) => !account.archived && !isPaymentCard(account),
     );
+    const known = accounts.filter((account) => balances.balanceByAccountId[account.id] !== null);
     return {
-      known: accounts.filter((account) => balances.balanceByAccountId[account.id] !== null).length,
+      known: known.length,
       total: accounts.length,
+      // Recorded bank/cash balances include negatives; credit-card dues stay
+      // apart. The shared balanceFils subtotal intentionally counts positives.
+      balanceFils: known.reduce((sum, account) => sum + (balances.balanceByAccountId[account.id] ?? 0), 0),
     };
   }, [state.accounts, balances.balanceByAccountId]);
   const balanceCoverageText =
@@ -418,7 +422,7 @@ function WalletScreen() {
           <BalanceOverview
             onAddAccount={() => setAdderVisible(true)}
             balanceCoverageText={balanceCoverageText}
-            balanceFils={balances.balanceFils}
+            balanceFils={balanceAccountCoverage.balanceFils}
             knownBalanceCount={balanceAccountCoverage.known}
             activeSourceCount={activeSources.length}
             creditCardCount={bandCounts.creditCards}
