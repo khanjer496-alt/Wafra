@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 35a8adf203e9741a1bac9f4ef9c169238a16af58e09591efa0b23516c8588d39
+// Generated from normal shipping TypeScript. Source SHA-256: eddf86254034ca1466670b8aefea4503e8ae3755658e6650bc3157c5e438c4b9
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -8742,7 +8742,8 @@ function inspectSupplementaryReversal(source, sender) {
     const market = (0, markets_1.detectLaunchMarketFromSender)(sender);
     const currencyAliases = market === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
         : market === 'SA' ? { 'ريال': ['SAR'] } : {};
-    const event = (0, universal_parser_1.inspectUniversalBankEvent)(pair.credit, { sender, currencyAliases });
+    const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).filter(sentence => !sentence.includes(pair.debit) && sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part => part.trim() && (0, credit_settlement_guards_1.mentionsCredit)(part) && pair.credit.includes(part.trim())));
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(notes.length ? notes.join(' ') : pair.credit, { sender, currencyAliases });
     return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
         amount: event.amount.evidence === 'explicit' ? event.amount : (0, universal_types_1.missingUniversalField)(),
         statementTotal: (0, universal_types_1.missingUniversalField)(), minimumDue: (0, universal_types_1.missingUniversalField)(), balance: (0, universal_types_1.missingUniversalField)(),
@@ -10417,11 +10418,19 @@ function hasNegatedPrincipalAssertion(source, span) {
         return false;
     for (const entity of namedMerchantSpans(lead).reverse())
         lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
-    const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
+    const proposition = /^\s*it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+/iu.exec(lead);
+    if (proposition) {
+        const assertion = lead.slice(proposition[0].length);
+        if (!/[,;]|\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(assertion) === null)
+            return true;
+    }
+    const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
     if (head) {
         const prefix = lead.slice(0, head.index);
         const negative = /\bno((?:\s+[\p{L}'’-]+){0,6})\s*$/iu.exec(prefix);
         if (negative && !PREDICATE_DESCRIPTOR.test(negative[1]) && !PREDICATE_AUXILIARY.test(negative[1]))
+            return true;
+        if (/\bnot\s+(?:a\s+single|one|any)\s*$/iu.test(prefix))
             return true;
         if (/(?:^|[.!?;:|]\s*)it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+(?:(?:a|an|the|your|this|that)\s+)?$/iu.test(prefix))
             return true;
