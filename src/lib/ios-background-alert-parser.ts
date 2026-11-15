@@ -287,8 +287,11 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     if (parsed && parsed.kind !== 'transaction') return ignore();
     if (parsed?.type === 'income' && event?.status === 'informational') parsed = null;
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
+    // Retaining an uncertain expense in the app cannot create a native money
+    // preview. The relaxed informational lane is for independently read credit.
+    if (!parsed && event?.status === 'informational' && event.direction === 'debit') return ignore();
     const informationalCredit = creditReviewOnly && !parsed && event?.status === 'informational' &&
-      event.amount.evidence === 'explicit' && event.amount.spans.length > 0;
+      event.direction === 'credit' && event.amount.evidence === 'explicit' && event.amount.spans.length > 0;
     if (!event || (!informationalCredit && !singleSourcePrincipal(principalSource, event, parsed))) return ignore();
     if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
       ((event.direction === 'debit' || event.direction === 'credit') &&
