@@ -8373,5 +8373,687 @@
     "requireReview": false,
     "acceptInformationalReview": false,
     "incompleteExpense": true
+  },
+  {
+    "id": "cross-family-4a6-closed:01",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:02",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE remains to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:03",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE needs to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:04",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON awaits approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:05",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON remains to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:06",
+    "body": "A purchase of AED 250.00 using card ending 1234 awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:07",
+    "body": "A purchase of AED 250.00 at AMAZON.AE awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:08",
+    "body": "A purchase of AED 250.00 using card ending 1234 (USD 68.00) has not been made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:09",
+    "body": "A purchase of AED 250.00 using card ending 1234 awaits approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:10",
+    "body": "A purchase of AED 250.00 using card ending 1234 remains to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:11",
+    "body": "A purchase of AED 250.00 using card ending 1234 remains to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:12",
+    "body": "A purchase of AED 250.00 using card ending 1234 needs to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:13",
+    "body": "A purchase of AED 250.00 using card ending 1234 needs to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:14",
+    "body": "A purchase of AED 250.00 using card ending 1234 glorps approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:15",
+    "body": "A purchase of AED 250.00 using card ending 1234 glorps approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:16",
+    "body": "A purchase of AED 250.00 at AMAZON.AE awaits approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:17",
+    "body": "A purchase of AED 250.00 at AMAZON.AE remains to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:18",
+    "body": "A purchase of AED 250.00 at AMAZON.AE remains to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:19",
+    "body": "A purchase of AED 250.00 at AMAZON.AE needs to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:20",
+    "body": "A purchase of AED 250.00 at AMAZON.AE needs to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:21",
+    "body": "A purchase of AED 250.00 at AMAZON.AE glorps approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:22",
+    "body": "A purchase of AED 250.00 at AMAZON.AE glorps approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:23",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE awaits approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:24",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE remains to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:25",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE needs to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:26",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE glorps approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:27",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE glorps approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:28",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 awaits approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:29",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:30",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 remains to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:31",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 remains to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:32",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 needs to be made.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:33",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 needs to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:34",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 glorps approval.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:35",
+    "body": "A purchase of AED 250.00 at MAY CAFE with card ending 1234 glorps approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:36",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON AWAITS APPROVAL.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:37",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON REMAINS TO BE MADE.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:38",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON NEEDS TO BE MADE.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:39",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOON GLORPS APPROVAL.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:40",
+    "body": "A purchase of AED 250.00 (USD 68.00) using card ending 1234 has not been made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:41",
+    "body": "A purchase of AED 250.00 (USD 68.00) using card ending 1234 will soon be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:42",
+    "body": "A purchase of AED 250.00 (USD 68.00) using card ending 1234 is being made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:43",
+    "body": "A purchase of AED 250.00 (USD 68.00) using card ending 1234 was made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-4a6-closed:44",
+    "body": "A purchase of AED 250.00 using card ending 1234 (USD 68.00) will soon be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:45",
+    "body": "A purchase of AED 250.00 using card ending 1234 (USD 68.00) is being made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:46",
+    "body": "A purchase of AED 250.00 using card ending 1234 (USD 68.00) was made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-4a6-closed:47",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE (USD 68.00) has not been made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:48",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE (USD 68.00) will soon be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:49",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE (USD 68.00) is being made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:50",
+    "body": "A purchase of AED 250.00 using card ending 1234 at AMAZON.AE (USD 68.00) was made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-4a6-closed:51",
+    "body": "A purchase of AED 250.00 using card ending 1234 (68.00 USD) at AMAZON.AE has not been made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:52",
+    "body": "A purchase of AED 250.00 using card ending 1234 (68.00 USD) at AMAZON.AE will soon be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:53",
+    "body": "A purchase of AED 250.00 using card ending 1234 (68.00 USD) at AMAZON.AE is being made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "cross-family-4a6-closed:54",
+    "body": "A purchase of AED 250.00 using card ending 1234 (68.00 USD) at AMAZON.AE was made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "cross-family-4a6-closed:55",
+    "body": "Your Credit Card XXX 250.00 AED purchase at MAY CAFE. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "cross-family-4a6-closed:56",
+    "body": "Your Credit Card XXX 250.00 AED purchase at NOT NOW CAFE. Your charge-back request for AED 40.00 is queued.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "trace-payment-polarity:1",
+    "body": "We have not received your payment of AED 120.00 for your order from Namshi.",
+    "sender": "ENBD",
+    "origin": "trace-payment-receipt-polarity",
+    "expected": "none",
+    "minorUnits": 12000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "trace-payment-polarity:2",
+    "body": "We have never received your payment of AED 120.00 for your order from Namshi.",
+    "sender": "ENBD",
+    "origin": "trace-payment-receipt-polarity",
+    "expected": "none",
+    "minorUnits": 12000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "trace-payment-polarity:3",
+    "body": "We will soon have received your payment of AED 120.00 for your order from Namshi.",
+    "sender": "ENBD",
+    "origin": "trace-payment-receipt-polarity",
+    "expected": "none",
+    "minorUnits": 12000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "trace-payment-polarity:4",
+    "body": "We are receiving your payment of AED 120.00 for your order from Namshi.",
+    "sender": "ENBD",
+    "origin": "trace-payment-receipt-polarity",
+    "expected": "none",
+    "minorUnits": 12000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:1",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:2",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO remains to be made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:3",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO glorps services. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:4",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO may occur. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:5",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO is dormant. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:6",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO AWAITs APPROVAL. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:7",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO MAY OCCUR. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "closed-record-unknown-identity:8",
+    "body": "A purchase of AED 250.00 using card ending 1234 at UNKNOWN CO IS DORMANT. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "cross-family-Grok-047caf3b-and-owned-closure",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
   }
 ]
