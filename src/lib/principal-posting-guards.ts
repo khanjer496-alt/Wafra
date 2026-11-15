@@ -258,6 +258,15 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
         if (length) { rest = rest.slice(length).trim(); continue; }
       }
     }
+    // A typed date/time owns its full token before a numeric branch suffix.
+    // Otherwise MART/SHOP plus 10:05 consumes "10" as an outlet number and
+    // leaves ":05", falsely refusing an already closed bank receipt.
+    const namedDate = /^(?:on\s*:?\s*)?\d{1,2}[- ]?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[- ]?\d{2,4}(?!\d)/iu.exec(rest);
+    if (namedDate) { rest = rest.slice(namedDate[0].length).trim(); continue; }
+    const date = /^(?:(?:on\s*:?|date\s*:)\s*)?\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?:T\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{3})?Z?)?(?!\d)/iu.exec(rest);
+    if (date) { rest = rest.slice(date[0].length).trim(); continue; }
+    const time = /^(?:(?:at|time\s*:)\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?(?!\d)/iu.exec(rest);
+    if (time) { rest = rest.slice(time[0].length).trim(); continue; }
     const identifier = merchant ? (branchNumber ? /^\d{1,20}(?![\p{L}\p{N}])/u : /^(?:[*xX·•]{2,}\d{2,12}|\d{4,20})(?![\p{L}\p{N}])/u).exec(rest) : null;
     if (identifier) { branchNumber = false; rest = rest.slice(identifier[0].length).trim(); continue; }
     if (instrument && /^at\s*(?:,|$)/iu.test(rest) && /\bwithdrawal\s+(?:of\s*)?$/iu.test(lead)) { rest = rest.replace(/^at\s*/iu, ''); continue; }
@@ -313,12 +322,6 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
     if (location) { rest = rest.slice(location[0].length).trim(); continue; }
     const phone = /^(?:\+|00)[\d·•*xX][\d·•*xX -]{5,20}(?!\d)/u.exec(rest);
     if (phone) { rest = rest.slice(phone[0].length).trim(); continue; }
-    const namedDate = /^(?:on\s*:?\s*)?\d{1,2}[- ]?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[- ]?\d{2,4}(?!\d)/iu.exec(rest);
-    if (namedDate) { rest = rest.slice(namedDate[0].length).trim(); continue; }
-    const date = /^(?:(?:on\s*:?|date\s*:)\s*)?\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?:T\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{3})?Z?)?(?!\d)/iu.exec(rest);
-    if (date) { rest = rest.slice(date[0].length).trim(); continue; }
-    const time = /^(?:(?:at|time\s*:)\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?(?!\d)/iu.exec(rest);
-    if (time) { rest = rest.slice(time[0].length).trim(); continue; }
     const reference = /^(?:ref(?:erence)?|auth(?:orisation|orization)?|approval)\s*(?:no\.?|number|code)?\s*[:#-]?\s*[A-Z0-9]*\d[A-Z0-9-]*(?![\p{L}\p{N}])/iu.exec(rest);
     if (reference) { rest = rest.slice(reference[0].length).trim(); continue; }
     return { closed: false, complete: false };

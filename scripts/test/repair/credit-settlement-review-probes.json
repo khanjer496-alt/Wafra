@@ -9196,5 +9196,45 @@
     "requireDebitParity": true,
     "requireSupplementaryNote": true,
     "noteMinorUnits": null
+  },
+  {
+    "id": "dated-receipt-field-order:1",
+    "body": "Purchase of AED 250.00 with Debit Card ending 1234 at QA MART on 13-NOV-2026 10:05.",
+    "sender": "ENBD",
+    "origin": "synthetic-android396-first-import-receipt-and-predicate-controls",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true
+  },
+  {
+    "id": "dated-receipt-field-order:2",
+    "body": "Purchase of AED 250.00 with Debit Card ending 1234 at QA MART on 13-NOV-2026 10:05. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "synthetic-android396-first-import-receipt-and-predicate-controls",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null
+  },
+  {
+    "id": "dated-receipt-field-order:3",
+    "body": "Your Credit Card XXX 250.00 AED purchase at QA MART on 13-NOV-2026 10:05 awaits approval. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "synthetic-android396-first-import-receipt-and-predicate-controls",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "dated-receipt-field-order:4",
+    "body": "A purchase of AED 250.00 using card ending 1234 at QA MART on 13-NOV-2026 10:05 has not been made. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "synthetic-android396-first-import-receipt-and-predicate-controls",
+    "expected": "none",
+    "minorUnits": 25000,
+    "incompleteExpense": true,
+    "requireReview": false
   }
 ]
