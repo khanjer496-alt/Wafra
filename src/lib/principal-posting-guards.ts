@@ -154,7 +154,7 @@ function receiptMerchantLength(text: string, knownOnly = false, metadata = false
   const atom = /^(?:%\s*)?[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(text);
   if (!atom) return 0;
   let length = atom[0].length, brandLength = 0;
-  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co|corp|company|llc|ltd)\b/iu.exec(text);
+  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co(?:\s+l(?:td)?)?|corp|company|llc|ltd)\b/iu.exec(text);
   if (business) length = Math.max(length, business[0].length);
   const words = [...text.matchAll(/\S+/gu)].slice(0, 8);
   for (const word of words) {
@@ -177,7 +177,7 @@ function receiptMerchantLength(text: string, knownOnly = false, metadata = false
   // completion; an unfamiliar stem does not become a noun by being unlisted.
   const record = text.trim();
   const descriptorWords = [...record.replace(/\bHOUES\s+HOLD\b/giu, 'HOUSEHOLD').replace(/\bSANDS(?=\s+SPORTS\b)/giu, 'SAND').matchAll(/[\p{L}\p{N}'’.-]+/gu)];
-  const noun = /^(?:yours|ours|theirs|hers|his|its|services|technologies|electronics|spices|sports|cinemas|traders|discounts|families|trading|building|clothing|holdings|systems|solutions)$/iu;
+  const noun = /^(?:yours|ours|theirs|hers|his|its|motors|services|technologies|electronics|spices|sports|cinemas|traders|discounts|families|trading|building|clothing|holdings|systems|solutions)$/iu;
   if (descriptorWords.some((word, index) => index > 0 && ((PREDICATE_AUXILIARY.test(word[0]) && !(commaBound && index === descriptorWords.length - 1 && /^pending$/iu.test(word[0]))) || (index < descriptorWords.length - 1 && /^[a-z]{3,}s$/iu.test(word[0]) && !/ss$/iu.test(word[0]) && !noun.test(word[0]))))) return atom[0].length;
   if (business && !metadata) return business[0].length;
   // No free punctuation or sentence instruction can be accepted as a field.
@@ -198,6 +198,15 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
   // Only the mature receipt label or own-card/price/label record supplies
   // implicit completion; qualified/unknown headings need an actual verb.
   let label = lead.trim().replace(/^Dear\s+Customer[,!:\s]+/iu, '');
+  const thanks = /\b(?:thank\s+you|thanks)\s+for\s+/iu.exec(label);
+  if (thanks) {
+    const title = label.slice(0, thanks.index).trim();
+    // A closed notification title is metadata, not an unparsed qualifier.
+    if (!title || /^transaction\s+alert$/iu.test(title) || getActiveMarket().banks.some(bank => bank.name.toLowerCase() === title.toLowerCase())) {
+      label = label.slice(thanks.index + thanks[0].length);
+    }
+  }
+
   const colon = label.indexOf(':');
   if (colon >= 0) {
     const header = label.slice(0, colon).trim();
@@ -268,6 +277,10 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
       const alias = receiptMerchantLength(rest, true);
       if (alias) { rest = rest.slice(alias).trim(); continue; }
     }
+    const billPayee = /^on\s+(?:your|the)\s+([\p{L}\p{N} .&'’-]{1,60}?)\s+bill\b/iu.exec(rest);
+    if (billPayee && !PREDICATE_AUXILIARY.test(billPayee[1]) && !hasCreditCondition(billPayee[1])) {
+      merchant = true; rest = rest.slice(billPayee[0].length).trim(); continue;
+    }
     const railTag = instrument ? /^(?:mada|visa|mastercard|amex)(?:\s*\((?:apple|google|samsung)\s+pay\))?(?![\p{L}\p{N}])/iu.exec(rest) : null;
     if (railTag) { rest = rest.slice(railTag[0].length).trim(); continue; }
     const aliasNote = /^\(([\p{L}\p{N}._-]+)\)/u.exec(rest);
@@ -278,7 +291,7 @@ function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean)
     if (merchant && qualifier) { branchNumber = /^(?:br|llc|ltd|tr|sp)\b/iu.test(qualifier[0]); rest = rest.slice(qualifier[0].length).trim(); continue; }
     const mall = /^mall\s+of\s+(?:emirates|arabia)(?![\p{L}\p{N}])/iu.exec(rest);
     if (merchant && mall) { rest = rest.slice(mall[0].length).trim(); continue; }
-    const location = /^(?:Beijing|Shanghai|Guangzhou|SHJ|Dubai|Abu\s+Dhabi|Sharjah|Ajman|Fujairah|Riyadh|Jeddah|DIFC|AE|ARE|UAE|SA|SAU|KSA|GBR|USA|GB|US|DE|DEU|SGP|HKG|IND|JPN|FRA)(?![\p{L}\p{N}])/iu.exec(rest);
+    const location = /^(?:Beijing|Shanghai|Guangzhou|MOE|JLT|SHJ|Dubai|Abu\s+Dhabi|Sharjah|Ajman|Fujairah|Riyadh|Jeddah|DIFC|AE|ARE|UAE|SA|SAU|KSA|GBR|USA|GB|US|DE|DEU|SGP|HKG|IND|JPN|FRA)(?![\p{L}\p{N}])/iu.exec(rest);
     if (location) { rest = rest.slice(location[0].length).trim(); continue; }
     const phone = /^(?:\+|00)[\d·•*xX][\d·•*xX -]{5,20}(?!\d)/u.exec(rest);
     if (phone) { rest = rest.slice(phone[0].length).trim(); continue; }
