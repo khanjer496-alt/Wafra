@@ -67,13 +67,12 @@ test('F10 read state has no cue or unread dot', () => {
 test('F11 manual hint and visible validation select manual copy in both languages', () => {
   const source = fs.readFileSync(path.join(root, 'src/app/add-transaction.tsx'), 'utf8');
   const manual = source.slice(source.indexOf('{!reviewItem ? <View testID="add-detail-chips"'));
-  const hint = manual.match(/accessibilityHint=\{tUi\('([^']+)'\)\}/)?.[1];
-  const error = manual.slice(manual.indexOf('{categoryInvalid &&')).match(/\{tUi\('([^']+)'\)\}/)?.[1];
-  const { t } = load(path.join(root, 'src/lib/i18n.ts'));
-  for (const key of [hint, error]) {
-    assert.equal(t(key, 'en'), 'Choose the category before adding this transaction.');
-    assert.equal(t(key, 'ar'), 'اختر التصنيف قبل إضافة هذه المعاملة.');
-  }
+  assert.match(manual, /accessibilityHint=\{copy\.manualEntryChooseCategory\}/);
+  assert.match(manual.slice(manual.indexOf('{categoryInvalid &&')), /\{copy\.manualEntryChooseCategory\}/);
+  const i18n = load(path.join(root, 'src/lib/i18n.ts'));
+  const { motionAndroidCopy } = load(path.join(root, 'src/lib/motion-android-copy.ts'), { '@/lib/i18n': i18n });
+  assert.equal(motionAndroidCopy('en').manualEntryChooseCategory, 'Choose the category before adding this transaction.');
+  assert.equal(motionAndroidCopy('ar').manualEntryChooseCategory, 'اختر التصنيف قبل إضافة هذه المعاملة.');
 });
 
 test('F11 alert-review category wording remains unchanged', () => {

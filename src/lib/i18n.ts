@@ -473,10 +473,6 @@ const S = {
     en: 'The purchase could not be saved. Check your transactions before trying again.',
     ar: 'تعذر حفظ العملية. تحقق من معاملاتك قبل المحاولة مرة أخرى.',
   },
-  manualEntryChooseCategory: {
-    en: 'Choose the category before adding this transaction.',
-    ar: 'اختر التصنيف قبل إضافة هذه المعاملة.',
-  },
   reviewAlertChooseCategory: {
     en: 'Choose the category before adding this alert.',
     ar: 'اختر التصنيف قبل إضافة هذا التنبيه.',
