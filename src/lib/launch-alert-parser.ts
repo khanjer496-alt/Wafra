@@ -309,7 +309,13 @@ export const inspectGenericBankEventForReview = (
   // This amount belongs to an unfinished debit, not the later refund note.
   // Safe refusal also protects native's informational-credit preview from
   // displaying the purchase amount as an unstated/different refund amount.
-  if (incompletePrincipal && !event.amount.spans.every(span => hasSelectedCreditPredicate(moneySource, span))) return null;
+  if (incompletePrincipal && !event.amount.spans.every(span => hasSelectedCreditPredicate(moneySource, span))) {
+    if (mentionsCredit(source)) return null;
+    // A structurally uncertain expense still belongs in informational Review.
+    // Keep its own facts without granting confirmation or credit authority.
+    event = { ...event, status: 'informational',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+  }
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
   if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
