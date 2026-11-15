@@ -48,7 +48,7 @@ const CEILING = {
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
   lostIncome: { parseSms: 0, session: 0, native: 0 },
   droppedDebit: { parseSms: 37, session: 37, native: 0 },
-  postedNotReview: { parseSms: 21, session: 21, native: 10 },
+  postedNotReview: { parseSms: 12, session: 12, native: 10 },
 };
 const NATIVE_IGNORED_INCOME_CEILING = 38;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
