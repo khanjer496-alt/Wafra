@@ -154,7 +154,7 @@ function receiptMerchantLength(text: string, knownOnly = false, metadata = false
   const atom = /^(?:%\s*)?[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(text);
   if (!atom) return 0;
   let length = atom[0].length, brandLength = 0;
-  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co|corp|company|llc|ltd)\b/iu.exec(text);
+  const business = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co(?:\s+l(?:td)?)?|corp|company|llc|ltd)\b/iu.exec(text);
   if (business) length = Math.max(length, business[0].length);
   const words = [...text.matchAll(/\S+/gu)].slice(0, 8);
   for (const word of words) {
@@ -177,7 +177,7 @@ function receiptMerchantLength(text: string, knownOnly = false, metadata = false
   // completion; an unfamiliar stem does not become a noun by being unlisted.
   const record = text.trim();
   const descriptorWords = [...record.replace(/\bHOUES\s+HOLD\b/giu, 'HOUSEHOLD').replace(/\bSANDS(?=\s+SPORTS\b)/giu, 'SAND').matchAll(/[\p{L}\p{N}'’.-]+/gu)];
-  const noun = /^(?:yours|ours|theirs|hers|his|its|services|technologies|electronics|spices|sports|cinemas|traders|discounts|families|trading|building|clothing|holdings|systems|solutions)$/iu;
+  const noun = /^(?:yours|ours|theirs|hers|his|its|motors|services|technologies|electronics|spices|sports|cinemas|traders|discounts|families|trading|building|clothing|holdings|systems|solutions)$/iu;
   if (descriptorWords.some((word, index) => index > 0 && ((PREDICATE_AUXILIARY.test(word[0]) && !(commaBound && index === descriptorWords.length - 1 && /^pending$/iu.test(word[0]))) || (index < descriptorWords.length - 1 && /^[a-z]{3,}s$/iu.test(word[0]) && !/ss$/iu.test(word[0]) && !noun.test(word[0]))))) return atom[0].length;
   if (business && !metadata) return business[0].length;
   // No free punctuation or sentence instruction can be accepted as a field.
