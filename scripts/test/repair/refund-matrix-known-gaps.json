@@ -7,20 +7,12 @@
   "EN-00294": {"expected":"REVIEW","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00295": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00296": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
-  "EN-00297": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00298": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00299": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00300": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
   "EN-00301": {"expected":"REVIEW","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00303": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00304": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
   "EN-00306": {"expected":"REVIEW","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00307": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
   "EN-00308": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000","native":"debit 25000"},
-  "EN-00309": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00310": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00311": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
-  "EN-00312": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"},
   "EN-01835": {"expected":"EXPENSE","parseSms":"none","session":"none"},
   "EN-01838": {"expected":"EXPENSE","parseSms":"none","session":"none"},
   "EN-01839": {"expected":"EXPENSE","parseSms":"none","session":"none"},
@@ -57,7 +49,6 @@
   "EN-02326": {"expected":"EXPENSE","parseSms":"none","session":"none"},
   "EN-02327": {"expected":"EXPENSE","parseSms":"none","session":"none"},
   "EN-02328": {"expected":"EXPENSE","parseSms":"none","session":"none"},
-  "EN-03510": {"expected":"EXPENSE","parseSms":"none","session":"none"},
-  "EN-03569": {"expected":"NO_POST","parseSms":"expense 25000","session":"expense 25000"}
+  "EN-03510": {"expected":"EXPENSE","parseSms":"none","session":"none"}
  }
 }
