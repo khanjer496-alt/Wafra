@@ -114,6 +114,14 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
 
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
   const got = paths(row.body, row.sender);
+  if (row.requireOriginalNegation) {
+    const start = row.body.indexOf(row.principalMoneyToken);
+    assert.ok(start >= 0, `${row.id}: independently selected original amount token`);
+    const span = { start, end: start + row.principalMoneyToken.length };
+    const guard = load('@/lib/principal-posting-guards');
+    assert.equal(guard.hasNegatedPrincipalAssertion(row.body, span), true, `${row.id}: original proposition polarity`);
+    assert.equal(guard.isCompletedExpensePrincipal(row.body, span), false, `${row.id}: denial cannot be positive completion proof`);
+  }
   if (row.sourceOmitObservedAt) {
     const source = sms.parseSms(row.body, {}, { sender: row.sender });
     const sourceShape = source ? `${source.kind === 'transaction' ? source.type : source.kind}:${source.amountFils}` : 'none';
