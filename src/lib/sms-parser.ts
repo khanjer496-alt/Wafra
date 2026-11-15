@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -10117,7 +10117,13 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
     // cannot authorize a fallback. The legacy receipt grammar now also needs
     // the same affirmative selected predicate, even when the whole reader
     // confuses a later completed credit or note with the already stated debit.
-    return !wholeRequired || (whole?.kind === 'transaction' && whole.type === 'expense' &&
+    // The broad reader can withhold a genuine nominal debit beside a pending
+    // note. Only explicit completion on BOTH original spans can recover it;
+    // its null result, a label or a terse fallback never supplies this proof.
+    const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(original.raw.slice(0, original.spans[0].start));
+    const explicitNominal = !whole && nominal && hasCompletedExpensePredicate(original.raw, original.spans[0]) &&
+      hasCompletedExpensePredicate(full.raw, { start: offset + original.spans[0].start, end: offset + original.spans[0].end });
+    return !wholeRequired || explicitNominal || (whole?.kind === 'transaction' && whole.type === 'expense' &&
       parsed.amountFils === whole.amountFils && parsed.currency === whole.currency);
   };
   const legacy = splitDebitBesideCredit(message);
@@ -10163,6 +10169,12 @@ function parseSmsCore(
   const withoutRequests = withoutUncompletedRequestNotes(message);
   if (withoutRequests !== message) {
     const movement = parseSms(withoutRequests, overrides, options);
+    if (movement?.kind === 'transaction' && movement.type === 'expense') {
+      const original = readPrincipalContext(message, movement);
+      // Keep a reference back to THIS debit before removing request notes.
+      // An unrelated cancelled/future credit does not qualify its principal.
+      if (original?.spans[0] && hasIncompletePrincipalReference(original.raw.slice(original.spans[0].end))) return null;
+    }
     return movement ? { ...movement, raw: message } : null;
   }
   let parsed = parseSmsInner(message, overrides, options);
