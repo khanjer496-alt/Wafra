@@ -114,6 +114,11 @@ for (const row of require('./credit-settlement-sweep.json')) test(`${row.id} ${r
 
 for (const row of require('./credit-settlement-review-probes.json')) test(`${row.id}: reviewer probe`, () => {
   const got = paths(row.body, row.sender);
+  if (row.sourceOmitObservedAt) {
+    const source = sms.parseSms(row.body, {}, { sender: row.sender });
+    const sourceShape = source ? `${source.kind === 'transaction' ? source.type : source.kind}:${source.amountFils}` : 'none';
+    assert.equal(sourceShape, row.expected === 'none' ? 'none' : `${row.expected}:${row.minorUnits}`, `${row.id}: original sender-only source invocation`);
+  }
   if (row.incompleteExpense) {
     assert.equal(got.nativeRoute, 'ignore', `${row.id}: an unfinished expense cannot produce a money preview ${JSON.stringify(got)}`);
     assert.notEqual(got.review?.direction, 'credit', `${row.id}: the expense amount is not refund money ${JSON.stringify(got)}`);

@@ -39,7 +39,7 @@ for (const [index, [body, sender, amount]] of [
   ['If approved, AED 250.00 has been refunded to your card.', 'ENBD', '25000'],
   ['ADCB: Reversal of AED 40.00 is under process. You will be notified when the amount is refunded.', 'ADCB', '4000'],
   ['نود اعلامك، ان تم استرداد مبلغ AED 250.00 إلى بطاقتك. فِيرجى تجاهل هذه الرسالة.', 'ENBD', '25000'],
-].concat(require('./credit-settlement-review-probes.json').filter(row => (row.id.startsWith('cross-family-91-') && row.requireReview) || (row.id.startsWith('credit-owned-purchase-principal:') && row.requireReview) || row.id === 'reviewer-ebc:NU17').map(row => [row.body, row.sender, String(row.minorUnits)])).entries()) test(`uncertain credit is retained through capture and history ${index}`, () => {
+].concat(require('./credit-settlement-review-probes.json').filter(row => (row.id.startsWith('cross-family-91-') && row.requireReview) || ((row.id.startsWith('credit-owned-purchase-principal:') || row.origin === 'reviewer-0dd-preserved-probes') && row.requireReview) || row.id === 'reviewer-ebc:NU17').map(row => [row.body, row.sender, String(row.minorUnits)])).entries()) test(`uncertain credit is retained through capture and history ${index}`, () => {
   load('@/lib/country').setActiveCountry('AE');load('@/lib/markets').setActiveMarket('AE');load('@/lib/markets').setLedgerCurrency('AED', 2);
   const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED', bestEffort: { enabled: true, country: 'AE' } });
   assert.equal(session.parse(body, sender, session.inspect(body, sender), undefined, at), null);
