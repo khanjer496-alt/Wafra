@@ -92,6 +92,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Final-pair proof is opt-in by its existing immutable ref convention.
+      # Ordinary founder/corpus APK workflows retain their existing behavior.
+      - name: Record final pair source baseline
+        if: startsWith(github.ref_name, 'android/final-')
+        env:
+          STATIC_INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: python3 scripts/ci/android-static-report.py baseline --baseline "$RUNNER_TEMP/android-static-baseline.json"
+
       - name: Refuse research exports in a Play bundle
         if: inputs.bundle == true && inputs.corpus == true
         run: |
@@ -420,6 +428,23 @@ jobs:
           node scripts/android-build-flags.cjs verify-production wafra.apk
           echo "### 🔒 Production build flags verified in the AAB and APK" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Inspect complete final pair artifacts before sealing
+        if: startsWith(github.ref_name, 'android/final-')
+        env:
+          STATIC_INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: |
+          set -euo pipefail
+          python3 scripts/test/ci/android-static-report.test.py
+          tool="$RUNNER_TEMP/wafra-bundletool.jar"
+          if [ ! -f "$tool" ]; then
+            curl --fail --silent --show-error --location --retry 3 \
+              https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar -o "$tool"
+          fi
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $tool" | sha256sum --check
+          python3 scripts/ci/android-static-report.py report \
+            --baseline "$RUNNER_TEMP/android-static-baseline.json" \
+            --bundletool "$tool" --out "$RUNNER_TEMP/android-static-report/report.json"
+
       # The repository is PUBLIC: any signed-in GitHub user can download any
       # Actions artifact. Signed APKs and AABs therefore never leave the runner
       # in plaintext. They are encrypted to .github/android-artifact-recipient.pem,
@@ -454,5 +479,15 @@ jobs:
           path: |
             sealed/*.enc
             sealed/verification.json
+          if-no-files-found: error
+          retention-days: 1
+
+      # Only bounded allowlisted JSON is public; native binaries remain sealed.
+      - name: Upload final pair static report
+        if: startsWith(github.ref_name, 'android/final-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-android-static-${{ github.run_number }}
+          path: ${{ runner.temp }}/android-static-report/report.json
           if-no-files-found: error
           retention-days: 1
