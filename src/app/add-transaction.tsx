@@ -1177,7 +1177,7 @@ export default function AddTransactionScreen() {
           collapsable={false}
           accessibilityLabel={tUi('category')}
           accessibilityLabelledBy={categoryLabelId}
-          accessibilityHint={tUi('reviewAlertChooseCategory')}
+          accessibilityHint={tUi('manualEntryChooseCategory')}
           {...(Platform.OS === 'web' ? categoryWebAriaProps : {})}
           style={styles.chipGroup}>
           <ThemedText type="meta" themeColor="textSecondary" nativeID={categoryLabelId}>
@@ -1226,7 +1226,7 @@ export default function AddTransactionScreen() {
             nativeID={categoryErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-            {tUi('reviewAlertChooseCategory')}
+            {tUi('manualEntryChooseCategory')}
           </ThemedText>
         )}
         {accountInvalid && (
