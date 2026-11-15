@@ -299,8 +299,11 @@ export const inspectGenericBankEventForReview = (
     const lead = leads[leads.length - 1] ?? '';
     const tail = moneySource.slice(span.end).split(/(?<=[.!?])\s+|[;؛\n]/u)[0]
       .split(/\b(?:using|with|via|at|from|to|into|on|by|for|merchant|card|account|wallet)\b/iu)[0];
+    // The same nominal receipt label can precede or follow its money field.
+    // A later refund note cannot change that selected amount's ownership.
     const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead + ' ' + tail) ||
-      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead) ||
+      /^\s*(?:purchase|payment|withdrawal|transaction)\b/iu.test(tail);
     return (debit || event.direction === 'debit') && isIncompletePrincipal(moneySource, span, true);
   });
   // This amount belongs to an unfinished debit, not the later refund note.

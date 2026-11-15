@@ -1,7 +1,7 @@
 name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-review-money-class-red-r16]
+    branches: [patch/port190-pr7-review-money-class-green-r16]
 permissions:
   contents: read
 jobs:
@@ -54,6 +54,9 @@ jobs:
           node --test --test-concurrency=1 scripts/test/repair/android396-first-import-balance.test.cjs > inbox.txt 2>&1
           node scripts/test/parser.test.js > parser.txt 2>&1
           node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
+      - name: Frozen matrix money and visible-credit retention
+        if: ${{ !cancelled() }}
+        run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -67,6 +70,8 @@ jobs:
             inbox.txt
             parser.txt
             bank-corpus.txt
+            matrix.txt
+            matrix-report.json
             legacy-contracts.txt
             reviewer-harness-cases.json
             reviewer-harness-results.json
