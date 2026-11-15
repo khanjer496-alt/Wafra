@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Producer-only tiny fixtures: actual workflow recipe, no keys/crypto/app build."""
+import ctypes
+import functools
 import hashlib
 import importlib.util
 import io
@@ -13,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -32,21 +35,112 @@ def recipe(base=False):
 
 OBSERVATIONS = []
 COMPARISONS = []
+EARLY_ERRORS = []
+NATIVE_BOUND = False
 
 
-def measure_both(observer):
+class XattrReadError(RuntimeError):
+    pass
+
+
+@functools.lru_cache(maxsize=1)
+def native_xattrs():
+    """Darwin ABI from sys/xattr.h; bind read-only calls only."""
+    global NATIVE_BOUND
+    if sys.platform != 'darwin': raise XattrReadError()
+    native=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
+    native.listxattr.argtypes=[ctypes.c_char_p,ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int]
+    native.listxattr.restype=ctypes.c_ssize_t
+    native.getxattr.argtypes=[ctypes.c_char_p,ctypes.c_char_p,ctypes.c_void_p,ctypes.c_size_t,ctypes.c_uint32,ctypes.c_int]
+    native.getxattr.restype=ctypes.c_ssize_t
+    NATIVE_BOUND=True
+    return native
+
+
+def read_xattrs(path,native=None):
+    # XATTR_NOFOLLOW=1 on BOTH calls: inspect the symlink node, not its target.
+    # Size/collection errors and races fail closed; zero is valid only after a
+    # successful native call. Keep NUL-delimited name bytes and value bytes exact.
+    native=native if native is not None else native_xattrs()
+    encoded=os.fsencode(path)
+    def collect(call):
+        size=call(None,0)
+        if not 0<=size<=1048576:raise XattrReadError()
+        buffer=ctypes.create_string_buffer(max(size,1))
+        count=call(buffer,size)
+        if count!=size:raise XattrReadError()
+        return buffer.raw[:count]
+    packed=collect(lambda buf,size:native.listxattr(encoded,buf,size,1))
+    if packed and not packed.endswith(b'\0'):raise XattrReadError()
+    names=packed[:-1].split(b'\0') if packed else []
+    if any(not name for name in names) or len(set(names))!=len(names):raise XattrReadError()
+    return {name:collect(lambda buf,size:native.getxattr(encoded,name,buf,size,0,1)) for name in names}
+
+
+def error_evidence(test,stage,error):
+    case=getattr(getattr(test,'test_case',test),'_testMethodName',test if isinstance(test,str) else 'unknown-case')
+    if case not in CASE_IDS:case='unknown-case'
+    stages={'setup','snapshot','source-state','measurement','recipe-exit','archive-read','source','source-nodes','consumer','test'}
+    allowed={'AttributeError','OSError','ValueError','RuntimeError','XattrReadError','AssertionError','TypeError','NotImplementedError'}
+    EARLY_ERRORS.append({'case':case,'stage':stage if stage in stages else 'test',
+                         'errorClass':type(error).__name__ if type(error).__name__ in allowed else 'OtherError',
+                         'osListxattrAvailable':callable(getattr(os,'listxattr',None)),
+                         'osGetxattrAvailable':callable(getattr(os,'getxattr',None)),
+                         'nativeReadAPIsBound':NATIVE_BOUND})
+
+
+class SafeResult(unittest.TestResult):
+    # Store no raw unittest traceback/assertion/exception text, even internally.
+    def addError(self,test,err):
+        error_evidence(test,getattr(getattr(test,'test_case',test),'_stage','test'),err[1])
+        self.errors.append((test,'fixed-error'))
+    def addFailure(self,test,err):self.failures.append((test,'fixed-failure'))
+    def addSubTest(self,test,subtest,err):
+        if err is not None:
+            if issubclass(err[0],test.failureException):self.addFailure(subtest,err)
+            else:self.addError(subtest,err)
+
+
+
+def measure_both(observer,case="unknown-case"):
     """A legacy observation must never prevent measuring the proposed producer."""
     observations = {}
     for origin in ('legacy', 'corrected'):
         try:
             observations[origin] = dict(observer(origin), entered=True)
-        except Exception:
+        except Exception as error:
+            error_evidence(case,'measurement',error)
             # No exception text, paths, argv or subprocess output in reports.
             observations[origin] = {'complete': False, 'outcome': 'observation-error', 'entered': True}
     return observations
 
 
+class FakeNativeXattrs:
+    """Pure ABI double: no native library, xattr command or attribute mutation."""
+    def __init__(self,attrs):self.attrs=attrs;self.calls=[]
+    def transfer(self,data,buf,size):
+        if buf is not None:
+            if size!=len(data):return -1
+            if data:ctypes.memmove(buf,data,len(data))
+        return len(data)
+    def listxattr(self,path,buf,size,options):
+        self.calls.append((path,options))
+        return self.transfer(b''.join(name+b'\0' for name in self.attrs[path]),buf,size)
+    def getxattr(self,path,name,buf,size,position,options):
+        self.calls.append((path,options));assert position==0
+        return self.transfer(self.attrs[path][name],buf,size)
+
+
 class ControlFlowFixtures(unittest.TestCase):
+    def setUp(self):
+        self.saved=[len(OBSERVATIONS),len(COMPARISONS),len(EARLY_ERRORS)]
+    def tearDown(self):
+        # Discard only nested expected-fault evidence; retain this pure case's
+        # own unexpected error diagnostics, even if the regression itself fails.
+        own_errors=[r for r in EARLY_ERRORS[self.saved[2]:] if r['case']==self._testMethodName]
+        for collection,size in zip((OBSERVATIONS,COMPARISONS,EARLY_ERRORS),self.saved):del collection[size:]
+        EARLY_ERRORS.extend(own_errors)
+
     def test_legacy_exception_still_measures_corrected(self):
         calls=[]; fixture=ProducerFixtures()
         def observer(origin,expected,nodes,attrs):
@@ -72,11 +166,63 @@ class ControlFlowFixtures(unittest.TestCase):
                 self.assertEqual(calls,['legacy','corrected'])
                 self.assertTrue(COMPARISONS.pop()['correctedEntered'])
 
+    def test_actual_source_state_without_linux_apis_preserves_binary_and_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);target=root/'target';target.write_bytes(b'file bytes')
+            link=root/'link';link.symlink_to('target')
+            values={os.fsencode(root):{b'name with newline\n':b'\x00\xff\n'},
+                    os.fsencode(target):{b'empty':b''},os.fsencode(link):{b'link-only':b'node bytes'}}
+            native=FakeNativeXattrs(values);fixture=ProducerFixtures()
+            with mock.patch.object(os,'listxattr',None,create=True),mock.patch.object(os,'getxattr',None,create=True):
+                nodes,attrs=fixture.source_state(root,native=native)
+            self.assertEqual(attrs['.'],values[os.fsencode(root)])
+            self.assertEqual(attrs['target'],values[os.fsencode(target)])
+            self.assertEqual(attrs['link'],values[os.fsencode(link)])
+            self.assertEqual(nodes['link']['kind'],'symlink');self.assertEqual(nodes['link']['target'],'target')
+            self.assertTrue(all(options==1 for path,options in native.calls))
+            self.assertEqual({path for path,options in native.calls},set(values))
+
+    def test_native_collection_errors_and_missing_symbols_never_default_empty(self):
+        failing=mock.Mock();failing.listxattr.return_value=-1
+        with self.assertRaises(XattrReadError):read_xattrs('synthetic',native=failing)
+        with self.assertRaises(AttributeError):read_xattrs('synthetic',native=object())
+        changing=mock.Mock();changing.listxattr.side_effect=[2,-1]
+        with self.assertRaises(XattrReadError):read_xattrs('synthetic',native=changing)
+        badvalue=mock.Mock();badvalue.listxattr.side_effect=lambda path,buf,size,options: FakeNativeXattrs({path:{b'a':b'x'}}).listxattr(path,buf,size,options)
+        badvalue.getxattr.return_value=-1
+        with self.assertRaises(XattrReadError):read_xattrs('synthetic',native=badvalue)
+
+    def test_empty_attributes_require_successful_native_collection(self):
+        native=FakeNativeXattrs({b'synthetic':{}})
+        self.assertEqual(read_xattrs('synthetic',native=native),{})
+        self.assertEqual(native.calls,[(b'synthetic',1),(b'synthetic',1)])
+
+    def test_actual_preobservation_error_records_unentered_incomplete_state(self):
+        fixture=ProducerFixtures('test_corrected_actual_recipe_preserves_clean_inputs_and_original_layout')
+        result=SafeResult();start=len(EARLY_ERRORS);observed=len(OBSERVATIONS)
+        with mock.patch(__name__+'.native_xattrs',return_value=object()),mock.patch.object(fixture,'execute_recipe') as execute:
+            fixture.run(result)
+        self.assertEqual(len(result.errors),1);execute.assert_not_called()
+        self.assertEqual(len(OBSERVATIONS),observed)
+        self.assertEqual(COMPARISONS[-1],{'case':fixture._testMethodName,'legacyEntered':False,'correctedEntered':False,'legacyComplete':False,'correctedComplete':False})
+        self.assertEqual(EARLY_ERRORS[start]['stage'],'source-state')
+        self.assertEqual(EARLY_ERRORS[start]['errorClass'],'AttributeError')
+
+    def test_partial_setup_reports_safely_and_retains_prior_measurements(self):
+        fixture=ProducerFixtures('test_corrected_actual_recipe_preserves_clean_inputs_and_original_layout')
+        sentinel={'syntheticMeasured':True};OBSERVATIONS.append(sentinel);result=SafeResult()
+        with mock.patch.object(pathlib.Path,'mkdir',side_effect=OSError('withheld synthetic path and secret')):
+            fixture.run(result)
+        self.assertEqual(len(result.errors),1);self.assertIs(OBSERVATIONS[-1],sentinel)
+        self.assertEqual(EARLY_ERRORS[-1]['stage'],'setup');self.assertEqual(EARLY_ERRORS[-1]['errorClass'],'OSError')
+        self.assertNotIn('withheld',json.dumps(EARLY_ERRORS));self.assertFalse(pathlib.Path(fixture.temp.name).exists())
+
 
 @unittest.skipUnless(sys.platform=='darwin','macOS BSD-tar producer fixtures')
 class ProducerFixtures(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(); self.root = pathlib.Path(self.temp.name)
+        self._stage='setup'
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup); self.root = pathlib.Path(self.temp.name)
         self.prefixes = {'Payload':self.root/'wafra/Payload', 'Products':self.root/'wda-build/Build/Products'}
         for prefix, path in self.prefixes.items():
             path.mkdir(parents=True); path.chmod(0o755)
@@ -99,6 +245,7 @@ class ProducerFixtures(unittest.TestCase):
         return {'recipe-exit':process.returncode==0,'recipe-output-empty':process.stdout==b''}
 
     def snapshot(self, root):
+        self._stage='snapshot'
         result={}
         def visit(path, relative):
             path.resolve().relative_to(root.resolve())
@@ -111,7 +258,8 @@ class ProducerFixtures(unittest.TestCase):
         visit(root,root.name)
         return result
 
-    def source_state(self, root):
+    def source_state(self, root, native=None):
+        self._stage='source-state'
         nodes={};attrs={}
         # rglob does not follow directory symlinks. Preserve original node kinds,
         # modes and link targets independently of the dereferenced byte oracle.
@@ -121,7 +269,7 @@ class ProducerFixtures(unittest.TestCase):
             nodes[key]={'kind':kind,'mode':stat.S_IMODE(info.st_mode)}
             if kind=='symlink':nodes[key]['target']=os.readlink(path)
             elif kind=='regular':nodes[key]['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
-            attrs[key]={name:os.getxattr(path,name,follow_symlinks=False) for name in os.listxattr(path,follow_symlinks=False)}
+            attrs[key]=read_xattrs(path,native=native)
         return nodes,attrs
 
     def manifest(self, archive):
@@ -145,7 +293,8 @@ class ProducerFixtures(unittest.TestCase):
     def observe(self, origin, expected, nodes, attrs):
         recipe_observed=True
         try:recipe_conditions=self.execute_recipe(base=origin=='legacy')
-        except Exception:
+        except Exception as error:
+            error_evidence(self,'recipe-exit',error)
             recipe_observed=False; recipe_conditions={'recipe-exit':False}
         recipe_ok=all(recipe_conditions.values())
         records=[]
@@ -183,20 +332,22 @@ class ProducerFixtures(unittest.TestCase):
                 outcome='canonical' if first is None else 'consumer-rejected' if consumer!='accepted' else 'mismatch'
                 record.update(complete=consumer!='unknown-rejection',outcome=outcome,conditions=conditions,memberCounts=counts,
                               consumer=consumer,firstFailedCondition=first)
-            except Exception:
+            except Exception as error:
+                error_evidence(self,stage,error)
                 record.update(outcome='observation-error',conditions=conditions,firstFailedCondition=stage)
             finally:
                 OBSERVATIONS.append(record); records.append(record)
         return {'complete':all(r['complete'] for r in records),'records':records}
 
     def compare_recipes(self, expected):
+        comparison={'case':self._testMethodName,'legacyEntered':False,'correctedEntered':False,
+                    'legacyComplete':False,'correctedComplete':False}
+        COMPARISONS.append(comparison)
         state={root:self.source_state(root) for root in self.prefixes.values()}
         nodes={root:value[0] for root,value in state.items()}; attrs={root:value[1] for root,value in state.items()}
-        observations=measure_both(lambda origin:self.observe(origin,expected,nodes,attrs))
-        COMPARISONS.append({'case':self._testMethodName,'legacyEntered':observations['legacy']['entered'],
-                            'correctedEntered':observations['corrected']['entered'],
-                            'legacyComplete':observations['legacy']['complete'],
-                            'correctedComplete':observations['corrected']['complete']})
+        observations=measure_both(lambda origin:self.observe(origin,expected,nodes,attrs),self._testMethodName)
+        comparison.update(legacyEntered=observations['legacy']['entered'],correctedEntered=observations['corrected']['entered'],
+                          legacyComplete=observations['legacy']['complete'],correctedComplete=observations['corrected']['complete'])
         # Assertions happen ONLY after both producers have been observed. Unknown
         # legacy failures remain failures, but never gate corrected measurement.
         self.assertTrue(observations['legacy']['complete'],'legacy observation incomplete')
@@ -289,19 +440,22 @@ def tar_identity():
     return {'implementation':'unknown','version':'unknown'}
 
 
+CASE_IDS={name for cls in (ControlFlowFixtures,ProducerFixtures) for name in vars(cls) if name.startswith('test_')}
+
+
 if __name__=='__main__':
     if os.environ.get('PACKAGE_FIXTURE_REPORT'):
         suite=unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(c) for c in (ControlFlowFixtures,ProducerFixtures))
-        result=unittest.TextTestRunner(stream=io.StringIO()).run(suite)
+        result=SafeResult();suite.run(result)
         head=subprocess.check_output(['git','-C',str(REPO),'rev-parse','HEAD'],text=True).strip()
-        report={'schema':'wafra-producer-fixture-v2','testsRun':result.testsRun,'failures':len(result.failures),
+        report={'schema':'wafra-producer-fixture-v3','testsRun':result.testsRun,'failures':len(result.failures),
                 'errors':len(result.errors),'skipped':len(result.skipped),'success':result.wasSuccessful() and not result.skipped,
                 'baselineCommit':BASE,'sourceCommit':head if re.fullmatch(r'[0-9a-f]{40}',head) else 'unknown',
                 'packagingOnly':True,'privateKeysUsed':False,'decryptionPerformed':False,'appBuildPerformed':False,
                 'scriptSha256':{p:hashlib.sha256((REPO/p).read_bytes()).hexdigest() for p in
                                 ['scripts/ci/ios-device-package.sh','scripts/test/ios-device-package.test.py','scripts/ci/ios-device-seal.py']},
                 'failedCases':[getattr(test,'test_case',test)._testMethodName for test,_ in result.failures+result.errors],
-                'observations':OBSERVATIONS,'comparisons':COMPARISONS,'tar':tar_identity(),
+                'observations':OBSERVATIONS,'comparisons':COMPARISONS,'tar':tar_identity(),'earlyErrors':EARLY_ERRORS,
                 'legacyFindings':[r for r in OBSERVATIONS if r['origin']=='legacy' and r['outcome']!='canonical']}
         target=pathlib.Path(os.environ['PACKAGE_FIXTURE_REPORT']);target.parent.mkdir(parents=True,exist_ok=True)
         target.write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));sys.exit(0 if report['success'] else 1)

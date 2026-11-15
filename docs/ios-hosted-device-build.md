@@ -169,3 +169,33 @@ exported. Missing/failed measurements remain failures. Seven native cases plus
 two pure cases must execute with zero errors/failures/skips for suite success;
 this does not establish historical cause, universal tar compatibility or release
 approval. Native execution remains held pending separate authorization/admission.
+
+
+### Test-only macOS xattr portability and early evidence proposal
+
+The fixture no longer uses Python os.listxattr/os.getxattr, documented as Linux
+extended-attribute APIs in Python3.13 (https://docs.python.org/3.13/library/os.html#linux-extended-attributes).
+Its read-only Darwin adapter binds listxattr/getxattr from libSystem using the
+Apple sys/xattr.h signatures and XATTR_NOFOLLOW on both calls
+(https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/xattr.h).
+Names remain NUL-delimited bytes, values remain exact bytes including empty,
+NUL and nontext values; symlink-node attributes are distinct from the target.
+Missing native symbols, failed calls, malformed/duplicate names, size changes
+and oversized synthetic collections fail closed. No fallback to empty attributes,
+no skipped attribute and no mutation call is used. An empty result is valid only
+following two successful native enumeration calls reporting zero bytes.
+
+The v3 report adds finite case/stage/error-class/API-availability evidence.
+SafeResult never formats traceback/assertion/exception prose. Comparison records
+start unentered/incomplete before source-state collection, and prior measured
+records survive later setup failures. Temporary setup registers cleanup at once.
+Seven native definitions and seven pure definitions remain required (14 total).
+The five new pure cases exercise actual source_state with missing Linux APIs,
+binary names/values and symlink-node identity through an injected native ABI
+double; refusal on unavailable/failed native calls; verified empty enumeration;
+actual early source-state error reporting without recipe entry; and safe partial
+setup cleanup/evidence with prior records retained. They do not load libSystem,
+run xattr/tar or establish native execution. All tests remain unexecuted under
+the current preparation/resource hold. Hosted43680457959 exceptions were not
+retained: this source portability defect is not a proven historical exception
+or archive cause. Production runtime/source NO-GO and all execution gates remain.
