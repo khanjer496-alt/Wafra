@@ -300,7 +300,7 @@ export const inspectGenericBankEventForReview = (
     const tail = moneySource.slice(span.end).split(/(?<=[.!?])\s+|[;؛\n]/u)[0]
       .split(/\b(?:using|with|via|at|from|to|into|on|by|for|merchant|card|account|wallet)\b/iu)[0];
     const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead + ' ' + tail) ||
-      /(?:^|[:|])\s*(?:(?:a|the|your)\s+)?(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
     return (debit || event.direction === 'debit') && isIncompletePrincipal(moneySource, span, true);
   });
   // Unknown direction is not completion evidence. Keep the original token
