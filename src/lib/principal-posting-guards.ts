@@ -189,8 +189,9 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
       (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest))) continue;
     const finite = rest.slice(0, predicateDescriptor(rest)?.index ?? rest.length).trim();
     const feeOwner = /^\s*(?:(?:annual|monthly|maintenance|service|card|account|bank)\s+)*(?:fees?|commission|tax|levy)\s*$/iu.test(before);
-    const approvedCardReceipt = /^is\s+approved$/iu.test(finite) &&
-      /^\s*on\s+your\s+card\s+ending\s+[*xX•\d -]{3,32}\s+at\s+\S/iu.test(before);
+    const approvedCardReceipt = /^(?:is|was)\s+approved$/iu.test(finite) &&
+      (/^\s*on\s+your\s+card\s+ending(?:\s+with)?\s+[*xX•\d -]{3,32}\s+at\s+\S/iu.test(before) ||
+        /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead));
     const authenticatedPurchase = /^was\s+authenticated$/iu.test(finite) &&
       /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) && /^\s+via\s+3d\s+secure\b/iu.test(rest.slice(finite.length));
     if (feeOwner) followingFees.add(finite);

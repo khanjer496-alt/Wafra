@@ -70,6 +70,7 @@ for (const [body, price] of [
   ['Purchase of AED 250.00 at NOON with Credit Card 4110 was authenticated via 3D Secure. Avl Bal AED 900.00', 'AED 250.00'],
   ['Trx. of AED 42.10 on your card ending **1234 at SMILES, UAE is Approved. Avl. card bal is 1234.56.', 'AED 42.10'],
   ['AED 25.00 annual card fee was assessed on card 1234.', 'AED 25.00'],
+  ['Your card purchase of AED 47.99 at CANVA was approved. Card ending 1234.', 'AED 47.99'],
 ]) test(`existing principal is not vetoed by another owner: ${body}`, () => {
   const start = body.indexOf(price);
   assert.equal(guards.isIncompletePrincipal(body, { start, end: start + price.length }, true), false, body);
