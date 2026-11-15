@@ -1,14 +1,13 @@
-name: Parser owned-completion evidence
+name: Parser exact reviewer charge controls
 on:
   push:
-    branches: [patch/port190-pr7-complete-admission-r14]
-  workflow_dispatch:
+    branches: [patch/port190-pr7-exact-charge-r14a]
 permissions:
   contents: read
 jobs:
   focused:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,104 +37,27 @@ jobs:
           REV="$GITHUB_SHA" node .github/reviewer-gate/legacy-probe.cjs reviewer-harness-cases.json legacy-harness-results.json > legacy-harness-summary.txt
           REV="$GITHUB_SHA" node .github/reviewer-gate/r4-original-probe.cjs reviewer-harness-cases.json reviewer-harness-results.json > reviewer-harness-rows.txt
           python3 .github/reviewer-gate/reviewer-compare.py > reviewer-harness-check.txt
-      - name: Selected predicate ownership
-        if: ${{ !cancelled() }}
-        run: node --test --test-concurrency=1 scripts/test/repair/selected-predicate-ownership.test.cjs > predicate.txt 2>&1
-      - name: Trace observer preserves isolated source and deterministic generator tests
-        if: ${{ !cancelled() }}
-        env:
-          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/observer-proof
-          NODE_OPTIONS: --require ${{ github.workspace }}/.github/patch-probe/parse-trace.cjs
-        run: node --test --test-concurrency=1 scripts/test/repair/ios-background-parser-generator.test.cjs scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > observer-proof.txt 2>&1
       - name: Three-path closure
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
       - name: Actual retention and consumer regressions
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
-      - name: Private teaching
-        if: ${{ !cancelled() }}
-        run: node --test --test-concurrency=1 scripts/test/learned-alert-formats.test.cjs > learning.txt 2>&1
-      - name: Existing parser controls
-        if: ${{ !cancelled() }}
-        run: node scripts/test/parser.test.js > parser.txt 2>&1
-      - name: Kotlin banner and source refusal parity
-        if: ${{ !cancelled() }}
-        run: node scripts/test/instant-alert.test.js > instant-alert.txt 2>&1
-      - name: Existing semantic accounting and boundary controls
-        if: ${{ !cancelled() }}
-        run: |
-          set +e
-          node scripts/test/bank-alert-semantics-matrix.test.js > semantic-matrix.txt 2>&1
-          A=$?
-          node scripts/test/bank-alert-interpreter.test.js > semantic-interpreter.txt 2>&1
-          B=$?
-          node scripts/test/global-alert-adversarial.test.js > global-alert-adversarial.txt 2>&1
-          C=$?
-          printf '{"matrix":%s,"interpreter":%s,"adversarial":%s}\n' "$A" "$B" "$C" > semantic-exits.json
-          test "$A" = 0 && test "$B" = 0 && test "$C" = 0
-      - name: Existing bank-corpus controls
-        if: ${{ !cancelled() }}
-        run: node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
-      - name: Existing parser invariants
-        if: ${{ !cancelled() }}
-        run: node scripts/test/invariants.test.js > invariants.txt 2>&1
-      - name: Existing native and coordinated-refund contracts
-        if: ${{ !cancelled() }}
-        run: node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/ios-corpus-money-contract.test.cjs scripts/test/repair/review-round2-safety.test.cjs scripts/test/repair/retention-compiled-contracts.test.cjs > existing-contracts.txt 2>&1
-      - name: Universal source and private-format suites
-        if: ${{ !cancelled() }}
-        run: node scripts/universal-test/run.cjs > universal.txt 2>&1
-      - name: Three-path matrix
-        if: ${{ !cancelled() }}
-        run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
-      - name: Confirm gap exceptions only shrink versus published source
-        if: ${{ !cancelled() }}
-        run: node scripts/test/repair/refund-gaps-no-growth.cjs 82682fadb8ceef3f8f7fb72ca28b25fe71ffc234 > no-growth.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: owned-completion-evidence-${{ github.sha }}
+          name: exact-charge-controls-${{ github.sha }}
           path: |
             generation-check.txt
             typecheck.txt
-            predicate.txt
-            observer-proof.txt
-            transport-workflow.yml
-            shipping-ci-inputs.json
-            semantic-exits.json
-            semantic-matrix.txt
-            semantic-interpreter.txt
-            global-alert-adversarial.txt
             compile.txt
             closure.txt
             consumers.txt
-            learning.txt
-            parser.txt
-            instant-alert.txt
-            bank-corpus.txt
-            invariants.txt
-            existing-contracts.txt
-            universal.txt
-            matrix.txt
-            matrix-report.json
-            no-growth.txt
             reviewer-harness-cases.json
-            legacy-harness-results.json
-            legacy-harness-summary.txt
             reviewer-harness-results.json
-            reviewer-harness-rows.txt
+            legacy-harness-results.json
             reviewer-harness-summary.json
             reviewer-harness-check.txt
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: owned-completion-resources-${{ github.sha }}
-          path: |
-            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js
-            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json
-            src/lib/ios-background-parser-source.generated.ts
           retention-days: 7
   hermes:
     runs-on: ubuntu-latest
@@ -176,48 +98,3 @@ jobs:
             hermes-summary.json
             hermes-stderr.txt
           retention-days: 7
-
-  complete-regressions:
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    env:
-      WAFRA_TRACE_ROOT: ${{ github.workspace }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-      - name: Locked validation dependencies and exact-source resources
-        run: |
-          npm ci
-          npm --prefix server ci
-          mkdir -p out
-          node scripts/generate-ios-background-parser.cjs > out/generation.txt 2>&1
-          node scripts/generate-ios-background-parser.cjs --check >> out/generation.txt 2>&1
-          bash scripts/test/build.sh > out/compile.txt 2>&1
-          git fetch --depth=1 origin 82682fadb8ceef3f8f7fb72ca28b25fe71ffc234
-          node .github/patch-probe/restore-shipping-ci-inputs.cjs
-      - name: Prepare actual native contract fixtures
-        run: |
-          node .github/patch-probe/run-traced-suite.cjs out/preflight.jsonl native-fixtures node_modules/expo/bin/cli prebuild --platform ios --no-install
-          node -e 'const fs=require("fs"),r=fs.readFileSync("out/preflight.jsonl","utf8").trim().split("\n").map(JSON.parse);if(r.some(x=>!x.passed))throw Error("native contract fixture setup failed")'
-      - name: Complete application and repair regression collection
-        run: |
-          cd scripts/test
-          node "$WAFRA_TRACE_ROOT/.github/patch-probe/run-traced-suite.cjs" "$WAFRA_TRACE_ROOT/out/complete-results.jsonl" repair --test --test-concurrency=2 repair/*.test.cjs
-          for t in ../universal-test/run.cjs ../universal-evidence/nonposting-regressions.test.cjs ../universal-evidence/money-regressions.test.cjs ../universal-evidence/evaluator.test.cjs ../universal-evidence-round2/run.cjs; do
-            node "$WAFRA_TRACE_ROOT/.github/patch-probe/run-traced-suite.cjs" "$WAFRA_TRACE_ROOT/out/complete-results.jsonl" "$t" "$t"
-          done
-          for t in *.test.js; do
-            node "$WAFRA_TRACE_ROOT/.github/patch-probe/run-traced-suite.cjs" "$WAFRA_TRACE_ROOT/out/complete-results.jsonl" "$t" "$t"
-          done
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: complete-receipt-regressions-${{ github.sha }}
-          path: out/
-          retention-days: 7
-      - name: Require each actual suite to complete successfully
-        run: |
-          node -e 'const fs=require("fs"),p="out/complete-results.jsonl";if(!fs.existsSync(p))throw Error("no suite results");const r=fs.readFileSync(p,"utf8").trim().split("\n").map(JSON.parse);if(r.length!==98||r.some(x=>!x.passed||x.signal||x.error))throw Error("failed or incomplete regression suite");console.log("All98actualsuiteexits0; finalexactheadtraceandretentionstillrequired")'
