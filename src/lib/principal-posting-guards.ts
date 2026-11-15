@@ -196,6 +196,20 @@ function receiptInstitutionTitle(title: string): boolean {
       bank.name.toLowerCase() === title.toLowerCase() || new RegExp(`^(?:${bank.re.source})$`, bank.re.flags.replace(/[gy]/gu, '')).test(title));
 }
 
+/** Closed metadata prefixes do not remove the following proposition's polarity. */
+function principalAssertionLead(lead: string): string {
+  let declaration = lead.trimStart();
+  for (;;) {
+    const greeting = /^dear\s+(?:valued\s+)?(?:customer|cardholder)\b\s*[,|:]?\s*/iu.exec(declaration);
+    if (greeting) { declaration = declaration.slice(greeting[0].length); continue; }
+    const issuer = /^([^:|\r\n]{1,80})[:|]\s*/u.exec(declaration);
+    if (issuer && receiptInstitutionTitle(issuer[1].trim())) {
+      declaration = declaration.slice(issuer[0].length); continue;
+    }
+    return declaration;
+  }
+}
+
 /** Positive entity spans, not masked text: later predicates still see the original. */
 function namedMerchantSpans(text: string): PrincipalSpan[] {
   const spans: PrincipalSpan[] = [];
@@ -224,9 +238,10 @@ export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan
   // a purchase or an instrument ("false that your card was charged ...").
   // Keep that original frame before active-verb reduction removes subjects.
   // A separate coordinated assertion cannot inherit an earlier frame.
-  const proposition = /^\s*it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+/iu.exec(lead);
+  const declaration = principalAssertionLead(lead);
+  const proposition = /^\s*it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+/iu.exec(declaration);
   if (proposition) {
-    const assertion = lead.slice(proposition[0].length);
+    const assertion = declaration.slice(proposition[0].length);
     if (!/[,;]|\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(assertion) === null) return true;
   }
   const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
@@ -410,9 +425,14 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   // merchant descriptors ("at BALANCE CAFE"), so they cannot erase a later
   // finite predicate either.
   const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
+  // A separately named reversal note can be joined by comma or newline.
+  // It cannot extend the purchase's finite predicate. Keep the full original
+  // tail available below for explicit references back to THIS same charge.
+  const separateNote = /(?:[,;\n]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.exec(ownedTail);
+  const predicateTail = ownedTail.slice(0, separateNote?.index ?? ownedTail.length);
   // A later explicit reference predicates this SAME charge, not a different
   // refund. An uncompleted/negated reference cannot be skipped as metadata.
-  for (const reference of ownedTail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)) {
+  for (const reference of tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)) {
     const assertion = reference[1].slice(0, predicateDescriptor(reference[1])?.index ?? reference[1].length).trim();
     if (!completedPredicate(assertion)) return false;
   }
@@ -422,20 +442,20 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   for (const qualifier of ownedTail.matchAll(/,\s*([a-z]+ly)\s*$/giu)) {
     if (!COMPLETION_ADVERBS.has(qualifier[1].toLowerCase())) return false;
   }
-  const descriptor = predicateDescriptor(ownedTail);
-  const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
+  const descriptor = predicateDescriptor(predicateTail);
+  const predicate = predicateTail.slice(0, descriptor?.index ?? predicateTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const following: string[] = [];
   const unknownFollowing: string[] = [];
   const followingFees = new Set<string>();
   const followingReceipts = new Set<string>();
-  if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
+  if (descriptor) for (const auxiliary of predicateTail.matchAll(FINITE_AUXILIARY_SCAN)) {
     if (auxiliary.index! < descriptor.index + descriptor[0].length) continue;
     // An auxiliary spelling wholly inside a positively named entity is not
     // the movement predicate; a later auxiliary outside that span still is.
-    entities ??= namedMerchantSpans(ownedTail);
+    entities ??= namedMerchantSpans(predicateTail);
     if (entities.some(entity => auxiliary.index! >= entity.start && auxiliary.index! < entity.end)) continue;
-    const before = ownedTail.slice(0, auxiliary.index);
-    const rest = ownedTail.slice(auxiliary.index);
+    const before = predicateTail.slice(0, auxiliary.index);
+    const rest = predicateTail.slice(auxiliary.index);
     // These predicates own a separate reversal or a conditional contact
     // instruction, not the purchase whose amount was already selected.
     if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
@@ -527,7 +547,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     completedPredicate(predicate, explicitDebitOnly, feePredicate, directions)) return true;
   if (active === null && !following.length && unknownFollowing.length) return false;
   if (active === null && !following.length && (nominal || nounLabel) && (!predicate || nounLabel)) {
-    const receipt = closedNominalReceipt(lead, ownedTail, firstStatedPrice(tail) !== null);
+    const receipt = closedNominalReceipt(lead, predicateTail, firstStatedPrice(tail) !== null);
     if (!receipt.closed) return false;
     return receipt.complete ? true : null;
   }
