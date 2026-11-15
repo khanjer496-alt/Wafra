@@ -9301,5 +9301,34 @@
     "minorUnits": 4000,
     "requireReview": true,
     "reviewMinorUnits": 4000
+  },
+  {
+    "id": "credit-owned-purchase-principal:1",
+    "body": "Your purchase of AED 250.00 will be refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "independent-credit-predicate-retention-control-for-review-ownership",
+    "expected": "none",
+    "minorUnits": 25000,
+    "reviewMinorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "credit-owned-purchase-principal:2",
+    "body": "Your purchase of AED 250.00 has been refunded to your card ending 1234 subject to merchant approval.",
+    "sender": "ENBD",
+    "origin": "independent-credit-predicate-retention-control-for-review-ownership",
+    "expected": "none",
+    "minorUnits": 25000,
+    "reviewMinorUnits": 25000,
+    "requireReview": true
+  },
+  {
+    "id": "credit-owned-purchase-principal:3",
+    "body": "Your purchase of AED 250.00 has been refunded to your card ending 1234.",
+    "sender": "ENBD",
+    "origin": "independent-credit-predicate-retention-control-for-review-ownership",
+    "expected": "income",
+    "minorUnits": 25000,
+    "reviewMinorUnits": 25000
   }
 ]
