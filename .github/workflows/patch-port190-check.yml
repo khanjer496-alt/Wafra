@@ -1,7 +1,7 @@
 name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-retained-expense-r18]
+    branches: [patch/port190-pr7-retained-expense-final-r18]
 permissions:
   contents: read
 jobs:

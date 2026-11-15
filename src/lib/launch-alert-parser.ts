@@ -313,7 +313,7 @@ export const inspectGenericBankEventForReview = (
     if (mentionsCredit(source)) return null;
     // A structurally uncertain expense still belongs in informational Review.
     // Keep its own facts without granting confirmation or credit authority.
-    event = { ...event, status: 'informational',
+    event = { ...event, status: 'informational', direction: event.direction === 'credit' ? 'unknown' : event.direction,
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
   }
   // Unknown direction is not completion evidence. Keep the original token
