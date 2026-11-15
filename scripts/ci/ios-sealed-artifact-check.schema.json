@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wafra-sealed-artifact-check-v1",
+  "description": "At most32768 encoded bytes; candidate-only until provider gate step and output artifact independently authenticated. No plaintext/signing/device/release acceptance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "candidateVerified",
+    "phase",
+    "failure",
+    "verifierScriptSha256",
+    "identity",
+    "checks",
+    "ciphertexts",
+    "privateTempDeleted",
+    "limits"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wafra-sealed-artifact-check-v1"
+    },
+    "candidateVerified": {
+      "type": "boolean"
+    },
+    "phase": {
+      "enum": [
+        "ciphertexts",
+        "cleanup",
+        "complete",
+        "download",
+        "host",
+        "identity",
+        "manifest",
+        "provider",
+        "report",
+        "source-pins",
+        "zip"
+      ]
+    },
+    "failure": {
+      "enum": [
+        "archive-digest",
+        "ciphertext-digest",
+        "cleanup",
+        "download-size",
+        "host",
+        "identity",
+        "interrupted",
+        "json",
+        "manifest",
+        "none",
+        "output-size",
+        "provider",
+        "source-pins",
+        "transport",
+        "unexpected",
+        "zip-budget",
+        "zip-layout"
+      ]
+    },
+    "verifierScriptSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identity": {
+      "const": {
+        "repository": "khanjer496-alt/Wafra",
+        "repositoryId": 1312657453,
+        "runJobId": 132737324650,
+        "artifactName": "wafra-ios-device-sealed-43689629732-1",
+        "runId": 43689629732,
+        "attempt": 1,
+        "sourceCommit": "f8addb95341dd7f661e47c18ec85da5eb019c1fe",
+        "workflowCommit": "f8addb95341dd7f661e47c18ec85da5eb019c1fe",
+        "workflowId": 418243062,
+        "artifactId": 14152642203,
+        "artifactBytes": 32607613,
+        "artifactSha256": "748b4a1367477e155e4c4a7a824d6d91537522ab737c3c07b6c09053c551f22d"
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "originalRunIdentity": {
+          "const": true
+        },
+        "originalArtifactIdentity": {
+          "const": true
+        },
+        "producerSourcePins": {
+          "const": true
+        },
+        "recipientSourcePin": {
+          "const": true
+        },
+        "encryptedArchiveDigestMatched": {
+          "const": true
+        },
+        "fixedZipAndManifest": {
+          "const": true
+        },
+        "ciphertextDeclarationsMatched": {
+          "const": true
+        },
+        "memberMapsDeclarationsOnly": {
+          "const": true
+        },
+        "wdaPackageVersionMatched": {
+          "const": true
+        }
+      }
+    },
+    "ciphertexts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wafra": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ciphertextBytesMeasured",
+            "ciphertextSha256Measured",
+            "plaintextBytesDeclared",
+            "plaintextSha256Declared",
+            "ciphertextDeclarationMatched",
+            "declaredCount",
+            "declarationDigest"
+          ],
+          "properties": {
+            "ciphertextBytesMeasured": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32607613
+            },
+            "ciphertextSha256Measured": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintextBytesDeclared": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "plaintextSha256Declared": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "ciphertextDeclarationMatched": {
+              "const": true
+            },
+            "declaredCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 465823
+            },
+            "declarationDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "wda": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ciphertextBytesMeasured",
+            "ciphertextSha256Measured",
+            "plaintextBytesDeclared",
+            "plaintextSha256Declared",
+            "ciphertextDeclarationMatched",
+            "declaredCount",
+            "declarationDigest"
+          ],
+          "properties": {
+            "ciphertextBytesMeasured": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32607613
+            },
+            "ciphertextSha256Measured": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintextBytesDeclared": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "plaintextSha256Declared": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "ciphertextDeclarationMatched": {
+              "const": true
+            },
+            "declaredCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 465823
+            },
+            "declarationDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "privateTempDeleted": {
+      "type": "boolean"
+    },
+    "limits": {
+      "const": {
+        "plaintextVerified": false,
+        "decryptionPerformed": false,
+        "cmsRecipientVerified": false,
+        "wdaSourceBytesVerified": false,
+        "appCompilerCorrectnessVerified": false,
+        "signingPerformed": false,
+        "deviceVerified": false,
+        "runtimeVerified": false,
+        "releaseApproved": false,
+        "acceptanceRequiresSuccessfulProviderGateStep": true
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "candidateVerified": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "phase": {
+            "const": "complete"
+          },
+          "failure": {
+            "const": "none"
+          },
+          "privateTempDeleted": {
+            "const": true
+          },
+          "checks": {
+            "required": [
+              "originalRunIdentity",
+              "originalArtifactIdentity",
+              "producerSourcePins",
+              "recipientSourcePin",
+              "encryptedArchiveDigestMatched",
+              "fixedZipAndManifest",
+              "ciphertextDeclarationsMatched",
+              "memberMapsDeclarationsOnly",
+              "wdaPackageVersionMatched"
+            ]
+          },
+          "ciphertexts": {
+            "required": [
+              "wafra",
+              "wda"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "failure": {
+            "not": {
+              "const": "none"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
