@@ -33,6 +33,21 @@ workflow provenance, plaintext/encrypted SHA256, build provenance, WDA source
 hash and complete product-file hashes; qaSigningPerformed=false. Tar packaging
 dereferences links; local extraction refuses links and special files.
 
+Both production packaging calls use the shared `scripts/ci/ios-device-package.sh`
+recipe. BSD tar's process-scoped `--no-mac-metadata` omits copyfile/AppleDouble
+packaging records; `-h`, normal paths, file bytes, modes and layout are retained.
+This does not clear source xattrs, strip arbitrary members, skip unknown
+prefixes, switch crypto or relax any archive guard. Unsupported tar options or
+unsafe inputs still fail; tar error prose is withheld and a fixed return-code
+summary is emitted. Existing sealing receipts and atomic publication remain.
+
+`scripts/test/ios-device-package.test.py` reads and executes the actual old
+ab62 and proposed production packaging steps against tiny synthetic trees.
+It checks xattr reproduction, normal file/path/mode preservation, clean trees,
+dereference parity and unchanged malformed-archive refusals. It does not
+identify the withheld offending member of run43672407533; that run's proven
+boundary remains first-member wrong-prefix, with upstream cause unknown.
+
 CMS uses the existing #239 recipient; its private key stays on this Mac.
 Download only the exact dispatched run, verify GitHub artifact archive digests,
 compare encrypted hashes, decrypt locally with OpenSSL3, then compare plaintext
@@ -128,3 +143,65 @@ and proving absence from the before-inventory immediately before deletion.
 Log each deletion. Keep2DY4K5NUMM active. Do NOT use ios-device-cleanup.yml for
 this route: that legacy workflow handles disposable runner-created certificates;
 its guards remain unchanged and do not authorize revoking reused certificates.
+
+
+## Producer fixture reconciliation (preparation only)
+
+The seven producer cases remain required. Two pure control-flow cases additionally
+verify that a legacy observation error/mismatch cannot prevent corrected entry,
+and that a corrected mismatch still fails. No historical assertion is inferred.
+The clean and alias cases characterize the legacy recipe separately, then check
+the actual corrected workflow recipe directly against the intended filesystem:
+regular bytes, modes, complete path/type set, empty directories and ordinary `._`
+files. File, empty-directory and populated-directory aliases must be dereferenced
+into regular files/directories accepted by the unchanged consumer. No archive
+link is accepted or filtered. Original lstat kinds/modes, readlink targets,
+regular bytes and source xattrs must also remain unchanged.
+
+The v2 synthetic report contains only fixed case/origin/prefix/check labels,
+correctedEntered (observation entry), booleans, member-kind counts, allowlisted consumer reasons and
+parsed tar implementation/version categories. A complete but noncanonical legacy
+result is an explicit legacyFindings entry, never the corrected oracle. An
+incomplete legacy observation still fails, after corrected measurement. All
+corrected checks must pass; legacy findings still need review reconciliation.
+No exception text, source/member paths, raw command output or assertion prose is
+exported. Missing/failed measurements remain failures. Seven native cases plus
+two pure cases must execute with zero errors/failures/skips for suite success;
+this does not establish historical cause, universal tar compatibility or release
+approval. Native execution remains held pending separate authorization/admission.
+
+
+### Test-only macOS xattr portability and early evidence proposal
+
+The fixture no longer uses Python os.listxattr/os.getxattr, documented as Linux
+extended-attribute APIs in Python3.13 (https://docs.python.org/3.13/library/os.html#linux-extended-attributes).
+Its read-only Darwin adapter binds listxattr/getxattr from libSystem using the
+Apple sys/xattr.h signatures and XATTR_NOFOLLOW on both calls
+(https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/xattr.h).
+Names remain NUL-delimited bytes, values remain exact bytes including empty,
+NUL and nontext values; symlink-node attributes are distinct from the target.
+Missing native symbols, failed calls, malformed/duplicate names, size changes
+and oversized synthetic collections fail closed. No fallback to empty attributes,
+no skipped attribute and no mutation call is used. An empty result is valid only
+following two successful native enumeration calls reporting zero bytes.
+
+The v3 report adds finite case/stage/error-class/API-availability evidence.
+SafeResult never formats traceback/assertion/exception prose. Comparison records
+start unentered/incomplete before source-state collection, and prior measured
+records survive later setup failures. Temporary setup registers cleanup at once.
+Seven native definitions and seven pure definitions remain required (14 total).
+The five new pure cases exercise actual source_state with missing Linux APIs,
+binary names/values and symlink-node identity through an injected native ABI
+double; refusal on unavailable/failed native calls; verified empty enumeration;
+actual early source-state error reporting without recipe entry; and safe partial
+setup cleanup/evidence with prior records retained. They do not load libSystem,
+run xattr/tar or establish native execution.
+
+At preparation on 2026-11-15, these tests were unexecuted. Authenticated
+[hosted run43682374982](https://github.com/khanjer496-alt/Wafra/actions/runs/43682374982)
+tested source `f3d9ef9068f77a4da03abf46ce64ea64645c37ab`: 14 executed,
+0 failures/errors/skips; six corrected observations canonical, with four
+complete legacy path-set findings retained. This proof is inherited only when
+the fixture/helper/sealer/workflow bytes are unchanged. Real product seal/build,
+signing, device and release outcomes remain unproved. Historical runner
+exceptions and the real archive member/upstream cause remain unknown.
