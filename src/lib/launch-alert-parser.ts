@@ -303,14 +303,18 @@ export const inspectGenericBankEventForReview = (
       /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
     return (debit || event.direction === 'debit') && isIncompletePrincipal(moneySource, span, true);
   });
+  // This amount belongs to an unfinished debit, not the later refund note.
+  // Safe refusal also protects native's informational-credit preview from
+  // displaying the purchase amount as an unstated/different refund amount.
+  if (incompletePrincipal) return null;
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
-  if (incompletePrincipal || (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
-    (event.direction === 'unknown' || event.direction === 'none'))) {
+  if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
+    (event.direction === 'unknown' || event.direction === 'none')) {
     event = { ...event, status: 'informational',
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
   }
-  if (!incompletePrincipal && !cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
+  if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
     (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&
       (event.status === 'unknown' || event.status === 'informational')))) event = informationalCreditReview(source, event);
