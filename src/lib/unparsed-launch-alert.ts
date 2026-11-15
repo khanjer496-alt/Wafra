@@ -138,9 +138,6 @@ const primaryMoney = (
   const eligible = draft.candidates.filter((candidate) => {
     if (candidate.currency !== localCurrency || candidate.minorUnits === null ||
       candidate.exponent === null || !/^[1-9]\d{0,39}$/.test(candidate.minorUnits)) return false;
-    // A legacy Review template must not restore confirmation authority for
-    // the selected debit that the shared original-predicate guard refused.
-    if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return false;
     const before = draft.normalizedText.slice(Math.max(0, candidate.span.start - 48), candidate.span.start);
     const after = draft.normalizedText.slice(candidate.span.end, candidate.span.end + 36);
     const instrumentLast4BeforeCurrency =
@@ -160,6 +157,10 @@ const primaryMoney = (
   });
   if (eligible.length !== 1) return null;
   const candidate = eligible[0];
+  // Keep selection and ambiguity refusal unchanged. A legacy Review template
+  // cannot restore authority for this selected incomplete debit or substitute
+  // another amount after refusing it.
+  if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return null;
   return {
     currency: localCurrency,
     minorUnits: candidate.minorUnits as string,

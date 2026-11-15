@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('node:fs'),vm=require('node:vm');
+const load=require(process.cwd()+'/scripts/universal-test/load-ts.cjs').createLoader();
+load('@/lib/country').setActiveCountry('AE');load('@/lib/markets').setActiveMarket('AE');load('@/lib/markets').setLedgerCurrency('AED',2);
+const sms=load('@/lib/sms-parser'),launch=load('@/lib/launch-alert-parser'),guard=load('@/lib/principal-posting-guards'),draft=load('@/lib/alert-draft');
+const session=launch.createLaunchAlertSession({overrides:{},activeMarket:'AE',pinnedCurrency:'AED',bestEffort:{enabled:true,country:'AE'}});
+const test=fs.readFileSync('scripts/test/repair/android396-first-import-balance.test.cjs','utf8');
+const rows=vm.runInNewContext(test.match(/const INBOX = (\[[\s\S]*?\n\]);/u)[1]);
+const result=rows.slice(0,6).map(([sender,body],i)=>{const inspection=session.inspect(body,sender);return {id:i,body,sender,source:sms.parseSms(body,{}, {sender}),session:session.parse(body,sender,inspection),reason:sms.nonPostingReason(body),money:draft.inspectAlertDraft(body).candidates.map(m=>({minorUnits:m.minorUnits,span:m.span,incomplete:guard.isIncompletePrincipal(body,m.span,true),complete:guard.isCompletedExpensePrincipal(body,m.span)}))};});
+fs.writeFileSync('inbox-diagnosis.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result.map(r=>({id:r.id,source:r.source?.type,session:r.session?.type,reason:r.reason,money:r.money}))));
