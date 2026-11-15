@@ -144,6 +144,41 @@ const knownFile = JSON.parse(knownText);
 const known = knownFile.gaps;
 const rows = buildOracleRows();
 const rowById = new Map(rows.map((row) => [row.id, row]));
+// Mutation controls exercise the policy judge, not the parser oracle. The
+// unmodified payload comes from a real held-credit row; each mutation must
+// lose retention acceptance even when the route names remain unchanged.
+for (const [name, mutate] of [
+  ['generic wrong amount', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['generic wrong currency', e => { e.event.amount.value.currency = 'USD'; }],
+  ['generic debit direction', e => { e.event.direction = 'debit'; }],
+  ['generic missing refusal marker', e => { e.event.issues = []; }],
+  ['native wrong amount', e => { e.nativeResult.notification.amount.minorUnits = '1'; }],
+  ['native wrong currency', e => { e.nativeResult.notification.amount.currency = 'USD'; }],
+  ['native debit direction', e => { e.nativeResult.notification.direction = 'debit'; }],
+  ['native movement style', e => { e.nativeResult.notification.style = 'movement'; }],
+]) test(`retention policy rejects ${name}`, () => {
+  const row = rowById.get('AR-04077');
+  const e = { got: { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.notEqual(judge(row, e).policy, 'held-informational');
+});
+for (const [name, mutate] of [
+  ['borrowed amount', n => { n.amount.value = { currency: 'AED', exponent: 2, minorUnits: '25000' }; }],
+  ['wrong currency', n => { n.amount.value = { currency: 'USD', exponent: 2, minorUnits: '10000' }; }],
+  ['credit direction', n => { n.direction = 'credit'; }],
+  ['missing refusal marker', n => { n.issues = []; }],
+]) test(`debit-note policy rejects ${name}`, () => {
+  const row = rows.find(r => r.case?.debit && r.case.amount === 'before' && judge(r).policy === 'debit-plus-note');
+  assert.ok(row, 'a frozen row with an independently stated AED100 note exists');
+  const note = structuredClone(inspectSupplementaryReversal(row.body, 'ENBD'));
+  mutate(note);
+  const e = { got: { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' },
+    nativeResult: native(row.body), event: inspectGenericBankEventForReview(row.body, 'ENBD'), note };
+  assert.notEqual(judge(row, e).policy, 'debit-plus-note');
+});
+
 const groups = new Map();
 for (const row of rows) {
   const key = `${row.lang} ${row.rule.split(' ')[0]} ${row.expected}`;
