@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 0bf82e2394618fc88f4475447d9306d3a103b39e7ba2272576c20bd8dd7a2186
+// Generated from normal shipping TypeScript. Source SHA-256: 9d069312fff14edfd57f809e810af96a9b2e8608c866c1b416cf3f908d7c35a6
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10298,6 +10298,7 @@ const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const FINITE_AUXILIARY_SCAN = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|[a-z]+n['’]t)\b/giu;
 const PREDICATE_DESCRIPTOR = /\b(?:using|with|via|at|from|to(?!\s+be\b)|towards?|into|between|on|by|for|merchant|cards?|accounts?|wallets?)\b/iu;
 const NEXT_MONEY_FIELD = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|date|time|reference|balance)\b/iu;
+const CLOSED_OWN_CARD_PREFIX = /^\s*your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card\s+(?:(?:ending(?:\s+with)?|number|no\.?)\s+)?(?=[*xX•\d -]*[*xX•\d])[*xX•\d -]{1,32}\s*$/iu;
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
 const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
 const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
@@ -10356,6 +10357,9 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false) {
     const descriptor = predicateDescriptor(ownedTail);
     const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
     const following = [];
+    const unknownFollowing = [];
+    const followingFees = new Set();
+    const followingReceipts = new Set();
     if (descriptor)
         for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
             if (auxiliary.index < descriptor.index + descriptor[0].length)
@@ -10363,11 +10367,29 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false) {
             const before = ownedTail.slice(0, auxiliary.index);
             const rest = ownedTail.slice(auxiliary.index);
             if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
+                /(?:[,;]|\band\b)\s*(?:(?:your|the|an?)\s+)?(?:earlier|previous|prior|other|another)\s+(?:transaction|purchase|payment|transfer|refund|reversal|chargeback)\b/iu.test(before) ||
                 (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest)))
                 continue;
             const finite = rest.slice(0, predicateDescriptor(rest)?.index ?? rest.length).trim();
-            if (DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite))
+            const feeOwner = /^\s*(?:(?:annual|monthly|maintenance|service|card|account|bank)\s+)*(?:fees?|commission|tax|levy)\s*$/iu.test(before);
+            const approvedCardReceipt = /^(?:is|was)\s+approved$/iu.test(finite) &&
+                (/^\s*on\s+your\s+card\s+ending(?:\s+with)?\s+[*xX•\d -]{3,32}\s+at\s+\S/iu.test(before) ||
+                    /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead));
+            const authenticatedPurchase = /^was\s+authenticated$/iu.test(finite) &&
+                /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) && /^\s+via\s+3d\s+secure\b/iu.test(rest.slice(finite.length));
+            if (feeOwner)
+                followingFees.add(finite);
+            if (approvedCardReceipt || authenticatedPurchase)
+                followingReceipts.add(finite);
+            if (followingReceipts.has(finite) || (feeOwner && COMPLETED_MONEY_VERB.test(finite)) ||
+                DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite))
                 following.push(finite);
+            else {
+                const descriptors = [...before.matchAll(new RegExp(PREDICATE_DESCRIPTOR.source, 'giu'))];
+                const nearest = descriptors[descriptors.length - 1];
+                if (nearest && before.slice(nearest.index + nearest[0].length).trim())
+                    unknownFollowing.push(finite);
+            }
             if (following.length)
                 break;
         }
@@ -10413,13 +10435,24 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false) {
     for (const finite of following) {
         if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite))
             continue;
-        if (!completedPredicate(finite, explicitDebitOnly, feePredicate))
+        if (followingReceipts.has(finite))
+            continue;
+        const ownedFee = feePredicate || followingFees.has(finite);
+        if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee))
             return false;
     }
+    if (nounLabel && CLOSED_OWN_CARD_PREFIX.test(lead) && /^\s*purchase\s+at\s+\S/iu.test(ownedTail) &&
+        !following.length && !unknownFollowing.length)
+        return true;
     const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
+    if (COMPLETED_MONEY_WORDS.has(predicate.split(/\s/u)[0]?.toLowerCase()) &&
+        completedPredicate(predicate, explicitDebitOnly, feePredicate))
+        return true;
     if (predicate && !(nounLabel && following.length) && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
         (active === null && (nominal || PREDICATE_START.test(predicate)))))
         return completedPredicate(predicate, explicitDebitOnly, feePredicate);
+    if (active === null && !following.length && unknownFollowing.length)
+        return false;
     return following.length ? true : active;
 }
 function principalClause(source, span) {
@@ -10444,8 +10477,7 @@ function isCompletedExpensePrincipal(source, span) {
         return completion;
     const tail = source.slice(span.end, clause.end);
     if (/\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) &&
-        /^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+\S/iu.test(tail) &&
-        !new RegExp(FINITE_AUXILIARY_SCAN.source, 'iu').test(tail.replace(/^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+/iu, '')))
+        /^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+\S/iu.test(tail))
         return true;
     const arabic = lead.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه');
     return /(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)(?:\s+(?:ال)?(?:مبلغ|بمبلغ|بقيمه|بواسطه))*\s*$/u.test(arabic) &&
@@ -15745,18 +15777,27 @@ const merchantFields = (text, moneySpans) => {
         }
     return resolve(observations);
 };
-const instrumentFields = (text) => {
+const instrumentFields = (text, moneySpans) => {
     const observations = [];
     const pattern = /(?:^|[^\p{L}\p{N}])(card|account|a\/?c|wallet|بطاق[ةه](?:ك)?|حساب(?:ك)?|محفظ[ةه](?:ك)?)\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|last\s*4|رقم|المنتهية|المنتهيه|تنتهي(?:\s+بـ?)?|ينتهي(?:\s+بـ?)?)\s*)?[:#-]?\s*([\dXx*•·-]{2,40}(?:[ \t]+[\dXx*•·-]{1,40}){0,7})(?![\p{L}\p{N}]|[ \t]+[\dXx*•·-])/giu;
     for (const match of text.matchAll(pattern)) {
         const label = match[1].toLocaleLowerCase();
         const kind = /card|بطاق/u.test(label) ? 'card'
             : /wallet|محفظ/u.test(label) ? 'wallet' : 'account';
-        const groups = match[2].split(/[ \t]+/u);
+        let identifier = match[2];
+        let end = match.index + match[0].length;
+        const numericTail = /\d+$/u.exec(identifier);
+        const mask = numericTail ? identifier.slice(0, numericTail.index) : '';
+        if (kind === 'card' && numericTail && /[ \t]$/u.test(mask) &&
+            /^[Xx*•·-]+(?:[ \t]+[Xx*•·-]+)*$/u.test(mask.trim()) && /^[.,٫]\d/u.test(text.slice(end)) &&
+            moneySpans.some(span => span.start === end - numericTail[0].length && span.end > end)) {
+            identifier = mask.trimEnd();
+            end -= match[2].length - identifier.length;
+        }
+        const groups = identifier.split(/[ \t]+/u);
         const validGroups = groups.length === 1 || groups.every((group) => /^[\dXx*•·]{4}$/u.test(group));
-        const last4 = validGroups ? match[2].match(/(\d{4})$/u)?.[1] ?? null : null;
-        const end = match.index + match[0].length;
-        observations.push({ value: { kind, last4 }, span: { start: end - (last4?.length ?? match[2].length), end } });
+        const last4 = validGroups ? identifier.match(/(\d{4})$/u)?.[1] ?? null : null;
+        observations.push({ value: { kind, last4 }, span: { start: end - (last4?.length ?? identifier.length), end } });
     }
     return resolve(observations);
 };
@@ -15773,7 +15814,7 @@ function extractUniversalFields(source, context = {}, moneySpans = []) {
     return {
         merchant: merchantFields(text, moneySpans),
         ...(0, universal_dates_1.extractUniversalDates)(text, context, moneySpans),
-        instrument: instrumentFields(text),
+        instrument: instrumentFields(text, moneySpans),
     };
 }
 },

@@ -163,18 +163,30 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
   return resolve(observations);
 };
 
-const instrumentFields = (text: string): UniversalField<UniversalInstrument> => {
+const instrumentFields = (text: string, moneySpans: readonly SourceSpan[]): UniversalField<UniversalInstrument> => {
   const observations: Observation<UniversalInstrument>[] = [];
   const pattern = /(?:^|[^\p{L}\p{N}])(card|account|a\/?c|wallet|بطاق[ةه](?:ك)?|حساب(?:ك)?|محفظ[ةه](?:ك)?)\s*(?:(?:ending(?:\s+(?:in|with))?|no\.?|number|last\s*4|رقم|المنتهية|المنتهيه|تنتهي(?:\s+بـ?)?|ينتهي(?:\s+بـ?)?)\s*)?[:#-]?\s*([\dXx*•·-]{2,40}(?:[ \t]+[\dXx*•·-]{1,40}){0,7})(?![\p{L}\p{N}]|[ \t]+[\dXx*•·-])/giu;
   for (const match of text.matchAll(pattern)) {
     const label = match[1].toLocaleLowerCase();
     const kind: UniversalInstrument['kind'] = /card|بطاق/u.test(label) ? 'card'
       : /wallet|محفظ/u.test(label) ? 'wallet' : 'account';
-    const groups = match[2].split(/[ \t]+/u);
+    let identifier = match[2];
+    let end = match.index! + match[0].length;
+    // A mask-only card field followed by an explicit fractional price is not
+    // a partial PAN: "Card XXX 250.00 AED purchase" has no visible card tail.
+    // Keep its mask span, but never consume the integer part of that price.
+    const numericTail = /\d+$/u.exec(identifier);
+    const mask = numericTail ? identifier.slice(0, numericTail.index) : '';
+    if (kind === 'card' && numericTail && /[ \t]$/u.test(mask) &&
+      /^[Xx*•·-]+(?:[ \t]+[Xx*•·-]+)*$/u.test(mask.trim()) && /^[.,٫]\d/u.test(text.slice(end)) &&
+      moneySpans.some(span => span.start === end - numericTail[0].length && span.end > end)) {
+      identifier = mask.trimEnd();
+      end -= match[2].length - identifier.length;
+    }
+    const groups = identifier.split(/[ \t]+/u);
     const validGroups = groups.length === 1 || groups.every((group) => /^[\dXx*•·]{4}$/u.test(group));
-    const last4 = validGroups ? match[2].match(/(\d{4})$/u)?.[1] ?? null : null;
-    const end = match.index! + match[0].length;
-    observations.push({ value: { kind, last4 }, span: { start: end - (last4?.length ?? match[2].length), end } });
+    const last4 = validGroups ? identifier.match(/(\d{4})$/u)?.[1] ?? null : null;
+    observations.push({ value: { kind, last4 }, span: { start: end - (last4?.length ?? identifier.length), end } });
   }
   return resolve(observations);
 };
@@ -195,6 +207,6 @@ export function extractUniversalFields(
   return {
     merchant: merchantFields(text, moneySpans),
     ...extractUniversalDates(text, context, moneySpans),
-    instrument: instrumentFields(text),
+    instrument: instrumentFields(text, moneySpans),
   };
 }

@@ -106,6 +106,7 @@ const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
 const FINITE_AUXILIARY_SCAN = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|[a-z]+n['’]t)\b/giu;
 const PREDICATE_DESCRIPTOR = /\b(?:using|with|via|at|from|to(?!\s+be\b)|towards?|into|between|on|by|for|merchant|cards?|accounts?|wallets?)\b/iu;
 const NEXT_MONEY_FIELD = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|date|time|reference|balance)\b/iu;
+const CLOSED_OWN_CARD_PREFIX = /^\s*your\s+(?:(?:credit|debit|covered|prepaid)\s+)?card\s+(?:(?:ending(?:\s+with)?|number|no\.?)\s+)?(?=[*xX•\d -]*[*xX•\d])[*xX•\d -]{1,32}\s*$/iu;
 const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
 const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
 const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
@@ -174,6 +175,9 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
   const descriptor = predicateDescriptor(ownedTail);
   const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
   const following: string[] = [];
+  const unknownFollowing: string[] = [];
+  const followingFees = new Set<string>();
+  const followingReceipts = new Set<string>();
   if (descriptor) for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
     if (auxiliary.index! < descriptor.index + descriptor[0].length) continue;
     const before = ownedTail.slice(0, auxiliary.index);
@@ -181,11 +185,30 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // These predicates own a separate reversal or a conditional contact
     // instruction, not the purchase whose amount was already selected.
     if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
+      /(?:[,;]|\band\b)\s*(?:(?:your|the|an?)\s+)?(?:earlier|previous|prior|other|another)\s+(?:transaction|purchase|payment|transfer|refund|reversal|chargeback)\b/iu.test(before) ||
       (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest))) continue;
     const finite = rest.slice(0, predicateDescriptor(rest)?.index ?? rest.length).trim();
+    const feeOwner = /^\s*(?:(?:annual|monthly|maintenance|service|card|account|bank)\s+)*(?:fees?|commission|tax|levy)\s*$/iu.test(before);
+    const approvedCardReceipt = /^(?:is|was)\s+approved$/iu.test(finite) &&
+      (/^\s*on\s+your\s+card\s+ending(?:\s+with)?\s+[*xX•\d -]{3,32}\s+at\s+\S/iu.test(before) ||
+        /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead));
+    const authenticatedPurchase = /^was\s+authenticated$/iu.test(finite) &&
+      /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) && /^\s+via\s+3d\s+secure\b/iu.test(rest.slice(finite.length));
+    if (feeOwner) followingFees.add(finite);
+    if (approvedCardReceipt || authenticatedPurchase) followingReceipts.add(finite);
     // Bare NOT in a merchant name is not a predicate. Nor does a later
     // refund's verb supply debit authority. Require finite movement/status.
-    if (DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);
+    if (followingReceipts.has(finite) || (feeOwner && COMPLETED_MONEY_VERB.test(finite)) ||
+      DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);
+    else {
+      // Once the descriptor has its own object, a later auxiliary still
+      // belongs to a predicate even when its terminal verb is unfamiliar.
+      // An auxiliary at the start of a merchant name ("at MAY CAFE") alone
+      // is not that predicate and cannot veto the receipt.
+      const descriptors = [...before.matchAll(new RegExp(PREDICATE_DESCRIPTOR.source, 'giu'))];
+      const nearest = descriptors[descriptors.length - 1];
+      if (nearest && before.slice(nearest.index! + nearest[0].length).trim()) unknownFollowing.push(finite);
+    }
     // Inner auxiliaries belong to the same reduction (has not been ...).
     if (following.length) break;
   }
@@ -236,11 +259,23 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // Existing purchase receipts distinguish pending settlement of an
     // authorised charge from a pending purchase/authorisation itself.
     if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite)) continue;
-    if (!completedPredicate(finite, explicitDebitOnly, feePredicate)) return false;
+    if (followingReceipts.has(finite)) continue;
+    const ownedFee = feePredicate || followingFees.has(finite);
+    if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee)) return false;
   }
+  // This is the established terse bank receipt: the own-card field precedes
+  // the selected price, followed by a purchase label and merchant. The label
+  // is not a failed attempt at a verb, nor does a generic offer gain this proof.
+  if (nounLabel && CLOSED_OWN_CARD_PREFIX.test(lead) && /^\s*purchase\s+at\s+\S/iu.test(ownedTail) &&
+    !following.length && !unknownFollowing.length) return true;
   const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
+  // Bare past verbs also govern a price-first receipt ("AED300 debited").
+  // Prove that closed predicate before looking at an unrelated later footer.
+  if (COMPLETED_MONEY_WORDS.has(predicate.split(/\s/u)[0]?.toLowerCase()) &&
+    completedPredicate(predicate, explicitDebitOnly, feePredicate)) return true;
   if (predicate && !(nounLabel && following.length) && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
     (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly, feePredicate);
+  if (active === null && !following.length && unknownFollowing.length) return false;
   return following.length ? true : active;
 }
 
@@ -266,8 +301,7 @@ export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan 
   // than allowing every unknown predicate to relax a separate-note refusal.
   const tail = source.slice(span.end, clause.end);
   if (/\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) &&
-    /^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+\S/iu.test(tail) &&
-    !new RegExp(FINITE_AUXILIARY_SCAN.source, 'iu').test(tail.replace(/^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+/iu, ''))) return true;
+    /^\s*(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s+(?:ending\s+)?[*xX\d -]{4,32}\s+at\s+\S/iu.test(tail)) return true;
   // Existing Arabic completed debit receipts also provide positive evidence.
   // Unknown/negated/modal text never becomes proof merely by being unrefused.
   const arabic = lead.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه');
