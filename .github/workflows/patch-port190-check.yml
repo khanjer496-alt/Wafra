@@ -1,7 +1,7 @@
-name: Parser exact reviewer charge controls
+name: Parser legacy Review completion proof
 on:
   push:
-    branches: [patch/port190-pr7-exact-charge-r14a]
+    branches: [patch/port190-pr7-review-completion-r14b]
 permissions:
   contents: read
 jobs:
@@ -43,16 +43,22 @@ jobs:
       - name: Actual retention and consumer regressions
         if: ${{ !cancelled() }}
         run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+      - name: Existing legacy Review and native history contracts
+        if: ${{ !cancelled() }}
+        run: |
+          node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > legacy-contracts.txt 2>&1
+          node scripts/test/unparsed-launch-alert.test.js >> legacy-contracts.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: exact-charge-controls-${{ github.sha }}
+          name: review-completion-controls-${{ github.sha }}
           path: |
             generation-check.txt
             typecheck.txt
             compile.txt
             closure.txt
             consumers.txt
+            legacy-contracts.txt
             reviewer-harness-cases.json
             reviewer-harness-results.json
             legacy-harness-results.json

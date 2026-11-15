@@ -3,6 +3,7 @@ import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammar
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import { MARKETS } from '@/lib/markets';
 import { isNonCashNotice, nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
+import { isIncompletePrincipal } from '@/lib/principal-posting-guards';
 
 export const UNPARSED_LAUNCH_REVIEW_VERSION = 1;
 
@@ -127,6 +128,7 @@ const candidateContext = (text: string, start: number, end: number): string =>
 const primaryMoney = (
   source: string,
   market: 'AE' | 'SA',
+  expensePredicate = false,
 ): UnparsedLaunchAlertReview['amount'] | null => {
   const localCurrency = market === 'AE' ? 'AED' : 'SAR';
   const aliases: CurrencyAliasMap = market === 'AE'
@@ -136,6 +138,9 @@ const primaryMoney = (
   const eligible = draft.candidates.filter((candidate) => {
     if (candidate.currency !== localCurrency || candidate.minorUnits === null ||
       candidate.exponent === null || !/^[1-9]\d{0,39}$/.test(candidate.minorUnits)) return false;
+    // A legacy Review template must not restore confirmation authority for
+    // the selected debit that the shared original-predicate guard refused.
+    if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return false;
     const before = draft.normalizedText.slice(Math.max(0, candidate.span.start - 48), candidate.span.start);
     const after = draft.normalizedText.slice(candidate.span.end, candidate.span.end + 36);
     const instrumentLast4BeforeCurrency =
@@ -222,7 +227,7 @@ export const inspectUnparsedLaunchSemantics = (
   const debit = forcedDebit || (!refundCredit &&
     (DEBIT.test(bounded) || COMPACT_LEDGER_DEBIT.test(bounded)));
   if (credit === debit) return { outcome: 'refuse', reason: 'unclear-direction' };
-  const amount = primaryMoney(bounded, market);
+  const amount = primaryMoney(bounded, market, debit);
   if (!amount) return { outcome: 'refuse', reason: 'unclear-amount' };
   const direction = credit ? 'credit' as const : 'debit' as const;
   return {
