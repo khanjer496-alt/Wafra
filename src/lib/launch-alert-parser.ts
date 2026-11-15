@@ -28,7 +28,7 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
 import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, hasNegatedPrincipalAssertion, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
-import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
+import { unqualifiedCardCreditCurrencyAliases, extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
@@ -50,17 +50,43 @@ export function inspectSupplementaryReversal(source: string, sender: string): Un
   // borrowed to fill an unstated refund amount.
   // The posting splitter separates commas too. An appositional own amount
   // ("It, AED 100.00, has been refunded") still belongs to its note sentence.
-  // Recover that verbatim sentence for informational facts only; the selected
-  // debit sentence is excluded and the posting proof above is unchanged.
-  const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).filter(sentence =>
-    !sentence.includes(pair.debit) && sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part =>
+  // Recover the verbatim note for informational facts only. Exclude the
+  // selected debit span, not its entire sentence: a comma-joined note still
+  // owns its explicit money. The posting proof above remains unchanged.
+  const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).flatMap(sentence => {
+    const start = sentence.indexOf(pair.debit);
+    if (start < 0) return [sentence];
+    if (sentence.lastIndexOf(pair.debit) !== start) return [];
+    return [sentence.slice(0, start), sentence.slice(start + pair.debit.length)];
+  }).filter(sentence => sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part =>
       part.trim() && mentionsCredit(part) && pair.credit.includes(part.trim())));
-  const event = inspectUniversalBankEvent(notes.length ? notes.join(' ') : pair.credit, { sender, currencyAliases });
+  const noteSource = notes.length ? notes.join(' ') : pair.credit;
+  const event = inspectUniversalBankEvent(noteSource, { sender, currencyAliases });
+  // The generic reader may select a lone fee as its principal. That fee is
+  // still not refund money: retain only this note's transaction/unknown spans,
+  // never an overlapping labelled fee, balance or statement field.
+  // Credit Review can relabel its selected field as a transaction. Recover
+  // the money reader's original roles, admitting only candidates the event
+  // already retained; identifiers/dates/references cannot re-enter here.
+  const context = { sender, currencyAliases };
+  const candidates = inspectUniversalMoneyDraft(noteSource, context).candidates;
+  const retained = event.observations.flatMap(observation => observation.field.spans);
+  const excluded = candidates.filter(candidate => !retained.some(span =>
+    span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+  const merchantSpans = event.merchant.evidence === 'explicit' ? event.merchant.spans : [];
+  const originalMoney = extractUniversalMoney(noteSource, context, merchantSpans, excluded);
+  const information = originalMoney.observations.filter(observation => observation.role !== 'transaction' && observation.role !== 'unknown');
+  const owned = originalMoney.observations.filter(observation => observation.role === 'transaction' || observation.role === 'unknown')
+    .flatMap(observation => observation.field.spans);
+  const excludedInformation = candidates.filter(candidate => !owned.some(span =>
+    span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+  const ownMoney = information.length ? extractUniversalMoney(noteSource, context, merchantSpans, excludedInformation).amount : event.amount;
+  const amount = ownMoney.evidence === 'explicit' ? ownMoney : missingUniversalField<UniversalMoney>();
   return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
-    amount: event.amount.evidence === 'explicit' ? event.amount : missingUniversalField(),
+    amount,
     statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
-    creditLimit: missingUniversalField(), observations: event.amount.evidence === 'explicit'
-      ? [{ role: 'transaction', field: event.amount }] : [],
+    creditLimit: missingUniversalField(), observations: amount.evidence === 'explicit'
+      ? [{ role: 'transaction', field: amount }] : [],
     issues: [...new Set([...event.issues, 'supplementary-reversal-info'])] };
 }
 
