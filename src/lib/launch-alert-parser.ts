@@ -27,7 +27,7 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -299,18 +299,25 @@ export const inspectGenericBankEventForReview = (
     const lead = leads[leads.length - 1] ?? '';
     const tail = moneySource.slice(span.end).split(/(?<=[.!?])\s+|[;؛\n]/u)[0]
       .split(/\b(?:using|with|via|at|from|to|into|on|by|for|merchant|card|account|wallet)\b/iu)[0];
+    // The same nominal receipt label can precede or follow its money field.
+    // A later refund note cannot change that selected amount's ownership.
     const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead + ' ' + tail) ||
-      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead) ||
+      /^\s*(?:purchase|payment|withdrawal|transaction)\b/iu.test(tail);
     return (debit || event.direction === 'debit') && isIncompletePrincipal(moneySource, span, true);
   });
+  // This amount belongs to an unfinished debit, not the later refund note.
+  // Safe refusal also protects native's informational-credit preview from
+  // displaying the purchase amount as an unstated/different refund amount.
+  if (incompletePrincipal && !event.amount.spans.every(span => hasSelectedCreditPredicate(moneySource, span))) return null;
   // Unknown direction is not completion evidence. Keep the original token
   // hold on Review authority without inventing an incoming/outgoing direction.
-  if (incompletePrincipal || (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
-    (event.direction === 'unknown' || event.direction === 'none'))) {
+  if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
+    (event.direction === 'unknown' || event.direction === 'none')) {
     event = { ...event, status: 'informational',
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
   }
-  if (!incompletePrincipal && !cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
+  if (!cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
     (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
     (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&
       (event.status === 'unknown' || event.status === 'informational')))) event = informationalCreditReview(source, event);
