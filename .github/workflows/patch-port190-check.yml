@@ -1,0 +1,57 @@
+name: Parser receipt closure iteration
+on:
+  push:
+    branches: [patch/port190-pr7-closed-receipt-r10m]
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Exact source generation and compile
+        run: |
+          node scripts/generate-ios-background-parser.cjs > generation.txt 2>&1
+          node scripts/generate-ios-background-parser.cjs --check >> generation.txt 2>&1
+          bash scripts/test/build.sh > compile.txt 2>&1
+          node node_modules/typescript/bin/tsc --noEmit > typecheck.txt 2>&1
+      - name: Completion and native field assertions
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/selected-predicate-ownership.test.cjs > predicate.txt 2>&1
+      - name: Three-path original and boundary fixtures
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
+      - name: All existing parser controls
+        if: ${{ !cancelled() }}
+        run: node --require ./.github/patch-probe/principal-diagnostics.cjs scripts/test/parser.test.js > parser.txt 2>&1
+      - name: Existing native history controls
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > native.txt 2>&1
+      - name: Actual incomplete and supplementary history controls
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs > retention.txt 2>&1
+      - name: Existing bank-corpus controls
+        if: ${{ !cancelled() }}
+        run: node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: receipt-iteration-${{ github.sha }}
+          path: |
+            generation.txt
+            compile.txt
+            typecheck.txt
+            predicate.txt
+            closure.txt
+            parser.txt
+            principal-diagnostics.json
+            native.txt
+            retention.txt
+            bank-corpus.txt
+          retention-days: 7
