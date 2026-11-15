@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -10117,7 +10117,10 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
     // cannot authorize a fallback. The legacy receipt grammar now also needs
     // the same affirmative selected predicate, even when the whole reader
     // confuses a later completed credit or note with the already stated debit.
-    return !wholeRequired || (whole?.kind === 'transaction' && whole.type === 'expense' &&
+    const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(original.raw.slice(0, original.spans[0].start));
+    const explicitNominal = !whole && nominal && hasCompletedExpensePredicate(original.raw, original.spans[0]) &&
+      hasCompletedExpensePredicate(full.raw, { start: offset + original.spans[0].start, end: offset + original.spans[0].end });
+    return !wholeRequired || explicitNominal || (whole?.kind === 'transaction' && whole.type === 'expense' &&
       parsed.amountFils === whole.amountFils && parsed.currency === whole.currency);
   };
   const legacy = splitDebitBesideCredit(message);
@@ -10163,6 +10166,7 @@ function parseSmsCore(
   const withoutRequests = withoutUncompletedRequestNotes(message);
   if (withoutRequests !== message) {
     const movement = parseSms(withoutRequests, overrides, options);
+    if (movement?.kind === 'transaction' && movement.type === 'expense' && hasUnsettledPrincipal(message, movement, true)) return null;
     return movement ? { ...movement, raw: message } : null;
   }
   let parsed = parseSmsInner(message, overrides, options);
