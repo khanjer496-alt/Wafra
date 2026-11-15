@@ -9898,5 +9898,3701 @@
     "requireDebitParity": true,
     "requireSupplementaryNote": true,
     "noteMinorUnits": null
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:0:0",
+    "body": "It is false that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:0:1",
+    "body": "It is false that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:0:2",
+    "body": "It is false that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:0:3",
+    "body": "It is false that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:1:0",
+    "body": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:1:1",
+    "body": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:1:2",
+    "body": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:1:3",
+    "body": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:2:0",
+    "body": "It is not true that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:2:1",
+    "body": "It is not true that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:2:2",
+    "body": "It is not true that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:2:3",
+    "body": "It is not true that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:3:0",
+    "body": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:3:1",
+    "body": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:3:2",
+    "body": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:3:3",
+    "body": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:4:0",
+    "body": "No amount of AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:4:1",
+    "body": "No amount of AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:4:2",
+    "body": "No amount of AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:4:3",
+    "body": "No amount of AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:5:0",
+    "body": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:5:1",
+    "body": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:5:2",
+    "body": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:0:5:3",
+    "body": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:0:0",
+    "body": "ENBD: It is false that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:0:1",
+    "body": "ENBD: It is false that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:0:2",
+    "body": "ENBD: It is false that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:0:3",
+    "body": "ENBD: It is false that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:1:0",
+    "body": "ENBD: It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:1:1",
+    "body": "ENBD: It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:1:2",
+    "body": "ENBD: It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:1:3",
+    "body": "ENBD: It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:2:0",
+    "body": "ENBD: It is not true that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:2:1",
+    "body": "ENBD: It is not true that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:2:2",
+    "body": "ENBD: It is not true that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:2:3",
+    "body": "ENBD: It is not true that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:3:0",
+    "body": "ENBD: Not a single purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:3:1",
+    "body": "ENBD: Not a single purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:3:2",
+    "body": "ENBD: Not a single purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:3:3",
+    "body": "ENBD: Not a single purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:4:0",
+    "body": "ENBD: No amount of AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:4:1",
+    "body": "ENBD: No amount of AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:4:2",
+    "body": "ENBD: No amount of AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:4:3",
+    "body": "ENBD: No amount of AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:5:0",
+    "body": "ENBD: No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:5:1",
+    "body": "ENBD: No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:5:2",
+    "body": "ENBD: No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:1:5:3",
+    "body": "ENBD: No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:0:0",
+    "body": "ENBD | It is false that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:0:1",
+    "body": "ENBD | It is false that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:0:2",
+    "body": "ENBD | It is false that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:0:3",
+    "body": "ENBD | It is false that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:1:0",
+    "body": "ENBD | It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:1:1",
+    "body": "ENBD | It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:1:2",
+    "body": "ENBD | It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:1:3",
+    "body": "ENBD | It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:2:0",
+    "body": "ENBD | It is not true that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:2:1",
+    "body": "ENBD | It is not true that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:2:2",
+    "body": "ENBD | It is not true that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:2:3",
+    "body": "ENBD | It is not true that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:3:0",
+    "body": "ENBD | Not a single purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:3:1",
+    "body": "ENBD | Not a single purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:3:2",
+    "body": "ENBD | Not a single purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:3:3",
+    "body": "ENBD | Not a single purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:4:0",
+    "body": "ENBD | No amount of AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:4:1",
+    "body": "ENBD | No amount of AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:4:2",
+    "body": "ENBD | No amount of AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:4:3",
+    "body": "ENBD | No amount of AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:5:0",
+    "body": "ENBD | No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:5:1",
+    "body": "ENBD | No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:5:2",
+    "body": "ENBD | No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:2:5:3",
+    "body": "ENBD | No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:0:0",
+    "body": "Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:0:1",
+    "body": "Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:0:2",
+    "body": "Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:0:3",
+    "body": "Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:1:0",
+    "body": "Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:1:1",
+    "body": "Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:1:2",
+    "body": "Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:1:3",
+    "body": "Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:2:0",
+    "body": "Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:2:1",
+    "body": "Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:2:2",
+    "body": "Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:2:3",
+    "body": "Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:3:0",
+    "body": "Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:3:1",
+    "body": "Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:3:2",
+    "body": "Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:3:3",
+    "body": "Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:4:0",
+    "body": "Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:4:1",
+    "body": "Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:4:2",
+    "body": "Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:4:3",
+    "body": "Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:5:0",
+    "body": "Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:5:1",
+    "body": "Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:5:2",
+    "body": "Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:3:5:3",
+    "body": "Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:0:0",
+    "body": "ENBD: Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:0:1",
+    "body": "ENBD: Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:0:2",
+    "body": "ENBD: Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:0:3",
+    "body": "ENBD: Dear Customer, It is false that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "It is false that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:1:0",
+    "body": "ENBD: Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:1:1",
+    "body": "ENBD: Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:1:2",
+    "body": "ENBD: Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:1:3",
+    "body": "ENBD: Dear Customer, It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "It was untrue that a purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:2:0",
+    "body": "ENBD: Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:2:1",
+    "body": "ENBD: Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:2:2",
+    "body": "ENBD: Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:2:3",
+    "body": "ENBD: Dear Customer, It is not true that your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "It is not true that your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:3:0",
+    "body": "ENBD: Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:3:1",
+    "body": "ENBD: Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:3:2",
+    "body": "ENBD: Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:3:3",
+    "body": "ENBD: Dear Customer, Not a single purchase of AED 250.00 using card ending 1234 at NOON was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "Not a single purchase of AED 250.00 using card ending 1234 at NOON was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:4:0",
+    "body": "ENBD: Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:4:1",
+    "body": "ENBD: Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:4:2",
+    "body": "ENBD: Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:4:3",
+    "body": "ENBD: Dear Customer, No amount of AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "No amount of AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:5:0",
+    "body": "ENBD: Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:5:1",
+    "body": "ENBD: Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:5:2",
+    "body": "ENBD: Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:negative:4:5:3",
+    "body": "ENBD: Dear Customer, No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "none",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "No purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "explicit denial"
+    },
+    "incompleteExpense": true,
+    "requireReview": false
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:0:0",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:0:1",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:0:2",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:0:3",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:1:0",
+    "body": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:1:1",
+    "body": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:1:2",
+    "body": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:1:3",
+    "body": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:2:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ". ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:2:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": ", ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:2:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "; ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:0:2:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "",
+      "join": "\n",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:0:0",
+    "body": "ENBD: Your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:0:1",
+    "body": "ENBD: Your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:0:2",
+    "body": "ENBD: Your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:0:3",
+    "body": "ENBD: Your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:1:0",
+    "body": "ENBD: A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:1:1",
+    "body": "ENBD: A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:1:2",
+    "body": "ENBD: A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:1:3",
+    "body": "ENBD: A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:2:0",
+    "body": "ENBD: AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ". ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:2:1",
+    "body": "ENBD: AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": ", ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:2:2",
+    "body": "ENBD: AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "; ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:1:2:3",
+    "body": "ENBD: AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: ",
+      "join": "\n",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:0:0",
+    "body": "ENBD | Your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:0:1",
+    "body": "ENBD | Your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:0:2",
+    "body": "ENBD | Your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:0:3",
+    "body": "ENBD | Your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:1:0",
+    "body": "ENBD | A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:1:1",
+    "body": "ENBD | A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:1:2",
+    "body": "ENBD | A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:1:3",
+    "body": "ENBD | A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:2:0",
+    "body": "ENBD | AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ". ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:2:1",
+    "body": "ENBD | AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": ", ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:2:2",
+    "body": "ENBD | AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "; ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:2:2:3",
+    "body": "ENBD | AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD | ",
+      "join": "\n",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:0:0",
+    "body": "Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:0:1",
+    "body": "Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:0:2",
+    "body": "Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:0:3",
+    "body": "Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:1:0",
+    "body": "Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:1:1",
+    "body": "Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:1:2",
+    "body": "Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:1:3",
+    "body": "Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:2:0",
+    "body": "Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ". ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:2:1",
+    "body": "Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": ", ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:2:2",
+    "body": "Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "; ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:3:2:3",
+    "body": "Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "Dear Customer, ",
+      "join": "\n",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:0:0",
+    "body": "ENBD: Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:0:1",
+    "body": "ENBD: Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:0:2",
+    "body": "ENBD: Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:0:3",
+    "body": "ENBD: Dear Customer, Your card ending 1234 was charged AED 250.00 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "Your card ending 1234 was charged AED 250.00 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:1:0",
+    "body": "ENBD: Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:1:1",
+    "body": "ENBD: Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:1:2",
+    "body": "ENBD: Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:1:3",
+    "body": "ENBD: Dear Customer, A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "A purchase of AED 250.00 at MAY-NOT CAFE using card ending 1234 was made",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:2:0",
+    "body": "ENBD: Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ". ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:2:1",
+    "body": "ENBD: Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON, Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": ", ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:2:2",
+    "body": "ENBD: Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON; Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "; ",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-prefix-punctuation:affirmative:4:2:3",
+    "body": "ENBD: Dear Customer, AED 250.00 was debited from your card ending 1234 at NOON\nYour refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-prefix-separator-polarity-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "metamorphic": {
+      "prefix": "ENBD: Dear Customer, ",
+      "join": "\n",
+      "principal": "AED 250.00 was debited from your card ending 1234 at NOON",
+      "meaning": "completed debit with independently stated AED40 note"
+    },
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000
+  },
+  {
+    "id": "owned-note-punctuation:0:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request, AED 40.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request, AED 40.00, is pending.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:0:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request, AED 40.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request, AED 40.00, is pending.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:0:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request, AED 40.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request, AED 40.00, is pending.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:0:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request, AED 40.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request, AED 40.00, is pending.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:1:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund, AED 100.00, has been credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund, AED 100.00, has been credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:1:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund, AED 100.00, has been credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund, AED 100.00, has been credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:1:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund, AED 100.00, has been credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund, AED 100.00, has been credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:1:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund, AED 100.00, has been credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund, AED 100.00, has been credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:2:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request is pending.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:2:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request is pending.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:2:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request is pending.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:2:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request is pending.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:3:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund of the same, 100.00 AED, will be credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:3:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund of the same, 100.00 AED, will be credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:3:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund of the same, 100.00 AED, will be credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:3:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 10000,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund of the same, 100.00 AED, will be credited to your card.",
+      "ownNoteMinorUnits": 10000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:4:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request, AED 250.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request, AED 250.00, is pending.",
+      "ownNoteMinorUnits": 25000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:4:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request, AED 250.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request, AED 250.00, is pending.",
+      "ownNoteMinorUnits": 25000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:4:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request, AED 250.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request, AED 250.00, is pending.",
+      "ownNoteMinorUnits": 25000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:4:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request, AED 250.00, is pending.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 25000,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request, AED 250.00, is pending.",
+      "ownNoteMinorUnits": 25000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:5:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:5:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:5:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:5:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:6:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:6:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:6:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:6:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request is pending. A refund processing fee of AED 5.00 applies.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": null,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request is pending. A refund processing fee of AED 5.00 applies.",
+      "ownNoteMinorUnits": null,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:7:0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM. Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": ". ",
+      "note": "Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:7:1",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM, Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": ", ",
+      "note": "Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:7:2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM; Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": "; ",
+      "note": "Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
+  },
+  {
+    "id": "owned-note-punctuation:7:3",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM\nYour refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+    "sender": "ENBD",
+    "origin": "bounded-independent-note-own-money-join-split-property-set",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "sourceOmitObservedAt": true,
+    "requireDebitParity": true,
+    "requireSupplementaryNote": true,
+    "noteMinorUnits": 4000,
+    "metamorphic": {
+      "join": "\n",
+      "note": "Your refund request, AED 40.00, is pending. Your available balance is AED 5000.00.",
+      "ownNoteMinorUnits": 4000,
+      "meaning": "completed debit; only explicitly stated note amount, never balance/fee/principal inference"
+    }
   }
 ]
