@@ -1,0 +1,46 @@
+name: Exact-head complete trace retention replay
+on:
+  push:
+    branches: [patch/trace-audit-final-0dd4fe17]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Bind unchanged shipping source and completed trace
+        run: |
+          test "$(git rev-parse HEAD^)" = 0dd4fe17b6d84b36705b806016b9d29b6c9f0e97
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+          mkdir -p out
+          gh run download 43701767636 --repo khanjer496-alt/Wafra --name repaired-parse-trace-5fb6e99415ac99475601b8f4e5ad9399c8594ec2 --dir "$RUNNER_TEMP/completed-trace"
+          cp "$RUNNER_TEMP/completed-trace/delta.json" out/delta.json
+          cp "$RUNNER_TEMP/completed-trace/suite-results.jsonl" out/suite-results.jsonl
+          cp "$RUNNER_TEMP/completed-trace/binding.json" out/trace-binding.json
+          node -e 'const fs=require("fs"),r=fs.readFileSync("out/suite-results.jsonl","utf8").trim().split("\n").map(JSON.parse),b=JSON.parse(fs.readFileSync("out/trace-binding.json"));if(r.length!==98||r.some(x=>!x.passed||x.signal||x.error)||b.shippingHead!=="0dd4fe17b6d84b36705b806016b9d29b6c9f0e97")throw Error("unbound or incomplete original trace")'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Verify committed generated outputs
+        run: |
+          node scripts/generate-ios-background-parser.cjs --check > out/generation-check.txt 2>&1
+          node -e 'const fs=require("fs"),b=JSON.parse(fs.readFileSync("out/trace-binding.json")),m=JSON.parse(fs.readFileSync("modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json"));if(b.meta.sourceHash!==m.sourceHash||b.meta.bundleSha256!==m.bundleSha256)throw Error("trace/source fingerprint mismatch")'
+      - name: Replay all affected keys with required blank-sender contract
+        run: |
+          node .github/patch-probe/trace-retention-audit.cjs out/delta.json out > out/money-retention-result.txt
+          git diff --exit-code HEAD^ -- src modules scripts/test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-retention-replay-${{ github.sha }}
+          path: out/
+          retention-days: 7
