@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: eddf86254034ca1466670b8aefea4503e8ae3755658e6650bc3157c5e438c4b9
+// Generated from normal shipping TypeScript. Source SHA-256: 6fa213218a4aff73e6a0c249bf136b8f1a35a8be3bfc0e45db24adb8a667d640
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -8742,13 +8742,33 @@ function inspectSupplementaryReversal(source, sender) {
     const market = (0, markets_1.detectLaunchMarketFromSender)(sender);
     const currencyAliases = market === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
         : market === 'SA' ? { 'ريال': ['SAR'] } : {};
-    const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).filter(sentence => !sentence.includes(pair.debit) && sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part => part.trim() && (0, credit_settlement_guards_1.mentionsCredit)(part) && pair.credit.includes(part.trim())));
-    const event = (0, universal_parser_1.inspectUniversalBankEvent)(notes.length ? notes.join(' ') : pair.credit, { sender, currencyAliases });
+    const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).flatMap(sentence => {
+        const start = sentence.indexOf(pair.debit);
+        if (start < 0)
+            return [sentence];
+        if (sentence.lastIndexOf(pair.debit) !== start)
+            return [];
+        return [sentence.slice(0, start), sentence.slice(start + pair.debit.length)];
+    }).filter(sentence => sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part => part.trim() && (0, credit_settlement_guards_1.mentionsCredit)(part) && pair.credit.includes(part.trim())));
+    const noteSource = notes.length ? notes.join(' ') : pair.credit;
+    const event = (0, universal_parser_1.inspectUniversalBankEvent)(noteSource, { sender, currencyAliases });
+    const context = { sender, currencyAliases };
+    const candidates = (0, universal_money_1.inspectUniversalMoneyDraft)(noteSource, context).candidates;
+    const retained = event.observations.flatMap(observation => observation.field.spans);
+    const excluded = candidates.filter(candidate => !retained.some(span => span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+    const merchantSpans = event.merchant.evidence === 'explicit' ? event.merchant.spans : [];
+    const originalMoney = (0, universal_money_1.extractUniversalMoney)(noteSource, context, merchantSpans, excluded);
+    const information = originalMoney.observations.filter(observation => observation.role !== 'transaction' && observation.role !== 'unknown');
+    const owned = originalMoney.observations.filter(observation => observation.role === 'transaction' || observation.role === 'unknown')
+        .flatMap(observation => observation.field.spans);
+    const excludedInformation = candidates.filter(candidate => !owned.some(span => span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+    const ownMoney = information.length ? (0, universal_money_1.extractUniversalMoney)(noteSource, context, merchantSpans, excludedInformation).amount : event.amount;
+    const amount = ownMoney.evidence === 'explicit' ? ownMoney : (0, universal_types_1.missingUniversalField)();
     return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
-        amount: event.amount.evidence === 'explicit' ? event.amount : (0, universal_types_1.missingUniversalField)(),
+        amount,
         statementTotal: (0, universal_types_1.missingUniversalField)(), minimumDue: (0, universal_types_1.missingUniversalField)(), balance: (0, universal_types_1.missingUniversalField)(),
-        creditLimit: (0, universal_types_1.missingUniversalField)(), observations: event.amount.evidence === 'explicit'
-            ? [{ role: 'transaction', field: event.amount }] : [],
+        creditLimit: (0, universal_types_1.missingUniversalField)(), observations: amount.evidence === 'explicit'
+            ? [{ role: 'transaction', field: amount }] : [],
         issues: [...new Set([...event.issues, 'supplementary-reversal-info'])] };
 }
 exports.REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|\bQR\s{0,3}\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}\s{0,3}QR\b|\b(?:COP|PEN)\s?\d|(?<![\p{L}\p{N}/.])S\/\.?\s?\d|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]|دينار\s+(?:كويتي|بحريني)|ريال\s+(?:قطري|عماني)/iu;
@@ -10219,8 +10239,10 @@ exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
 exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.hasNegatedPrincipalAssertion = hasNegatedPrincipalAssertion;
+exports.hasIncompletePrincipalReference = hasIncompletePrincipalReference;
 exports.hasSelectedCreditPredicate = hasSelectedCreditPredicate;
 exports.isCompletedExpensePrincipal = isCompletedExpensePrincipal;
+exports.hasCompletedExpensePredicate = hasCompletedExpensePredicate;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
@@ -10414,14 +10436,13 @@ function hasNegatedPrincipalAssertion(source, span) {
     if (!clause || !span)
         return false;
     let lead = source.slice(clause.start, span.start);
-    if (!/\b(?:no|false|untrue|not)\b/iu.test(lead))
+    if (!/\b(?:no|false|untrue|not|(?:isn|wasn)['’]t)\b/iu.test(lead))
         return false;
     for (const entity of namedMerchantSpans(lead).reverse())
         lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
-    const proposition = /^\s*it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+/iu.exec(lead);
-    if (proposition) {
-        const assertion = lead.slice(proposition[0].length);
-        if (!/[,;]|\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(assertion) === null)
+    for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
+        const assertion = lead.slice(proposition.index + proposition[0].length);
+        if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null)
             return true;
     }
     const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
@@ -10640,36 +10661,49 @@ function completedPredicate(fragment, debitOnly = false, feePredicate = false, d
     return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
         (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
+function hasIncompletePrincipalReference(tail) {
+    const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
+    if (!references.length)
+        return false;
+    const entities = namedMerchantSpans(tail);
+    return references.some(reference => {
+        if (entities.some(entity => reference.index >= entity.start && reference.index < entity.end))
+            return false;
+        const assertion = reference[1].slice(0, predicateDescriptor(reference[1])?.index ?? reference[1].length).trim();
+        const directions = new Set();
+        const completed = completedPredicate(assertion, false, false, directions);
+        return !completed && !(directions.size === 1 && directions.has('credit'));
+    });
+}
 function selectedPredicateCompletion(lead, tail, debitOnly = false, directions) {
     tail = withoutPriceAnnotations(tail);
     if (hasNegatedPrincipalAssertion(lead + tail, { start: lead.length, end: lead.length }))
         return false;
     const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
-    for (const reference of ownedTail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)) {
-        const assertion = reference[1].slice(0, predicateDescriptor(reference[1])?.index ?? reference[1].length).trim();
-        if (!completedPredicate(assertion))
-            return false;
-    }
+    const separateNote = /(?:[,;\n]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit(?!\s+(?:card|limit)\b))\b/iu.exec(ownedTail);
+    const predicateTail = ownedTail.slice(0, separateNote?.index ?? ownedTail.length);
+    if (hasIncompletePrincipalReference(tail))
+        return false;
     let entities;
     for (const qualifier of ownedTail.matchAll(/,\s*([a-z]+ly)\s*$/giu)) {
         if (!COMPLETION_ADVERBS.has(qualifier[1].toLowerCase()))
             return false;
     }
-    const descriptor = predicateDescriptor(ownedTail);
-    const predicate = ownedTail.slice(0, descriptor?.index ?? ownedTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
+    const descriptor = predicateDescriptor(predicateTail);
+    const predicate = predicateTail.slice(0, descriptor?.index ?? predicateTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
     const following = [];
     const unknownFollowing = [];
     const followingFees = new Set();
     const followingReceipts = new Set();
     if (descriptor)
-        for (const auxiliary of ownedTail.matchAll(FINITE_AUXILIARY_SCAN)) {
+        for (const auxiliary of predicateTail.matchAll(FINITE_AUXILIARY_SCAN)) {
             if (auxiliary.index < descriptor.index + descriptor[0].length)
                 continue;
-            entities ?? (entities = namedMerchantSpans(ownedTail));
+            entities ?? (entities = namedMerchantSpans(predicateTail));
             if (entities.some(entity => auxiliary.index >= entity.start && auxiliary.index < entity.end))
                 continue;
-            const before = ownedTail.slice(0, auxiliary.index);
-            const rest = ownedTail.slice(auxiliary.index);
+            const before = predicateTail.slice(0, auxiliary.index);
+            const rest = predicateTail.slice(auxiliary.index);
             if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
                 /(?:[,;]|\band\b)\s*(?:(?:your|the|an?)\s+)?(?:earlier|previous|prior|other|another)\s+(?:transaction|purchase|payment|transfer|refund|reversal|chargeback)\b/iu.test(before) ||
                 (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest)))
@@ -10754,7 +10788,7 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false, directions) 
     if (active === null && !following.length && unknownFollowing.length)
         return false;
     if (active === null && !following.length && (nominal || nounLabel) && (!predicate || nounLabel)) {
-        const receipt = closedNominalReceipt(lead, ownedTail, firstStatedPrice(tail) !== null);
+        const receipt = closedNominalReceipt(lead, predicateTail, firstStatedPrice(tail) !== null);
         if (!receipt.closed)
             return false;
         return receipt.complete ? true : null;
@@ -10799,12 +10833,19 @@ function isCompletedExpensePrincipal(source, span) {
     return /(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)(?:\s+(?:ال)?(?:مبلغ|بمبلغ|بقيمه|بواسطه))*\s*$/u.test(arabic) &&
         !/(?<![ء-ي])(?:لم|لن|لما|اذا|لو|سوف|قد|يمكن|سيتم)(?![ء-ي])/u.test(arabic);
 }
+function hasCompletedExpensePredicate(source, span) {
+    const clause = principalClause(source, span);
+    return !!clause && !!span && !isIncompletePrincipal(source, span, true) &&
+        selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), true) === true;
+}
 function isIncompletePrincipal(source, span, expensePredicate = false) {
     const clause = principalClause(source, span);
     if (!clause || !span)
         return false;
     const { start, end } = clause;
     if (hasNegatedPrincipalAssertion(source, span))
+        return true;
+    if (expensePredicate && hasIncompletePrincipalReference(source.slice(span.end)))
         return true;
     if (source[end] === '?' && COMPLETED_MONEY_VERB.test(source.slice(start, end).trim().split(/\s/u).pop() ?? ''))
         return true;
@@ -15547,7 +15588,10 @@ function completedDebitBesideCredit(message, options) {
         if (!full || offset < 0 || full.raw.lastIndexOf(original.raw) !== offset || !original.spans[0] ||
             !(0, principal_posting_guards_1.isCompletedExpensePrincipal)(full.raw, { start: offset + original.spans[0].start, end: offset + original.spans[0].end }))
             return false;
-        return !wholeRequired || (whole?.kind === 'transaction' && whole.type === 'expense' &&
+        const nominal = /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(original.raw.slice(0, original.spans[0].start));
+        const explicitNominal = !whole && nominal && (0, principal_posting_guards_1.hasCompletedExpensePredicate)(original.raw, original.spans[0]) &&
+            (0, principal_posting_guards_1.hasCompletedExpensePredicate)(full.raw, { start: offset + original.spans[0].start, end: offset + original.spans[0].end });
+        return !wholeRequired || explicitNominal || (whole?.kind === 'transaction' && whole.type === 'expense' &&
             parsed.amountFils === whole.amountFils && parsed.currency === whole.currency);
     };
     const legacy = (0, credit_settlement_guards_1.completedDebitBesideCredit)(message);
@@ -15586,6 +15630,11 @@ function parseSmsCore(message, overrides, options) {
     const withoutRequests = withoutUncompletedRequestNotes(message);
     if (withoutRequests !== message) {
         const movement = parseSms(withoutRequests, overrides, options);
+        if (movement?.kind === 'transaction' && movement.type === 'expense') {
+            const original = readPrincipalContext(message, movement);
+            if (original?.spans[0] && (0, principal_posting_guards_1.hasIncompletePrincipalReference)(original.raw.slice(original.spans[0].end)))
+                return null;
+        }
         return movement ? { ...movement, raw: message } : null;
     }
     let parsed = parseSmsInner(message, overrides, options);
