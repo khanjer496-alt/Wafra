@@ -86,6 +86,39 @@ for (const body of KEEP_DEBIT) test(`request never reverses a debit: ${body}`, (
   assert.equal(got.session, 'expense:25000', JSON.stringify(got));
   assert.equal(got.native, 'debit:25000', JSON.stringify(got));
 });
+const FALSE_COMMA_DEBIT = [
+  'It is false that a fee applied, AED 250.00 was debited from your card ending 1234 at NOON.',
+  'It is false that the store was closed, AED 250.00 was debited from your card ending 1234 at NOON.',
+  'ENBD: It is false that a fee applied, AED 250.00 was debited from your card ending 1234 at NOON.',
+  'Dear Customer, It is false that a fee applied, AED 250.00 was debited from your card ending 1234 at NOON.',
+  'It is false that a fee applied; AED 250.00 was debited from your card ending 1234 at NOON.',
+  'It is false that a fee applied, but AED 250.00 was debited from your card ending 1234 at NOON.',
+  'It is false that a fee applied. AED 250.00 was debited from your card ending 1234 at NOON.',
+];
+for (const body of FALSE_COMMA_DEBIT) test(`completed debit follows a separate false claim: ${body}`, () => {
+  const got = paths(body);
+  const start = body.indexOf('AED 250.00');
+  const span = { start, end: start + 'AED 250.00'.length };
+  const guard = load('@/lib/principal-posting-guards');
+  assert.equal(guard.hasNegatedPrincipalAssertion(body, span), false, body);
+  assert.equal(guard.isCompletedExpensePrincipal(body, span), true, body);
+  assert.equal(got.sms, 'expense:25000', JSON.stringify(got));
+  assert.equal(got.session, 'expense:25000', JSON.stringify(got));
+  assert.equal(got.native, 'debit:25000', JSON.stringify(got));
+});
+for (const body of [
+  'ENBD: It is false that your card ending 1234, was charged AED 250.00 at NOON.',
+  'It is false that your card ending 1234 (USD 68.00), was charged AED 250.00 at NOON.',
+]) test(`instrument comma stays inside the false charge: ${body}`, () => {
+  const got = paths(body);
+  const start = body.indexOf('AED 250.00');
+  const span = { start, end: start + 'AED 250.00'.length };
+  const guard = load('@/lib/principal-posting-guards');
+  assert.equal(guard.hasNegatedPrincipalAssertion(body, span), true, body);
+  assert.equal(got.sms, 'none', JSON.stringify(got));
+  assert.equal(got.session, 'none', JSON.stringify(got));
+  assert.ok(!/^(?:credit|debit):/.test(got.native), JSON.stringify(got));
+});
 for (const body of KEEP_CREDIT) test(`settled credit preserved: ${body}`, () => {
   const got = paths(body);
   const retained = got.sms === 'none' && got.session === 'none' && got.review?.status === 'informational' && !got.review.confirmable && got.nativeRoute === 'review';

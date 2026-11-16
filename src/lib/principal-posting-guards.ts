@@ -213,6 +213,19 @@ function namedMerchantSpans(text: string): PrincipalSpan[] {
   return spans;
 }
 
+const CHARGE_FINITE = /\b(?:was|were|is|are|has|have|had|being)\b(?:\s+(?:not|never|been|being)){0,3}\s+(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b|\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
+
+/** A comma ends a false proposition unless this charge's own verb is still before its amount. */
+function commaEndsFalseProposition(assertion: string): boolean {
+  const text = withoutPriceAnnotations(assertion);
+  let last = -1;
+  for (let i = 0; i < text.length; i++) {
+    const mark = text[i];
+    if (mark === ';' || (mark === ',' && !(/\d/u.test(text[i - 1] ?? '') && /\d/u.test(text[i + 1] ?? '')))) last = i;
+  }
+  return last >= 0 && !CHARGE_FINITE.test(text.slice(last + 1));
+}
+
 /** Negation belongs to the selected monetary subject, never a merchant word. */
 export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan | undefined): boolean {
   const clause = principalClause(source, span);
@@ -230,7 +243,8 @@ export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan
   for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
     const assertion = lead.slice(proposition.index! + proposition[0].length);
     // Instrument punctuation and same-movement FX annotations do not create
-    // a new assertion. Only an independently stated transition/price does.
+    // a new assertion. A comma with no charge verb before the amount does.
+    if (commaEndsFalseProposition(assertion)) continue;
     if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null) return true;
   }
   const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);

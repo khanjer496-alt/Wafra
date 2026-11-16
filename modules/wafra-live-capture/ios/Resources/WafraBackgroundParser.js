@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 6fa213218a4aff73e6a0c249bf136b8f1a35a8be3bfc0e45db24adb8a667d640
+// Generated from normal shipping TypeScript. Source SHA-256: a13191ac42fa76c2cd5b249f5bb74e155f5a34bc8a9c93435c1e3e7c4d7a10f2
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10431,6 +10431,17 @@ function namedMerchantSpans(text) {
     }
     return spans;
 }
+const CHARGE_FINITE = /\b(?:was|were|is|are|has|have|had|being)\b(?:\s+(?:not|never|been|being)){0,3}\s+(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b|\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
+function commaEndsFalseProposition(assertion) {
+    const text = withoutPriceAnnotations(assertion);
+    let last = -1;
+    for (let i = 0; i < text.length; i++) {
+        const mark = text[i];
+        if (mark === ';' || (mark === ',' && !(/\d/u.test(text[i - 1] ?? '') && /\d/u.test(text[i + 1] ?? ''))))
+            last = i;
+    }
+    return last >= 0 && !CHARGE_FINITE.test(text.slice(last + 1));
+}
 function hasNegatedPrincipalAssertion(source, span) {
     const clause = principalClause(source, span);
     if (!clause || !span)
@@ -10442,6 +10453,8 @@ function hasNegatedPrincipalAssertion(source, span) {
         lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
     for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
         const assertion = lead.slice(proposition.index + proposition[0].length);
+        if (commaEndsFalseProposition(assertion))
+            continue;
         if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null)
             return true;
     }
