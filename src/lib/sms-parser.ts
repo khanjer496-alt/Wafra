@@ -10137,6 +10137,7 @@ export function parseSms(
   options?: ParseOptions,
 ): ParsedSms | null {
   // Evaluate the original BEFORE any core parser can mask merchants or notes.
+  if (hasIncompletePrincipalReference(message)) return null;
   const holdCredit = hasUnsettledCreditToken(message);
   if (hasClickLinkPrompt(message) || hasLinkCallToAction(message)) return null;
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
