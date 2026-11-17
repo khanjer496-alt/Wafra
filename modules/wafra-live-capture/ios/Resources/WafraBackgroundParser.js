@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 7a9f60059e2a72630e53738263c89c1c54e6a59aeffc7ccdec7db128f2397338
+// Generated from normal shipping TypeScript. Source SHA-256: 05979a67e7bc09a9518f7fed692bac33ef04418ffe7f562e13a432e5892dd628
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1790,7 +1790,9 @@ const parseSemanticReview = (source, market, fallback, decision, legacy) => {
         return null;
     const trustedInstitution = 'market' in decision.review;
     const evidence = (0, bank_alert_semantic_output_1.reviewEvidence)(decision.review, trustedInstitution);
-    const meaning = (0, bank_alert_semantic_rules_1.automaticMeaning)(source, decision.review, legacy);
+    const classificationSource = decision.review.direction === 'debit'
+        ? (0, unparsed_launch_alert_1.launchPrincipalClassificationSource)(source, market) : source;
+    const meaning = (0, bank_alert_semantic_rules_1.automaticMeaning)(classificationSource, decision.review, legacy);
     if (!meaning) {
         if (!legacy && trustedInstitution && fallback.outcome === 'review') {
             return {
@@ -10238,6 +10240,7 @@ exports.blankWordLinkPrompts = blankWordLinkPrompts;
 exports.hasExplicitPersonalMoneyClaim = hasExplicitPersonalMoneyClaim;
 exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
+exports.selectedPrincipalClassificationSource = selectedPrincipalClassificationSource;
 exports.hasNegatedPrincipalAssertion = hasNegatedPrincipalAssertion;
 exports.hasIncompletePrincipalReference = hasIncompletePrincipalReference;
 exports.hasSelectedCreditPredicate = hasSelectedCreditPredicate;
@@ -10432,10 +10435,10 @@ function namedMerchantSpans(text) {
     return spans;
 }
 function closedServiceChargeAssessment(previous) {
-    const assessment = /\bservice\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))\b/iu.exec(previous);
+    const assessment = /^(?:(?:a|the|your)\s+)?service\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))$/iu.exec(previous);
     return assessment !== null && completedPredicate(assessment[1], false, true);
 }
-function hasIndependentCompletedCommaPrincipal(assertion, tail) {
+function independentCompletedCommaPrincipalStart(assertion, tail) {
     for (const comma of assertion.matchAll(/,/gu)) {
         const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
         const closedServiceCharge = closedServiceChargeAssessment(previous);
@@ -10450,16 +10453,31 @@ function hasIndependentCompletedCommaPrincipal(assertion, tail) {
         const predicate = tail.slice(0, predicateDescriptor(tail)?.index ?? tail.length).trim();
         const nominal = /^(?:(?:a|an|the|your|this)\s+)?(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*)*$/iu.test(next);
         if ((!next || nominal) && completedPredicate(predicate, !nominal))
-            return true;
+            return comma.index + 1;
         for (const verb of next.matchAll(ACTIVE_MONEY_VERB)) {
             const before = next.slice(0, verb.index);
             const finite = PREDICATE_AUXILIARY.exec(before);
             if (finite && CLOSED_OWN_CARD_PREFIX.test(before.slice(0, finite.index)) &&
                 completedPredicate(next.slice(finite.index), true))
-                return true;
+                return comma.index + 1;
         }
     }
-    return false;
+    return null;
+}
+function selectedPrincipalClassificationSource(source, span) {
+    const clause = principalClause(source, span);
+    if (!clause || !isCompletedExpensePrincipal(source, span))
+        return source;
+    const lead = source.slice(clause.start, span.start);
+    for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
+        const assertionStart = proposition.index + proposition[0].length;
+        const start = independentCompletedCommaPrincipalStart(lead.slice(assertionStart), source.slice(span.end, clause.end));
+        if (start !== null) {
+            const boundary = clause.start + assertionStart + start;
+            return ' '.repeat(boundary) + source.slice(boundary);
+        }
+    }
+    return source;
 }
 function hasNegatedPrincipalAssertion(source, span) {
     const clause = principalClause(source, span);
@@ -10472,7 +10490,7 @@ function hasNegatedPrincipalAssertion(source, span) {
         lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
     for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
         const assertion = lead.slice(proposition.index + proposition[0].length);
-        if (hasIndependentCompletedCommaPrincipal(assertion, source.slice(span.end, clause.end)))
+        if (independentCompletedCommaPrincipalStart(assertion, source.slice(span.end, clause.end)) !== null)
             continue;
         if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null)
             return true;
@@ -10752,7 +10770,7 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false, directions) 
             if (approvedCardReceipt || authenticatedPurchase)
                 followingReceipts.add(finite);
             if (followingReceipts.has(finite) || (feeOwner && COMPLETED_MONEY_VERB.test(finite)) ||
-                DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite))
+                COMPLETED_MONEY_VERB.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite))
                 following.push(finite);
             else {
                 const descriptors = [...before.matchAll(new RegExp(PREDICATE_DESCRIPTOR.source, 'giu'))];
@@ -10810,6 +10828,9 @@ function selectedPredicateCompletion(lead, tail, debitOnly = false, directions) 
             continue;
         if (followingReceipts.has(finite))
             continue;
+        if (debitOnly && /\b(?:reversed|refunded|returned|credited)\b/iu.test(finite) &&
+            !EXPLICIT_DEBIT_OUTCOME.test(finite))
+            return false;
         const ownedFee = feePredicate || followingFees.has(finite);
         if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee, directions))
             return false;
@@ -17098,7 +17119,7 @@ exports.missingUniversalField = missingUniversalField;
 "unparsed-launch-alert":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.inspectUnparsedLaunchAlert = exports.inspectUnparsedLaunchSemantics = exports.hasAffirmativeSettledMovement = exports.normalizeUnparsedLaunchTemplate = exports.UNPARSED_LAUNCH_REVIEW_VERSION = void 0;
+exports.inspectUnparsedLaunchAlert = exports.inspectUnparsedLaunchSemantics = exports.launchPrincipalClassificationSource = exports.hasAffirmativeSettledMovement = exports.normalizeUnparsedLaunchTemplate = exports.UNPARSED_LAUNCH_REVIEW_VERSION = void 0;
 const alert_draft_1 = require("@/lib/alert-draft");
 const markets_1 = require("@/lib/markets");
 const sms_parser_1 = require("@/lib/sms-parser");
@@ -17189,11 +17210,22 @@ const primaryMoney = (source, market, expensePredicate = false) => {
     if (expensePredicate && (0, principal_posting_guards_1.isIncompletePrincipal)(source, candidate.span, true))
         return null;
     return {
-        currency: localCurrency,
-        minorUnits: candidate.minorUnits,
-        exponent: candidate.exponent,
+        amount: {
+            currency: localCurrency,
+            minorUnits: candidate.minorUnits,
+            exponent: candidate.exponent,
+        },
+        classificationSource: expensePredicate
+            ? (0, principal_posting_guards_1.selectedPrincipalClassificationSource)(draft.normalizedText, candidate.span)
+            : draft.normalizedText,
     };
 };
+const launchPrincipalClassificationSource = (source, market) => {
+    if (!/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/iu.test(source))
+        return source;
+    return primaryMoney(source, market, true)?.classificationSource ?? source;
+};
+exports.launchPrincipalClassificationSource = launchPrincipalClassificationSource;
 const instrumentFrom = (source) => {
     const card = source.match(/(?:\b(?:card(?:\s+no)?|cc)\b|بطاق[هة])[^.\n]{0,32}?(?:x{2,}|\*{2,}|ending(?:\s+with)?|last\s*4)?\s*(\d{4})\b/iu);
     if (card)
@@ -17250,18 +17282,18 @@ const inspectUnparsedLaunchSemantics = (source, market, allowFutureFooter = fals
         (DEBIT.test(bounded) || COMPACT_LEDGER_DEBIT.test(bounded)));
     if (credit === debit)
         return { outcome: 'refuse', reason: 'unclear-direction' };
-    const amount = primaryMoney(bounded, market, debit);
-    if (!amount)
+    const selected = primaryMoney(bounded, market, debit);
+    if (!selected)
         return { outcome: 'refuse', reason: 'unclear-amount' };
     const direction = credit ? 'credit' : 'debit';
     return {
         outcome: 'review',
         review: {
-            amount,
+            amount: selected.amount,
             direction,
-            family: familyFrom(bounded, direction),
+            family: familyFrom(selected.classificationSource, direction),
             rail: null,
-            instrument: instrumentFrom(bounded),
+            instrument: instrumentFrom(selected.classificationSource),
         },
     };
 };
