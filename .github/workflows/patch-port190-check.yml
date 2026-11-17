@@ -1,0 +1,21 @@
+name: Generic refund four-caller provenance
+on:
+  push:
+    branches: [patch/port190-pr7-generic-caller-provenance]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - run: node .github/patch-probe/generic-caller-probe.cjs generic-caller-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generic-caller-provenance
+          path: generic-caller-results.json
