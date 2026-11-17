@@ -218,12 +218,12 @@ function namedMerchantSpans(text: string): PrincipalSpan[] {
  * the low-level fee completion, not a posting guard.
  */
 function closedServiceChargeAssessment(previous: string): boolean {
-  const assessment = /\bservice\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))\b/iu.exec(previous);
+  const assessment = /^(?:(?:a|the|your)\s+)?service\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))$/iu.exec(previous);
   return assessment !== null && completedPredicate(assessment[1], false, true);
 }
 
 /** A new completed money subject can follow an independently finite assertion. */
-function hasIndependentCompletedCommaPrincipal(assertion: string, tail: string): boolean {
+function independentCompletedCommaPrincipalStart(assertion: string, tail: string): number | null {
   for (const comma of assertion.matchAll(/,/gu)) {
     const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
     // An instrument, movement, or generic charge still belongs to the denied
@@ -237,17 +237,35 @@ function hasIndependentCompletedCommaPrincipal(assertion: string, tail: string):
     const next = assertion.slice(comma.index! + 1).trim();
     const predicate = tail.slice(0, predicateDescriptor(tail)?.index ?? tail.length).trim();
     const nominal = /^(?:(?:a|an|the|your|this)\s+)?(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*)*$/iu.test(next);
-    if ((!next || nominal) && completedPredicate(predicate, !nominal)) return true;
+    if ((!next || nominal) && completedPredicate(predicate, !nominal)) return comma.index! + 1;
     // A post-comma verb alone continues the earlier instrument. A new own-card
     // subject plus its explicit predicate instead owns the selected price.
     for (const verb of next.matchAll(ACTIVE_MONEY_VERB)) {
       const before = next.slice(0, verb.index);
       const finite = PREDICATE_AUXILIARY.exec(before);
       if (finite && CLOSED_OWN_CARD_PREFIX.test(before.slice(0, finite.index)) &&
-        completedPredicate(next.slice(finite.index), true)) return true;
+        completedPredicate(next.slice(finite.index), true)) return comma.index! + 1;
     }
   }
-  return false;
+  return null;
+}
+
+/** Classification alone may exclude a separately owned false lead-in. Original
+ * source still supplies every refusal/trust check. Keep offsets and evidence.
+ */
+export function selectedPrincipalClassificationSource(source: string, span: PrincipalSpan): string {
+  const clause = principalClause(source, span);
+  if (!clause || !isCompletedExpensePrincipal(source, span)) return source;
+  const lead = source.slice(clause.start, span.start);
+  for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
+    const assertionStart = proposition.index! + proposition[0].length;
+    const start = independentCompletedCommaPrincipalStart(lead.slice(assertionStart), source.slice(span.end, clause.end));
+    if (start !== null) {
+      const boundary = clause.start + assertionStart + start;
+      return ' '.repeat(boundary) + source.slice(boundary);
+    }
+  }
+  return source;
 }
 
 /** Negation belongs to the selected monetary subject, never a merchant word. */
@@ -268,7 +286,7 @@ export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan
     const assertion = lead.slice(proposition.index! + proposition[0].length);
     // Instrument punctuation and same-movement FX annotations do not create
     // a new assertion. Only a separately completed comma assertion does.
-    if (hasIndependentCompletedCommaPrincipal(assertion, source.slice(span.end, clause.end))) continue;
+    if (independentCompletedCommaPrincipalStart(assertion, source.slice(span.end, clause.end)) !== null) continue;
     if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null) return true;
   }
   const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
