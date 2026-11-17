@@ -23,6 +23,8 @@ const cases = [
   ['false-fee-comma', `It is false that a fee applied, ${debit}`, 'expense'],
   ['false-service-charge-comma', `It is false that a service charge was applied, ${debit}`, 'expense'],
   ['false-service-charge-assessed', `It is false that a service charge was assessed, ${debit}`, 'expense'],
+  ['denied-card-after-subordinate-fee', 'It is false that after a service charge was applied your card ending 1234 was charged, AED 250.00 was debited at NOON.', 'none'],
+  ['denied-card-before-subordinate-fee', 'It is false that your card ending 1234 was charged after a service charge was applied, AED 250.00 was debited at NOON.', 'none'],
   ['open-service-charge-apposition', `It is false that a service charge, ${debit}`, 'none'],
   ['denied-generic-charge-apposition', `It is false that the charge, ${debit}`, 'none'],
   ['denied-generic-charge-applied', `It is false that the charge was applied, ${debit}`, 'none'],
