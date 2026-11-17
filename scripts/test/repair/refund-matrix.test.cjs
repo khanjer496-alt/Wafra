@@ -143,6 +143,21 @@ function judge(row, evidence) {
   // interpreting its reversal note as income. The original oracle is kept
   // pinned; this explicit product-policy overlay does not rewrite its rows.
   const c = row.case;
+  // Reviewed semantic split; the frozen D8 generator and every body stay pinned.
+  // Same-money reference or returning the identified purchase binds its amount.
+  // A merchant crediting "your refund" or bare "The refund" leaves amount unknown.
+  const linkedSelectedReturn = row.lang === 'EN' && row.rule.startsWith('D8') && c?.debit &&
+    (['it', 'this amount', 'a refund of the same'].includes(c.subject) ||
+      (c.subject === 'merchant' && !c.verb.startsWith('processed')));
+  if (linkedSelectedReturn) {
+    if (got.parseSms !== 'income 25000' || got.session !== 'income 25000' ||
+      nativeResult.route !== 'review' || nativeResult.notification?.style !== 'review' ||
+      nativeResult.notification.direction !== 'credit' || !exactAed(nativeResult.notification.amount, '25000')) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'owned-return contract mismatch', ...got, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'owned-selected-return' };
+  }
   const debitWithCreditNote = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ||
     (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) ||
       (row.lang === 'EN' && c.subject === 'merchant') || c.trail === 'reversed'));

@@ -1,0 +1,32 @@
+name: Owned refund split bounded controls
+on:
+  push:
+    branches: [patch/port190-pr7-owned-refund-split-controls]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/generate-ios-background-parser.cjs > generation.txt 2>&1
+      - run: node scripts/generate-ios-background-parser.cjs --check >> generation.txt 2>&1
+      - run: node .github/patch-probe/owned-split-probe.cjs > controlled-summary.txt 2>&1
+      - name: Bounded source capture history and preserved safety assertions
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/review-round2-safety.test.cjs scripts/test/repair/selected-retention-cohorts.test.cjs scripts/test/repair/same-fee-reversal.test.cjs > controlled-tests.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owned-split-controlled
+          path: |
+            generation.txt
+            controlled-summary.txt
+            controlled-tests.txt
+            owned-split-results.json
