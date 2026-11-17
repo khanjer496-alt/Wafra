@@ -1,0 +1,23 @@
+[
+  {
+    "id": "reviewer-0dd-control:09",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your card.",
+    "sender": "ENBD",
+    "kind": "generic",
+    "noteMinorUnits": null
+  },
+  {
+    "id": "reviewer-0dd-control:10",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.",
+    "sender": "ENBD",
+    "kind": "linked",
+    "noteMinorUnits": null
+  },
+  {
+    "id": "note-apposition-money:4",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your card.",
+    "sender": "ENBD",
+    "kind": "linked",
+    "noteMinorUnits": null
+  }
+]

@@ -460,16 +460,55 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
     (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
 
+/** Preserve all bytes/offsets except an earlier, money-free pending status
+ * which cannot own a later positively completed independent principal. */
+export function withoutUnrelatedPendingTransactionStatus(source: string): string {
+  if (!/pending/iu.test(source)) return source;
+  const status = /(?:^|[.!?;\n])\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?(pending\s+(?:approval|authori[sz]ation|confirmation|processing))\b/giu;
+  let scoped = source;
+  for (const match of source.matchAll(status)) {
+    const after = match.index! + match[0].length;
+    const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
+    if (!boundary || !/^[.!;]/u.test(boundary[0])) continue;
+    // Sentence order alone does not distinguish a pending transaction from
+    // the completed wording which follows. Require an affirmative statement
+    // that this status belongs to a separate movement; negated, conditional
+    // or uncertain separation supplies no ownership proof.
+    const ownership = source.slice(after, after + boundary.index);
+    if (!/^\s+is\s+(?:separate|unrelated)\s*$/iu.test(ownership)) continue;
+    const nextStart = after + boundary.index + boundary[0].length;
+    // Earlier money might itself own the status; never replace that ambiguity
+    // with a later receipt or a limit. Unknown completion is never proof.
+    if (firstStatedPrice(source.slice(0, nextStart)) !== null) continue;
+    for (const money of source.slice(nextStart).matchAll(STATED_PRICE)) {
+      const start = nextStart + money.index!;
+      const prefixEnd = start + money[0].length;
+      const end = prefixEnd + /^[\d.,]*/u.exec(source.slice(prefixEnd))![0].length;
+      if (!isCompletedExpensePrincipal(source, { start, end })) continue;
+      const at = after - match[1].length;
+      scoped = scoped.slice(0, at) + ' '.repeat(match[1].length) + scoped.slice(after);
+      break;
+    }
+  }
+  return scoped;
+}
+
 /** Explicit selected status, including a continuation after a typed limit. */
-export function hasSelectedPendingTransaction(source: string): boolean {
+function hasPendingTransactionStatus(source: string): boolean {
   if (!/pending/iu.test(source)) return false;
-  // A named refund or conditional contact footer is not this status.
   return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+}
+
+/** At the full-message boundary only, a money-free earlier status may be unrelated. */
+export function hasSelectedPendingTransaction(source: string): boolean {
+  return hasPendingTransactionStatus(withoutUnrelatedPendingTransactionStatus(source));
 }
 
 /** Explicit references back to this movement retain their original assertion. */
 export function hasIncompletePrincipalReference(tail: string): boolean {
-  if (hasSelectedPendingTransaction(tail)) return true;
+  // This is the selected principal's suffix: its money is outside the tail.
+  // A later receipt cannot prove that this status belongs to another movement.
+  if (hasPendingTransactionStatus(tail)) return true;
   const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
   if (!references.length) return false;
   const entities = namedMerchantSpans(tail);
