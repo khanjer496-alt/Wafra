@@ -1,7 +1,7 @@
 name: Pending selected movement distinct transaction regression
 on:
   push:
-    branches: [patch/port190-pr7-pending-distinct-green]
+    branches: [patch/port190-pr7-pending-distinct-diagnostic]
 permissions:
   contents: read
 jobs:
@@ -15,12 +15,10 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - run: npm ci
-      - run: node scripts/generate-ios-background-parser.cjs > generation.txt 2>&1
-      - run: node --test --test-concurrency=1 scripts/test/repair/principal-assertion-boundaries.test.cjs scripts/test/repair/generic-refund-caller-ownership.test.cjs > controls.txt 2>&1
+      - run: node diagnostic.cjs > diagnostic.txt 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pending-distinct-controls
+          name: pending-distinct-diagnostic
           path: |
-            generation.txt
-            controls.txt
+            diagnostic.txt
