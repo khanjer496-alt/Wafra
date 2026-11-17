@@ -20,6 +20,18 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'modules/wafra-live-capture/i
 const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
+  ["question-separate", "Your transaction pending approval is separate? AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["question-unrelated", "Your transaction pending approval is unrelated? AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["question-spaced", "Your transaction pending approval is separate ? AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["question-compound", "Your transaction pending approval is separate?! AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["question-arabic", "Your transaction pending approval is separate\u061f AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["uncertain-punctuation", "Your transaction pending approval is separate, perhaps. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["conditional-separation", "Your transaction pending approval is separate if approved. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["negated-unrelated", "Your transaction pending approval is not unrelated! AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["asserted-exclamation", "Your transaction pending approval is separate! AED 250.00 was debited from your card ending 1234 at NOON.", "expense"],
+  ["asserted-unrelated", "Your transaction pending approval is unrelated. AED 250.00 was debited from your card ending 1234 at NOON.", "expense"],
+  ["asserted-semicolon", "Your transaction pending approval is separate; AED 250.00 was debited from your card ending 1234 at NOON.", "expense"],
+
   ["ambiguous-pending-before", "Your transaction pending approval. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
   ["negated-separation-before", "Your transaction pending approval is not separate. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
   ["uncertain-separation-before", "Your transaction pending approval may be separate. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
@@ -201,4 +213,13 @@ test("pending requires affirmative separation before independent completion", ()
     assert.equal(guards.withoutUnrelatedPendingTransactionStatus(body), body);
     assert.equal(guards.hasSelectedPendingTransaction(body), true);
   }
+});
+
+test("only asserted separation punctuation can stand aside", () => {
+ for (const [id, body, expected] of [["question-separate", "Your transaction pending approval is separate? AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["question-unrelated", "Your transaction pending approval is unrelated? AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["question-spaced", "Your transaction pending approval is separate ? AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["question-compound", "Your transaction pending approval is separate?! AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["question-arabic", "Your transaction pending approval is separate\u061f AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["uncertain-punctuation", "Your transaction pending approval is separate, perhaps. AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["conditional-separation", "Your transaction pending approval is separate if approved. AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["negated-unrelated", "Your transaction pending approval is not unrelated! AED 250.00 was debited from your card ending 1234 at NOON.", "none"], ["asserted-exclamation", "Your transaction pending approval is separate! AED 250.00 was debited from your card ending 1234 at NOON.", "expense"], ["asserted-unrelated", "Your transaction pending approval is unrelated. AED 250.00 was debited from your card ending 1234 at NOON.", "expense"], ["asserted-semicolon", "Your transaction pending approval is separate; AED 250.00 was debited from your card ending 1234 at NOON.", "expense"]]) {
+  const scoped=guards.withoutUnrelatedPendingTransactionStatus(body);
+  assert.equal(scoped.length,body.length,id);
+  assert.equal(scoped===body,expected==='none',id);
+  assert.equal(guards.hasSelectedPendingTransaction(body),expected==='none',id);
+ }
 });
