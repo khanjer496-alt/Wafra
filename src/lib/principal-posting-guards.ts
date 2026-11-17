@@ -470,6 +470,12 @@ export function withoutUnrelatedPendingTransactionStatus(source: string): string
     const after = match.index! + match[0].length;
     const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
     if (!boundary) continue;
+    // Sentence order alone does not distinguish a pending transaction from
+    // the completed wording which follows. Require an affirmative statement
+    // that this status belongs to a separate movement; negated, conditional
+    // or uncertain separation supplies no ownership proof.
+    const ownership = source.slice(after, after + boundary.index);
+    if (!/^\s+is\s+(?:separate|unrelated)\s*$/iu.test(ownership)) continue;
     const nextStart = after + boundary.index + boundary[0].length;
     // Earlier money might itself own the status; never replace that ambiguity
     // with a later receipt or a limit. Unknown completion is never proof.

@@ -20,6 +20,10 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'modules/wafra-live-capture/i
 const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
+  ["ambiguous-pending-before", "Your transaction pending approval. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["negated-separation-before", "Your transaction pending approval is not separate. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+  ["uncertain-separation-before", "Your transaction pending approval may be separate. AED 250.00 was debited from your card ending 1234 at NOON.", "none"],
+
   ['selected-pending-before-second-debit', 'AED 42.10 was debited from your card ending 1234 at SHOP. Transaction pending approval. AED 250.00 was debited from your card ending 5678 at NOON.', 'none'],
   ['unrelated-pending-before', `Your transaction pending approval is separate. ${debit}`, 'expense'],
   ['unrelated-pending-before-semicolon', `Your payment pending processing is separate; ${debit}`, 'expense'],
@@ -190,4 +194,11 @@ test('pending reference tail cannot be disowned by a second debit', () => {
   assert.equal(guards.hasSelectedPendingTransaction(body), true);
   assert.equal(guards.hasIncompletePrincipalReference(body.slice(end)), true);
   assert.equal(guards.isCompletedExpensePrincipal(body, { start, end }), false);
+});
+
+test("pending requires affirmative separation before independent completion", () => {
+  for (const body of ["Your transaction pending approval. AED 250.00 was debited from your card ending 1234 at NOON.", "Your transaction pending approval is not separate. AED 250.00 was debited from your card ending 1234 at NOON.", "Your transaction pending approval may be separate. AED 250.00 was debited from your card ending 1234 at NOON."]) {
+    assert.equal(guards.withoutUnrelatedPendingTransactionStatus(body), body);
+    assert.equal(guards.hasSelectedPendingTransaction(body), true);
+  }
 });
