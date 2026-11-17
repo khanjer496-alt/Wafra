@@ -699,7 +699,7 @@ for (const [kind, body] of [
   ['debit-then-the-refund-credited', `${sideNoteDebit} The refund has been credited to your card.`],
 ]) {
   test(`refund hardening posts/same-movement-refund-${kind}`, () => {
-    if (kind === 'debit-then-the-refund-credited' || kind === 'charged-then-a-refund-of-the-same') { assertDebitAndNote(body, 25000); return; }
+    if (kind === 'debit-then-the-refund-credited') { assertDebitAndNote(body, 25000); return; }
     const session = reader('AE');
     assert.equal(nonPostingReason(body), null);
     for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }),
@@ -707,6 +707,13 @@ for (const [kind, body] of [
       assertCreditOrReview(parsed, body, 25000);
     }
     const native = confirmationNative(body);
+    if (kind === 'charged-then-a-refund-of-the-same') {
+      for (const parsed of [parseSms(body), parseSms(body, {}, { sender: 'ENBD', observedAt: at }), session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at)]) {
+        assert.equal(parsed?.type, 'income'); assert.equal(parsed.amountFils, 25000); assert.equal(parsed.currency, 'AED');
+      }
+      assert.equal(native.route, 'review'); assert.equal(native.notification.style, 'review'); assert.equal(native.notification.direction, 'credit');
+      assert.deepEqual(native.notification.amount, { currency: 'AED', minorUnits: '25000', exponent: 2 });
+    }
     assert.notEqual(native.route === 'parsed' ? native.notification.direction : null, 'debit', 'native never books the refund as a purchase');
   });
 }

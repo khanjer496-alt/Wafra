@@ -1,0 +1,822 @@
+[
+  {
+    "id": "7d85a850bcb7930a380bb69f83df7ce50732c45c31430d1f196b8f9465c31108",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "5699202b49f95a418fdf8136a72e31156e1f54d6c48a100bc9c5d2a34fc00964",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "ebdfc9a962b72b825b966bef80284d213a3118f0e1af294f0d9f5903c49420ef",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "8e2da17c8142556869cf40ff5c9bd2ea312ab0b052c2247bd736c57b96788d83",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been reversed to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "265618644ddf613b827246dec823ad46dee5a8fbc2483bea422f47c524d718f9",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been reversed to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "724e2ae2ec53e1853f47f726ba3dc663146a7fe88ea6aa682e1bfae3c27ba5af",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was refunded to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "c71603a6a181a35e6f1649627afb732b8f4d4ccf7da475163abf4fbf49386614",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was refunded to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "5ddfc6849e7cfca254f172cfd3a1590f78dcd9850bb95d3da679f93b86926d6f",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "d0ba7116227d18b5eeb7d0240ec43907ccb52b8b735de67243fdd1dccea1f568",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "49d8b4ba4aa3b1ad7603e4a788a2a6690201d175bc9e9861c61a4d33e388ea30",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was reversed to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "38bbf0ce66858f9fa384684d216199909985f470410bc2dbf35acfceb94aa554",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was reversed to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "a2cee3cce4bc0ba472276b5cbd2ffced5c33b545fff95a4b223cc8dd6cdafe88",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has reversed the purchase to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "7f9d8c6835e0bddec5c025872fcd9aff34dad1fddd3375007a8d164d20a0dac5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has reversed the purchase to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "ca1a88000ad4f29692bd3a9516c7b3ccdcbcbb032bd5fbf6b709a1519fdd1c69",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM reversed the purchase to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "f58729cef18146db5821db4dc77e0ac25865b629154bb6317b4df21fc583adba",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM reversed the purchase to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "a0872910cbf136107d9f5052d4e9363e7ca7cad3eeb896910c22eda44fd37aa6",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been refunded to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "68da8633e11f527473e1fa1de02b083ea11dd3d0eea9c137c1a1b95b261655f9",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been refunded to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "4186b52dd32688a86f00fa48ec6b49d0991602685d2655c6fcacaf1620e6e3b0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "726d7a1b08effc9692ba5a29484d67036ddf6284bf680af041940fe6f87c0575",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "7d54f36bccbce04c476e85426d94e7ff05673eafb447079c91eeee20810daf7b",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been reversed to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "acfcd4e394b832e1752dc8e839ee39f7e7c3411a76bf4ab9f683c95c9396d998",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been reversed to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "71bbe2e6b67248e93e9785f9c1d273ff8f261d9ad7b0878c995cc621793bb1e5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was refunded to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "239f222535438388a77365ee6b7a6c67d4332d349ad06851b76bc1fd99484ff5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was refunded to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "1e22107e58dcc6a4564e388ec4b90c922353b0a8054b7616550a7b519ac7db69",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "f707168d35a22a7c02b3066ecb8a6e7c569b39749480bb1a5e0eb61a3bb6e6a5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "d119c7b3fb6f39b0368420f6d4ce2044b28b810236e195d095321f6c6f9a8f48",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was reversed to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "8b0fdee9e74067507429a454f2ba2f41766f4512193291c8cfc380c190e2ec78",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was reversed to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "b6b2cdc43ac7c6f8b8f638cf9fee00300be8a00158ff79a19b6d532b94e5feec",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been credited to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "05cc915f96e91c766e524340aef72ec44a49f14dccd9d925db5eeb84b50d59cf",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been credited to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "f3fb748816f798562295aa444b3c1986d064ccf895dfd2a62040a6f589df7d19",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "7799a03a7e9db37b0ee79cea2fcb5d9978048631d0896cddc69b593a8153bcdf",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "a90f7c91f2470a55ca4e3c856f2f7a790fc36606d2debee7868f53c898964f1a",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was credited to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "1c5f9424b9d20c9bf1c58e02aee652b23575aec29b0851d9de0c1acc00492af2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was credited to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "da7c0c6898881044d035f9dc7367488553e242bf77d69ed0d9a4e40cad2d1ea7",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "44f2122da88e6f0047e08bdeeb113bdb10d0acee2ce8d09ca20a5a4b42269e27",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "ecf504b98aace31be8ebd75849e5fe612396a2cd33a455f198286b58b11aae1c",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "d560c29d2f497095a211f464695bd1b55f45ad8915b5fd31221b9d514c6e917e",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "20e4f0e15605f8b19559e9eddec8e4b68416c1327e4ae642e4abe242667292dc",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "50b40abad6c0f8b5d2493a31c1849a848a2452f23cdf058011552ffc9b46412c",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was credited to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "73011af57e7f3cc02c247a14c44d03f17c506c4896776520853778b5f092675c",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was credited to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "f658bab81711316afe24a52168516392dd50447ea8239999156980404c95e2e2",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was returned to your account.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "6125ce2f5da67200d03247537ee66e66f5f1d5dfddf76db9bf9f1e02066afe92",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was returned to your card.",
+    "sender": "ENBD",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "d5020dab5dfd1b8fe230f5ce8725621998eea25df3966aaeb5f0d0e9c974ede5",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your card.",
+    "sender": "",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "generic-refund-unknown-amount"
+  },
+  {
+    "id": "50efab0151660a596f725ba150c32b49a54482e8692c260400d6d7ab60cb4adb",
+    "body": "Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.",
+    "sender": "",
+    "groups": [
+      "U06_same_money_note_direction_policy"
+    ],
+    "contexts": [
+      "AE"
+    ],
+    "returnOwnership": "explicit-selected-return"
+  },
+  {
+    "id": "473e863f4e97ae8edc0e2f300233ded6b037b9d90a1169de21a36f32937120c4",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 Transaction pending approval.",
+    "sender": "",
+    "groups": [
+      "U02_pending_approval_posted"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "f686a4933179f704d6816d36200ce02d9c35a7dc1c6178dbbbaed78e100f6d62",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 Transaction pending approval.",
+    "sender": "ADCB",
+    "groups": [
+      "U02_pending_approval_posted"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "0039aad3e30598d9f30c823f15ae434e9d1ac785dc517fcb6029c64962705977",
+    "body": "ألغيت عملية الشراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "cbdd948cbfeaa5a614061d4cca43b50dffad631ca62c3fa689525382ca788580",
+    "body": "إلغاء عملية\nشراء\nمبلغ: 50 ر.س\nلدى: نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "ff20ec80bf5db3bf3a6ebd32f5f755ff93c658012bbd31db76360853ce65a1f8",
+    "body": "تم إلغاء الحركة: شراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "facf80e5fa470af56ffa1f142fdafac4a47133624483c829c4dedc2c0f8c6cdf",
+    "body": "تم إلغاء العملية، يرجى التواصل معنا. شراء 50 ر.س لدى نون بطاقة 1234",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "6f125b175ca848f41923e1eeedcbd9200f824814396d84ef1949033c58fef011",
+    "body": "تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "509aa50251892f1c352dcf00ad3cbe97e77d18bae3a50e4863ab2e74f0bbded1",
+    "body": "تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون\nاذا لم تطلب العملية اتصل بالبنك",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "ca5254d478c41680a3dbd9aa81f058c477634658cf0af0531d19c941f1c965fb",
+    "body": "تم إلغاء عملية شراء بمبلغ 50 ر.س لدى نون يرجى التواصل مع المتجر",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "32f95cd3294a5d763bd50aa0d8d315c4dfbc514214027b778583f320102c2c35",
+    "body": "تم إيقاف عملية شراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "c98033be2ff2fd1987897ae6857cebc0ab7100bdfffd522af065f9aaa4a5426b",
+    "body": "تم تعليق عملية شراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "cca34eaa712afa7dfb471d6f350cae659a5177c3171968cda73171b393f105b7",
+    "body": "شراء\nمبلغ: 50 ر.س\nلدى: نون\nالعملية غير مكتملة",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "bf0951e6e5cdebc6962f01e587f5de605d89bf37a956352b0c06cceec59789c4",
+    "body": "شراء بمبلغ 50 ر.س لدى نون\nتم الإلغاء",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "d0082ae6a2295774f071dd0568e27710d7f015e449ea05ebf9a756a067cbee0a",
+    "body": "شراء ملغى بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "827acb82dbdc88473251dda00617371b0edb775f1142c642a011c86fb45da992",
+    "body": "عملية شراء بمبلغ 50 ر.س لدى نون تم إلغاؤه",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "fe8d5a618a1412f4272316792fe4f1dc979b7921537d658ed4a20cc9a989bbc3",
+    "body": "عملية شراء بمبلغ 50 ر.س لدى نون تم إلغاؤها",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "fd1a1c198ef994dddc405c10b3fe08e4d084b563ec58bd590ba0f2a7b7472506",
+    "body": "عملية شراء بمبلغ 50 ر.س لدى نون تم إلغائها",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "6aa256b983cb7f223c6ae8603a6f60ed8227664687c863da93f689ab5921dca0",
+    "body": "عملية شراء بمبلغ 50 ر.س لدى نون، تم إلغاؤها",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "3febc579b647e2da66c8dcb880ce33876d2a0a2a5978567fcf649272245f9ffc",
+    "body": "عملية غير ناجحة: شراء بمبلغ 50 ر.س لدى نون",
+    "sender": "AlRajhiBank",
+    "groups": [
+      "unresolved_confirmation_capable_ar_sar_17"
+    ],
+    "contexts": [
+      "AE",
+      "SA"
+    ]
+  },
+  {
+    "id": "control-0",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON. Your refund request for AED 40.00 is pending.",
+    "sender": "FAB",
+    "groups": [
+      "independent_pending_refund_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "control-1",
+    "body": "Annual fee AED 250.00 charged to card 1234. Your refund request for AED 40.00 is pending.",
+    "sender": "FAB",
+    "groups": [
+      "independent_pending_refund_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "positive-purchase-65",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00",
+    "sender": "",
+    "groups": [
+      "genuine_purchase_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "positive-purchase-66",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 If this transaction was not made by you, call 600.",
+    "sender": "",
+    "groups": [
+      "genuine_purchase_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "positive-purchase-67",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00",
+    "sender": "ADCB",
+    "groups": [
+      "genuine_purchase_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  },
+  {
+    "id": "positive-purchase-68",
+    "body": "Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 If this transaction was not made by you, call 600.",
+    "sender": "ADCB",
+    "groups": [
+      "genuine_purchase_control"
+    ],
+    "contexts": [
+      "AE"
+    ]
+  }
+]

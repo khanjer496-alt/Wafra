@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -10137,6 +10137,7 @@ export function parseSms(
   options?: ParseOptions,
 ): ParsedSms | null {
   // Evaluate the original BEFORE any core parser can mask merchants or notes.
+  if (hasSelectedPendingTransaction(message)) return null;
   const holdCredit = hasUnsettledCreditToken(message);
   if (hasClickLinkPrompt(message) || hasLinkCallToAction(message)) return null;
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
