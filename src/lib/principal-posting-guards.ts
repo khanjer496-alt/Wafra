@@ -488,14 +488,21 @@ export function withoutUnrelatedPendingTransactionStatus(source: string): string
 }
 
 /** Explicit selected status, including a continuation after a typed limit. */
-export function hasSelectedPendingTransaction(source: string): boolean {
+function hasPendingTransactionStatus(source: string): boolean {
   if (!/pending/iu.test(source)) return false;
-  return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(withoutUnrelatedPendingTransactionStatus(source));
+  return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+}
+
+/** At the full-message boundary only, a money-free earlier status may be unrelated. */
+export function hasSelectedPendingTransaction(source: string): boolean {
+  return hasPendingTransactionStatus(withoutUnrelatedPendingTransactionStatus(source));
 }
 
 /** Explicit references back to this movement retain their original assertion. */
 export function hasIncompletePrincipalReference(tail: string): boolean {
-  if (hasSelectedPendingTransaction(tail)) return true;
+  // This is the selected principal's suffix: its money is outside the tail.
+  // A later receipt cannot prove that this status belongs to another movement.
+  if (hasPendingTransactionStatus(tail)) return true;
   const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
   if (!references.length) return false;
   const entities = namedMerchantSpans(tail);

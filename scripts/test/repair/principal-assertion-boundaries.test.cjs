@@ -20,6 +20,7 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'modules/wafra-live-capture/i
 const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
+  ['selected-pending-before-second-debit', 'AED 42.10 was debited from your card ending 1234 at SHOP. Transaction pending approval. AED 250.00 was debited from your card ending 5678 at NOON.', 'none'],
   ['unrelated-pending-before', `Your transaction pending approval is separate. ${debit}`, 'expense'],
   ['unrelated-pending-before-semicolon', `Your payment pending processing is separate; ${debit}`, 'expense'],
   ['selected-pending-after-limit', 'Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 Transaction pending approval.', 'none'],
@@ -179,4 +180,14 @@ test('pending scope keeps offsets and every non-completion / competing-money vet
   assert.equal(scoped.length, body.length);
   assert.equal(scoped.indexOf('AED 250.00'), body.indexOf('AED 250.00'));
   assert.equal(scoped.slice(prefix.length), debit);
+});
+
+// A tail belongs to the already selected principal, whose money precedes it.
+test('pending reference tail cannot be disowned by a second debit', () => {
+  const body = "AED 42.10 was debited from your card ending 1234 at SHOP. Transaction pending approval. AED 250.00 was debited from your card ending 5678 at NOON.";
+  const start = body.indexOf('AED 42.10');
+  const end = start + 'AED 42.10'.length;
+  assert.equal(guards.hasSelectedPendingTransaction(body), true);
+  assert.equal(guards.hasIncompletePrincipalReference(body.slice(end)), true);
+  assert.equal(guards.isCompletedExpensePrincipal(body, { start, end }), false);
 });
