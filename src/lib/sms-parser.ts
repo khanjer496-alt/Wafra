@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { withoutUnrelatedPendingTransactionStatus, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -5968,6 +5968,7 @@ function nonPostingReasonInBody(
     body = body.replace(/[^\S\r\n]+/gu, ' ');
     suppressible = suppressible.replace(/[^\S\r\n]+/gu, ' ');
   }
+  body = withoutUnrelatedPendingTransactionStatus(body);
   if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible)) return 'card-lifecycle';
   if (declinedInBody(body, suppressible)) return 'declined';
   if (hasClickLinkPrompt(body) || hasLinkCallToAction(body)) return 'link-request';

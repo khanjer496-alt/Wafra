@@ -23,6 +23,7 @@ import {
 } from '@/lib/markets';
 import {
   creditNoteBesideDebit,
+  completedDebitBesideCredit,
   hasArabicRefundHeading,
   hasMalformedBankAmount,
   hasOnlyUnsettledCredit,
@@ -382,6 +383,17 @@ export const interpretBankAlert = ({
   if (decision.outcome === 'review') {
     const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
     if (semantic) {
+      // A semantic refund label cannot borrow an independently proven debit's
+      // price for an amount-free note. Preserve the mature receipt here too,
+      // before callers that have no pinned ledger currency see the result.
+      // Owned completed returns fail this separate-debit proof and keep their
+      // existing credit/held routes. No nullable currency fallback is relaxed.
+      if (semantic.outcome === 'parsed' && semantic.meaning === 'refund' &&
+        semantic.parsed.kind === 'transaction' && semantic.parsed.type === 'income' &&
+        usableLegacy?.kind === 'transaction' && usableLegacy.type === 'expense' &&
+        withMarketPackForParsing(market, () => completedDebitBesideCredit(source, { sender }))) {
+        return legacyResult(usableLegacy);
+      }
       if (semantic.outcome === 'parsed' && withMarketPackForParsing(market, () =>
         hasUnsettledPrincipal(source, semantic.parsed))) {
         return usableLegacy ? legacyResult(usableLegacy) : finalFallback(fallback, null);
