@@ -6,7 +6,7 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
-import { isCompletedExpensePrincipal } from '@/lib/principal-posting-guards';
+import { withoutUnrelatedPendingTransactionStatus, isCompletedExpensePrincipal } from '@/lib/principal-posting-guards';
 import { PARSER_VERSION, completedDebitBesideCredit, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
 import type { UniversalBankEvent, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
@@ -243,7 +243,7 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
     const refusal = nonPostingReason(source);
     const unsafeMoney = isNotAutoPostableMoney(source);
-    const incomplete = unsafeMoney || hasNonCompletedWording(source, context.country, sender);
+    const incomplete = unsafeMoney || hasNonCompletedWording(withoutUnrelatedPendingTransactionStatus(source), context.country, sender);
     const reviewableRefusal = (creditReviewOnly && canReviewCreditRefusal(source, refusal)) || (!!pair && refusal === 'declined');
     if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
       incomplete)) return ignore();
