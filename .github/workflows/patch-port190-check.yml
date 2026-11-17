@@ -1,7 +1,7 @@
-name: Pending status affirmative separation ownership
+name: Pending status assertion punctuation boundary
 on:
   push:
-    branches: [patch/port190-pr7-pending-separation-green]
+    branches: [patch/port190-pr7-pending-assertive-green]
 permissions:
   contents: read
 jobs:
