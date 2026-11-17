@@ -1,9 +1,10 @@
 'use strict';
 const fs=require('fs'),vm=require('vm'),crypto=require('crypto');
-const load=require(process.cwd()+'/scripts/universal-test/load-ts.cjs').createLoader();
+const root=require('node:path').resolve(__dirname,'../../..');
+const load=require(root+'/scripts/universal-test/load-ts.cjs').createLoader();
 const sms=load('@/lib/sms-parser'),launch=load('@/lib/launch-alert-parser'),capture=load('@/lib/auto-import'),history=load('@/lib/historical-import');
 load('@/lib/country').setActiveCountry('AE');load('@/lib/markets').setActiveMarket('AE');load('@/lib/markets').setLedgerCurrency('AED',2);
-const resources={bundle:fs.readFileSync('modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js','utf8'),metadata:JSON.parse(fs.readFileSync('modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json','utf8'))};
+const resources={bundle:fs.readFileSync(root+'/'+'modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js','utf8'),metadata:JSON.parse(fs.readFileSync(root+'/'+'modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json','utf8'))};
 const native={};vm.runInNewContext(resources.bundle,native);const meta=resources.metadata;
 const at=Date.parse('2026-11-14T10:00:00Z'),debit='AED 250.00 was debited from your card ending 1234 at NOON.';
 const bodies=['Annual fee AED 250.00 charged\nto card 1234 was reversed.','Annual fee AED 250.00 charged\nto card 1234.','Annual fee AED 250.00 charged\nto card 1234. Your refund request for AED 40.00 is pending.'];

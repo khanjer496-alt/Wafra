@@ -1,0 +1,220 @@
+name: Parser selected service ownership qualification
+on:
+  push:
+    branches: [patch/port190-pr7-owned-refund-final-qualification]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Generate and verify exact-source resources
+        run: |
+          node scripts/generate-ios-background-parser.cjs > generation-check.txt 2>&1
+          node scripts/generate-ios-background-parser.cjs --check >> generation-check.txt 2>&1
+      - name: Record actual service ownership paths
+        run: node .github/patch-probe/service-ownership-probe.cjs
+      - name: Known comma ownership controls
+        run: node --test --test-concurrency=1 scripts/test/repair/principal-assertion-boundaries.test.cjs > boundaries.txt 2>&1
+      - name: Same fee reversal ownership and wrap controls
+        if: ${{ !cancelled() }}
+        run: |
+          node .github/patch-probe/reversed-fee-probe.cjs
+          node scripts/test/repair/same-fee-reversal.test.cjs > same-fee-controls.txt 2>&1
+      - name: Consolidated selected retention and complete confirmation controls
+        if: ${{ !cancelled() }}
+        run: |
+          node .github/patch-probe/grouped-probe.cjs > grouped-summary.txt 2>&1
+          node scripts/test/repair/selected-retention-cohorts.test.cjs > grouped-controls.txt 2>&1
+          (cd scripts/test && node --test --test-concurrency=1 repair/same-fee-reversal.test.cjs repair/selected-retention-cohorts.test.cjs) > cwd-controls.txt 2>&1
+      - name: Reviewed owned-return canonical matrix and full held confirmations
+        if: ${{ !cancelled() }}
+        run: node .github/patch-probe/owned-split-probe.cjs > owned-split-summary.txt 2>&1
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: node node_modules/typescript/bin/tsc --noEmit > typecheck.txt 2>&1
+      - name: Compile shipping modules
+        if: ${{ !cancelled() }}
+        run: bash scripts/test/build.sh > compile.txt 2>&1
+      - name: Restore actual shipping automation inputs for contract inspection
+        if: ${{ !cancelled() }}
+        run: |
+          git fetch --depth=1 origin 17a788edda298cede6673b4911da5d029f47cd8f
+          node .github/patch-probe/restore-shipping-ci-inputs.cjs
+      - name: Original independent reviewer harnesses
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/wafra-ts59 .github/reviewer-gate/scratch
+          ln -s "$PWD/node_modules" /tmp/wafra-ts59/node_modules
+          ln -s "$PWD" ".github/reviewer-gate/scratch/$GITHUB_SHA"
+          node -e "require('fs').writeFileSync('reviewer-harness-cases.json',JSON.stringify([...require('./scripts/test/repair/credit-settlement-sweep.json'),...require('./scripts/test/repair/credit-settlement-review-probes.json')]))"
+          REV="$GITHUB_SHA" node .github/reviewer-gate/legacy-probe.cjs reviewer-harness-cases.json legacy-harness-results.json > legacy-harness-summary.txt
+          REV="$GITHUB_SHA" node .github/reviewer-gate/r4-original-probe.cjs reviewer-harness-cases.json reviewer-harness-results.json > reviewer-harness-rows.txt
+          python3 .github/reviewer-gate/reviewer-compare.py > reviewer-harness-check.txt
+      - name: Selected predicate ownership
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/selected-predicate-ownership.test.cjs > predicate.txt 2>&1
+      - name: Trace observer preserves isolated source and deterministic generator tests
+        if: ${{ !cancelled() }}
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/observer-proof
+          NODE_OPTIONS: --require ${{ github.workspace }}/.github/patch-probe/parse-trace.cjs
+        run: node --test --test-concurrency=1 scripts/test/repair/ios-background-parser-generator.test.cjs scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs > observer-proof.txt 2>&1
+      - name: Three-path closure
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-settlement-closure.test.cjs > closure.txt 2>&1
+      - name: Actual retention and consumer regressions
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/credit-review-retention.test.cjs scripts/test/repair/history-receipt-date-context.test.cjs scripts/test/repair/history-scheduling.test.cjs scripts/test/repair/notification-beta.test.cjs > consumers.txt 2>&1
+      - name: Actual queue durability and repayment retention regressions
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/capture-review-admission.test.cjs scripts/test/repair/qa001-card-repayments.test.cjs scripts/test/repair/qa001-near-variants.test.cjs scripts/test/repair/statement-ledger-audit.test.cjs > affected-retention.txt 2>&1
+      - name: Actual Android capture admission regressions
+        if: ${{ !cancelled() }}
+        run: node scripts/test/android-review-capture.test.js > android-capture.txt 2>&1
+      - name: Private teaching
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/learned-alert-formats.test.cjs > learning.txt 2>&1
+      - name: Existing parser controls
+        if: ${{ !cancelled() }}
+        run: node scripts/test/parser.test.js > parser.txt 2>&1
+      - name: Kotlin banner and source refusal parity
+        if: ${{ !cancelled() }}
+        run: node scripts/test/instant-alert.test.js > instant-alert.txt 2>&1
+      - name: Existing semantic accounting and boundary controls
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          node scripts/test/bank-alert-semantics-matrix.test.js > semantic-matrix.txt 2>&1
+          A=$?
+          node scripts/test/bank-alert-interpreter.test.js > semantic-interpreter.txt 2>&1
+          B=$?
+          node scripts/test/global-alert-adversarial.test.js > global-alert-adversarial.txt 2>&1
+          C=$?
+          printf '{"matrix":%s,"interpreter":%s,"adversarial":%s}\n' "$A" "$B" "$C" > semantic-exits.json
+          test "$A" = 0 && test "$B" = 0 && test "$C" = 0
+      - name: Existing bank-corpus controls
+        if: ${{ !cancelled() }}
+        run: node scripts/test/bank-corpus.test.js > bank-corpus.txt 2>&1
+      - name: Existing parser invariants
+        if: ${{ !cancelled() }}
+        run: node scripts/test/invariants.test.js > invariants.txt 2>&1
+      - name: Existing native and coordinated-refund contracts
+        if: ${{ !cancelled() }}
+        run: node --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/ios-corpus-money-contract.test.cjs scripts/test/repair/review-round2-safety.test.cjs scripts/test/repair/retention-compiled-contracts.test.cjs > existing-contracts.txt 2>&1
+      - name: Universal source and private-format suites
+        if: ${{ !cancelled() }}
+        run: node scripts/universal-test/run.cjs > universal.txt 2>&1
+      - name: Three-path matrix
+        if: ${{ !cancelled() }}
+        run: REFUND_MATRIX_REPORT=matrix-report.json node --test --test-concurrency=1 scripts/test/repair/refund-matrix.test.cjs > matrix.txt 2>&1
+      - name: Confirm gap exceptions only shrink versus published source
+        if: ${{ !cancelled() }}
+        run: |
+          git cat-file -e 17a788edda298cede6673b4911da5d029f47cd8f:scripts/test/repair/refund-matrix-known-gaps.json
+          git cat-file -e 17a788edda298cede6673b4911da5d029f47cd8f:scripts/test/repair/refund-matrix-oracle.cjs
+          node scripts/test/repair/refund-gaps-no-growth.cjs 17a788edda298cede6673b4911da5d029f47cd8f > no-growth.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owned-completion-evidence-${{ github.sha }}
+          path: |
+            generation-check.txt
+            boundaries.txt
+            owned-split-results.json
+            owned-split-summary.txt
+            grouped-results.json
+            grouped-summary.txt
+            grouped-controls.txt
+            cwd-controls.txt
+            same-fee-controls.txt
+            reversed-fee-results.json
+            service-ownership-results.json
+            typecheck.txt
+            predicate.txt
+            observer-proof.txt
+            transport-workflow.yml
+            shipping-ci-inputs.json
+            semantic-exits.json
+            semantic-matrix.txt
+            semantic-interpreter.txt
+            global-alert-adversarial.txt
+            compile.txt
+            closure.txt
+            consumers.txt
+            affected-retention.txt
+            android-capture.txt
+            learning.txt
+            parser.txt
+            instant-alert.txt
+            bank-corpus.txt
+            invariants.txt
+            existing-contracts.txt
+            universal.txt
+            matrix.txt
+            matrix-report.json
+            no-growth.txt
+            reviewer-harness-cases.json
+            legacy-harness-results.json
+            legacy-harness-summary.txt
+            reviewer-harness-results.json
+            reviewer-harness-rows.txt
+            reviewer-harness-summary.json
+            reviewer-harness-check.txt
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: owned-completion-resources-${{ github.sha }}
+          path: |
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.js
+            modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json
+            src/lib/ios-background-parser-source.generated.ts
+          retention-days: 7
+  hermes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WAFRA_HERMES_TOOLS: /tmp/wafra-hermes-tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Generate exact-source resources and install isolated engine tools
+        run: |
+          node scripts/generate-ios-background-parser.cjs
+          node scripts/generate-ios-background-parser.cjs --check
+          npm install --prefix "$WAFRA_HERMES_TOOLS" --no-audit --no-fund @babel/core@7.29.13 @babel/runtime@7.29.14 @react-native/babel-preset@0.83.1 esbuild@0.24.2
+          mkdir -p "$RUNNER_TEMP/hermes-cli"
+          gh release download v0.13.0 --repo facebook/hermes --pattern hermes-cli-linux.tar.gz --dir "$RUNNER_TEMP/hermes-cli"
+          tar -xzf "$RUNNER_TEMP/hermes-cli/hermes-cli-linux.tar.gz" -C "$RUNNER_TEMP/hermes-cli"
+      - name: Compare Node and actual Hermes 0.13 on every fixture
+        run: |
+          node .github/closure-probe/hermes-build.cjs
+          NODE_PATH="$WAFRA_HERMES_TOOLS/node_modules" "$WAFRA_HERMES_TOOLS/node_modules/.bin/esbuild" hermes-closure.babel.js --bundle --format=iife --platform=neutral --target=es2016 --supported:bigint=true --main-fields=main,module --outfile=hermes-closure.js
+          node hermes-closure.js > node-hermes-closure.json
+          "$RUNNER_TEMP/hermes-cli/hermes" hermes-closure.js > hermes-closure.json 2> hermes-stderr.txt
+          python3 .github/closure-probe/hermes-compare.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owned-completion-hermes-${{ github.sha }}
+          path: |
+            hermes-cases.json
+            node-hermes-closure.json
+            hermes-closure.json
+            hermes-summary.json
+            hermes-stderr.txt
+          retention-days: 7
