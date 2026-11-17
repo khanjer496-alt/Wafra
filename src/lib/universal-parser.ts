@@ -6,7 +6,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
+import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -608,6 +608,17 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     !money.observations.some((observation) => observation.role === 'fee')) {
     family = ownAccountMovementFamily(maskedSource, direction) ?? family;
   }
+  // Preserve source-level selected-movement refusals at the generic Review
+  // boundary too. A confirmation cannot manufacture settlement of this source.
+  // Folding these Arabic letters is length-preserving, so money spans stay bound.
+  const statusSource = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي');
+  const selectedNonPosting = direction !== 'credit' && money.amount.spans.some(span =>
+    isIncompletePrincipal(statusSource, span) || hasIncompletePrincipalReference(statusSource.slice(span.end)));
+  const samePrincipalReturn = money.amount.spans.some(span => hasCompletedPrincipalReturn(source, span));
+  if (selectedNonPosting) status = 'informational';
+  if (samePrincipalReturn) {
+    family = 'refund'; direction = 'credit'; status = 'informational';
+  }
   const creditReviewOnly = creditSourceDisposition(source) === 'review';
 
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
@@ -635,6 +646,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
     ...(authentication ? ['authentication-not-posting'] : []),
     ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
+    ...(selectedNonPosting || samePrincipalReturn ? ['unsettled-credit-not-posting'] : []),
     ...(cardSettlement ? ['settlement-adapter-required'] : []),
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),

@@ -1,0 +1,30 @@
+name: Consolidated money cohort diagnostic
+on:
+  push:
+    branches: [patch/port190-pr7-grouped-money-green]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/generate-ios-background-parser.cjs > generation-check.txt 2>&1
+      - run: node scripts/generate-ios-background-parser.cjs --check >> generation-check.txt 2>&1
+      - run: node .github/patch-probe/grouped-probe.cjs > grouped-summary.txt 2>&1
+      - run: node scripts/test/repair/selected-retention-cohorts.test.cjs > grouped-controls.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grouped-money-17a788ed
+          path: |
+            grouped-results.json
+            grouped-summary.txt
+            grouped-controls.txt
+            generation-check.txt
