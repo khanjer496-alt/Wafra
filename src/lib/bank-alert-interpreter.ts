@@ -35,6 +35,7 @@ import {
 } from '@/lib/sms-parser';
 import {
   hasAffirmativeSettledMovement,
+  launchPrincipalClassificationSource,
   inspectUnparsedLaunchAlert,
   inspectUnparsedLaunchSemantics,
   type UnparsedLaunchAlertDecision,
@@ -173,7 +174,9 @@ const parseSemanticReview = (
   if ('market' in decision.review && decision.review.market !== market) return null;
   const trustedInstitution = 'market' in decision.review;
   const evidence = reviewEvidence(decision.review, trustedInstitution);
-  const meaning = automaticMeaning(source, decision.review, legacy);
+  const classificationSource = decision.review.direction === 'debit'
+    ? launchPrincipalClassificationSource(source, market) : source;
+  const meaning = automaticMeaning(classificationSource, decision.review, legacy);
   if (!meaning) {
     if (!legacy && trustedInstitution && fallback.outcome === 'review') {
       return {

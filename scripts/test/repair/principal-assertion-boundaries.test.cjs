@@ -23,6 +23,10 @@ const cases = [
   ['false-fee-comma', `It is false that a fee applied, ${debit}`, 'expense'],
   ['false-service-charge-comma', `It is false that a service charge was applied, ${debit}`, 'expense'],
   ['false-service-charge-assessed', `It is false that a service charge was assessed, ${debit}`, 'expense'],
+  ['denied-card-after-subordinate-fee', 'It is false that after a service charge was applied your card ending 1234 was charged, AED 250.00 was debited at NOON.', 'none'],
+  ['denied-card-before-subordinate-fee', 'It is false that your card ending 1234 was charged after a service charge was applied, AED 250.00 was debited at NOON.', 'none'],
+  ['false-service-charge-note40', `It is false that a service charge was applied, ${debit} Your refund request for AED 40.00 is pending.`, 'expense', '4000'],
+  ['false-service-charge-note100', `It is false that a service charge was assessed, ${debit} Your refund, AED 100.00, has been credited to your card.`, 'expense', '10000'],
   ['open-service-charge-apposition', `It is false that a service charge, ${debit}`, 'none'],
   ['denied-generic-charge-apposition', `It is false that the charge, ${debit}`, 'none'],
   ['denied-generic-charge-applied', `It is false that the charge was applied, ${debit}`, 'none'],
@@ -89,6 +93,19 @@ for (const [id, body, expected, noteAmount] of cases) test(`${id}: source and Hi
   assert.equal(imported.parsed.length, 1, 'History retains the completed debit');
   assert.equal(imported.parsed[0].type, 'expense');
   assert.equal(imported.parsed[0].amountFils, 25000);
+  if (id.startsWith('false-service-charge') || id === 'plain-completed') {
+    for (const result of [source, dated, parsed, imported.parsed[0]]) {
+      assert.equal(result.merchant, 'Noon', 'selected purchase owns merchant');
+      assert.equal(result.categoryGuess, 'shopping', 'denied fee cannot retitle category');
+      assert.deepEqual(result.card, { last4: '1234', kind: 'unknown' });
+    }
+    assert.equal(source.raw, body, 'original evidence survives classification');
+    assert.equal(dated.date, sms.parseSms(debit, {}, { sender: 'ENBD', observedAt: at }).date);
+    if (!noteAmount) {
+      assert.equal(decision.candidate.family, 'purchase');
+      assert.equal(decision.candidate.direction, 'debit');
+    }
+  }
   if (noteAmount) {
     assert.equal(decision.kind, 'review');
     assert.equal(imported.reviewCandidates.length, 1);
@@ -109,5 +126,30 @@ for (const [id, body, expected] of cases) test(`${id}: committed native bundle k
     assert.equal(result.notification.direction, 'debit');
     assert.equal(result.notification.amount.currency, 'AED');
     assert.equal(result.notification.amount.minorUnits, '25000');
+    if (id.startsWith('false-service-charge') || id === 'plain-completed') {
+      assert.equal(result.notification.merchant, 'Noon');
+      assert.equal(result.notification.family, 'purchase');
+      assert.deepEqual(result.notification.instrument, { kind: 'card', last4: '1234' });
+    }
   }
+});
+
+test('a genuine service fee keeps its own classification and instrument', () => {
+  const body = 'A service charge of AED 25.00 was debited from your account ending 1234.';
+  const session = launch.createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED', bestEffort: { enabled: true, country: 'AE' } });
+  const source = sms.parseSms(body, {}, { sender: 'ENBD', observedAt: at });
+  const parsed = session.parse(body, 'ENBD', session.inspect(body, 'ENBD'), undefined, at);
+  const record = JSON.stringify({ v: 1, id: crypto.createHash('sha256').update(body).digest('hex'), text: body, sender: 'ENBD', receivedAt: new Date(at).toISOString() });
+  const imported = history.parseHistoricalMessageRecords([record], {}, new Date(at), new Set(), session);
+  for (const result of [source, parsed, imported.parsed[0]]) {
+    assert.equal(result.type, 'expense'); assert.equal(result.amountFils, 2500);
+    assert.equal(result.currency, 'AED'); assert.equal(result.merchant, 'Service charge');
+    assert.equal(result.categoryGuess, 'other'); assert.deepEqual(result.card, { last4: '1234', kind: 'account' });
+  }
+  const decision = capture.inspectSourceFreeRefusedAlert({ source: body, sender: 'ENBD', observedAt: at, channel: 'inbox', session, acceptedExpense: parsed });
+  assert.equal(decision.candidate.family, 'fee');
+  const result = JSON.parse(native.wafraNativeAlertParse(JSON.stringify({ v: 1, context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 }, sourceHash: meta.sourceHash }, sender: 'ENBD', body, observedAt: at })));
+  assert.equal(result.route, 'parsed'); assert.equal(result.notification.family, 'fee');
+  assert.equal(result.notification.merchant, 'Service charge'); assert.equal(result.notification.amount.minorUnits, '2500');
+  assert.deepEqual(result.notification.instrument, { kind: 'account', last4: '1234' });
 });
