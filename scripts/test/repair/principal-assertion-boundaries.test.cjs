@@ -20,6 +20,9 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'modules/wafra-live-capture/i
 const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
+  ['unrelated-pending-before', `Your transaction pending approval is separate. ${debit}`, 'expense'],
+  ['unrelated-pending-before-semicolon', `Your payment pending processing is separate; ${debit}`, 'expense'],
+  ['selected-pending-after-limit', 'Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 Transaction pending approval.', 'none'],
   ['false-fee-comma', `It is false that a fee applied, ${debit}`, 'expense'],
   ['false-service-charge-comma', `It is false that a service charge was applied, ${debit}`, 'expense'],
   ['false-service-charge-assessed', `It is false that a service charge was assessed, ${debit}`, 'expense'],
