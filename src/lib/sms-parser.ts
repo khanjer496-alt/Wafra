@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { withoutUnrelatedPendingTransactionStatus, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -6030,7 +6030,7 @@ function nonPostingReasonInBody(
 export function nonPostingReason(message: string): NonPostingReason | null {
   const source = message.trim();
   if (!source) return null;
-  const body = foldOrthography(stripInvisible(source));
+  const body = withoutUnrelatedPendingTransactionStatus(foldOrthography(stripInvisible(source)));
   const suppressible = blank(maskMerchantNames(body), FRAUD_FOOTER_RE);
   return nonPostingReasonInBody(body, suppressible);
 }
