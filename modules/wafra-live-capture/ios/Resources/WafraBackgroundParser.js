@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 05979a67e7bc09a9518f7fed692bac33ef04418ffe7f562e13a432e5892dd628
+// Generated from normal shipping TypeScript. Source SHA-256: 2a1e2d3d98f3c7eaeb4a77a2f7710b3871b01655ac7c4c3bc60ef7d683ba288f
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10242,6 +10242,7 @@ exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.selectedPrincipalClassificationSource = selectedPrincipalClassificationSource;
 exports.hasNegatedPrincipalAssertion = hasNegatedPrincipalAssertion;
+exports.hasSelectedPendingTransaction = hasSelectedPendingTransaction;
 exports.hasIncompletePrincipalReference = hasIncompletePrincipalReference;
 exports.hasSelectedCreditPredicate = hasSelectedCreditPredicate;
 exports.isCompletedExpensePrincipal = isCompletedExpensePrincipal;
@@ -10249,6 +10250,7 @@ exports.hasCompletedExpensePredicate = hasCompletedExpensePredicate;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
+exports.hasCompletedPrincipalReturn = hasCompletedPrincipalReturn;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
 exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
 exports.isUnqualifiedCardRepayment = isUnqualifiedCardRepayment;
@@ -10711,7 +10713,14 @@ function completedPredicate(fragment, debitOnly = false, feePredicate = false, d
     return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
         (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
+function hasSelectedPendingTransaction(source) {
+    if (!/pending/iu.test(source))
+        return false;
+    return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+}
 function hasIncompletePrincipalReference(tail) {
+    if (hasSelectedPendingTransaction(tail))
+        return true;
     const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
     if (!references.length)
         return false;
@@ -10867,6 +10876,8 @@ function principalClause(source, span) {
     return { start, end };
 }
 function hasSelectedCreditPredicate(source, span) {
+    if (hasCompletedPrincipalReturn(source, span))
+        return true;
     const clause = principalClause(source, span);
     if (!clause || !span)
         return false;
@@ -10899,6 +10910,8 @@ function isIncompletePrincipal(source, span, expensePredicate = false) {
     if (hasNegatedPrincipalAssertion(source, span))
         return true;
     if (expensePredicate && hasIncompletePrincipalReference(source.slice(span.end)))
+        return true;
+    if (expensePredicate && hasCompletedPrincipalReturn(source, span))
         return true;
     if (source[end] === '?' && COMPLETED_MONEY_VERB.test(source.slice(start, end).trim().split(/\s/u).pop() ?? ''))
         return true;
@@ -11085,7 +11098,30 @@ function refundPrincipalStatus(source, spans, monetarySpans = spans) {
         return 'pending';
     return 'completed';
 }
+function hasCompletedPrincipalReturn(source, span) {
+    if (!span || !/\b(?:refunded|returned|reversed|credited)\b/iu.test(source))
+        return false;
+    const scope = sentenceAround(source, span, true);
+    if (!/\b(?:was\s+debited|was\s+charged)\b/iu.test(scope.text) ||
+        firstStatedPrice(source.slice(span.end, scope.end)) !== null)
+        return false;
+    if ((0, credit_settlement_guards_1.hasCreditCondition)(scope.text) || (0, credit_settlement_guards_1.hasPendingCreditStatus)(scope.text) ||
+        selectedPredicateCompletion(source.slice(scope.start, span.start), source.slice(span.end, scope.end), true) !== true)
+        return false;
+    const next = source.slice(scope.end).replace(/^[.!?\s]+/u, '').trim();
+    if (!next || firstStatedPrice(next) !== null || (0, credit_settlement_guards_1.hasCreditCondition)(next) || (0, credit_settlement_guards_1.hasPendingCreditStatus)(next))
+        return false;
+    if (/^(?:it|this\s+amount|a\s+refund\s+of\s+the\s+same)\s+(?:has\s+been|was)\s+(?:refunded|returned|reversed|credited|processed\s+and\s+credited)\s+to\s+your\s+(?:account|card)[.!]?$/iu.test(next))
+        return true;
+    const merchant = /^([\p{L}\p{N}._&'’-]+(?:\s+[\p{L}\p{N}._&'’-]+){0,5}?)\s+(?:has\s+)?(?:refunded|returned|reversed|credited)\s+the\s+purchase\s+to\s+your\s+(?:account|card)[.!]?$/iu.exec(next);
+    if (!merchant)
+        return false;
+    const name = merchant[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return new RegExp(`\\bat\\s+${name}(?=\\s|[,;]|$)`, 'iu').test(scope.text);
+}
 function isCompletedPrincipalRefund(source, span) {
+    if (hasCompletedPrincipalReturn(source, span))
+        return true;
     if (!span)
         return false;
     const scope = sentenceAround(source, span);
@@ -15653,6 +15689,8 @@ function completedDebitBesideCredit(message, options) {
     return (0, credit_settlement_guards_1.completedDebitBesideCredit)(message, clause => prove(clause, true));
 }
 function parseSms(message, overrides, options) {
+    if ((0, principal_posting_guards_1.hasSelectedPendingTransaction)(message))
+        return null;
     const holdCredit = (0, credit_settlement_guards_1.hasUnsettledCreditToken)(message);
     if ((0, principal_posting_guards_1.hasClickLinkPrompt)(message) || (0, principal_posting_guards_1.hasLinkCallToAction)(message))
         return null;
@@ -17069,6 +17107,16 @@ function inspectUniversalBankEvent(source, context = {}) {
         !money.observations.some((observation) => observation.role === 'fee')) {
         family = ownAccountMovementFamily(maskedSource, direction) ?? family;
     }
+    const statusSource = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي').replace(/ؤ/gu, 'و');
+    const selectedNonPosting = direction !== 'credit' && money.amount.spans.some(span => (0, principal_posting_guards_1.isIncompletePrincipal)(statusSource, span) || (0, principal_posting_guards_1.hasIncompletePrincipalReference)(statusSource.slice(span.end)));
+    const samePrincipalReturn = money.amount.spans.some(span => (0, principal_posting_guards_1.hasCompletedPrincipalReturn)(source, span));
+    if (selectedNonPosting)
+        status = 'informational';
+    if (samePrincipalReturn) {
+        family = 'refund';
+        direction = 'credit';
+        status = 'informational';
+    }
     const creditReviewOnly = (0, credit_settlement_guards_1.creditSourceDisposition)(source) === 'review';
     const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
     const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
@@ -17093,6 +17141,7 @@ function inspectUniversalBankEvent(source, context = {}) {
         ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
         ...(authentication ? ['authentication-not-posting'] : []),
         ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
+        ...(selectedNonPosting || samePrincipalReturn ? ['unsettled-credit-not-posting'] : []),
         ...(cardSettlement ? ['settlement-adapter-required'] : []),
         ...(status === 'failed' ? ['failed-not-posting'] : []),
         ...(promotion ? ['promotion-not-posting'] : []),
