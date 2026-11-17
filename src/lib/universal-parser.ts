@@ -6,7 +6,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
+import { withoutUnrelatedPendingTransactionStatus, isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -308,6 +308,7 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
 export function inspectUniversalBankEvent(source: string, context: UniversalParseContext = {}): UniversalBankEvent {
   if (typeof source !== 'string' || !source.trim()) return emptyEvent('empty-input');
   if (source.length > 4096) return emptyEvent('input-too-long');
+  source = withoutUnrelatedPendingTransactionStatus(source);
   // An exact Brazilian, Colombian, Mexican or Peruvian bank template owns its
   // whole message: its money, family, direction and posting decision come from
   // that template alone (src/lib/latam-alert-templates.ts).
