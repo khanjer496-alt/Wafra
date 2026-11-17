@@ -20,6 +20,10 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'modules/wafra-live-capture/i
 const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
+  ['selected-pending-before-second-debit', 'AED 42.10 was debited from your card ending 1234 at SHOP. Transaction pending approval. AED 250.00 was debited from your card ending 5678 at NOON.', 'none'],
+  ['unrelated-pending-before', `Your transaction pending approval is separate. ${debit}`, 'expense'],
+  ['unrelated-pending-before-semicolon', `Your payment pending processing is separate; ${debit}`, 'expense'],
+  ['selected-pending-after-limit', 'Your Cr.Card XXX1234 was used for AED42.10 on 12/10/2026 12:00:00 at SAMPLE MARKET, SAMPLE CITY. Avl. Cr.Limit is AED5000.00 Transaction pending approval.', 'none'],
   ['false-fee-comma', `It is false that a fee applied, ${debit}`, 'expense'],
   ['false-service-charge-comma', `It is false that a service charge was applied, ${debit}`, 'expense'],
   ['false-service-charge-assessed', `It is false that a service charge was assessed, ${debit}`, 'expense'],
@@ -152,4 +156,38 @@ test('a genuine service fee keeps its own classification and instrument', () => 
   assert.equal(result.route, 'parsed'); assert.equal(result.notification.family, 'fee');
   assert.equal(result.notification.merchant, 'Service charge'); assert.equal(result.notification.amount.minorUnits, '2500');
   assert.deepEqual(result.notification.instrument, { kind: 'account', last4: '1234' });
+});
+
+// Pending status may stand aside only for affirmative independent money.
+test('pending scope keeps offsets and every non-completion / competing-money veto', () => {
+  const scope = guards.withoutUnrelatedPendingTransactionStatus;
+  const prefix = 'Your transaction pending approval is separate. ';
+  for (const tail of [
+    'AED 250.00 will be debited from your card ending 1234 at NOON.',
+    'AED 250.00 was not debited from your card ending 1234 at NOON.',
+    'AED 250.00 is being debited from your card ending 1234 at NOON.',
+    'AED 250.00 at NOON.',
+    'Your credit limit is AED 5000.00.',
+  ]) assert.equal(scope(prefix + tail), prefix + tail, tail);
+  for (const body of [
+    'AED 40.00 transaction pending approval. ' + debit,
+    debit + ' Transaction pending approval.',
+    'Your transaction pending approval.',
+  ]) assert.equal(scope(body), body, 'earlier or selected pending money never stands aside');
+  const body = prefix + debit;
+  const scoped = scope(body);
+  assert.notEqual(scoped, body);
+  assert.equal(scoped.length, body.length);
+  assert.equal(scoped.indexOf('AED 250.00'), body.indexOf('AED 250.00'));
+  assert.equal(scoped.slice(prefix.length), debit);
+});
+
+// A tail belongs to the already selected principal, whose money precedes it.
+test('pending reference tail cannot be disowned by a second debit', () => {
+  const body = "AED 42.10 was debited from your card ending 1234 at SHOP. Transaction pending approval. AED 250.00 was debited from your card ending 5678 at NOON.";
+  const start = body.indexOf('AED 42.10');
+  const end = start + 'AED 42.10'.length;
+  assert.equal(guards.hasSelectedPendingTransaction(body), true);
+  assert.equal(guards.hasIncompletePrincipalReference(body.slice(end)), true);
+  assert.equal(guards.isCompletedExpensePrincipal(body, { start, end }), false);
 });
