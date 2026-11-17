@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 400a350ffbd4c897d7ac2015bd76cbcd1707bf0e80c4e8a77407e598d3fa9a06
+// Generated from normal shipping TypeScript. Source SHA-256: 7a9f60059e2a72630e53738263c89c1c54e6a59aeffc7ccdec7db128f2397338
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -10431,11 +10431,16 @@ function namedMerchantSpans(text) {
     }
     return spans;
 }
+function closedServiceChargeAssessment(previous) {
+    const assessment = /\bservice\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))\b/iu.exec(previous);
+    return assessment !== null && completedPredicate(assessment[1], false, true);
+}
 function hasIndependentCompletedCommaPrincipal(assertion, tail) {
     for (const comma of assertion.matchAll(/,/gu)) {
         const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
+        const closedServiceCharge = closedServiceChargeAssessment(previous);
         if (!previous || /[,;]/u.test(previous) ||
-            /\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous))
+            (/\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous) && !closedServiceCharge))
             continue;
         const auxiliary = /\b(?:was|were|is|are|has|have|had)\s+\p{L}/iu.exec(previous);
         const pastVerb = /\b\p{L}+(?:ed|ied)\s*$/iu.exec(previous);
