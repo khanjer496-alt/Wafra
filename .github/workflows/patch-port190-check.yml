@@ -1,0 +1,208 @@
+name: Exact parser trace with isolated observers
+on:
+  push:
+    branches: [patch/trace-pr7-final-17a788ed]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  trace:
+    needs: repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      WAFRA_TRACE_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Bind unchanged shipping source to exact final head
+        run: |
+          test "$(git rev-parse HEAD^)" = 17a788edda298cede6673b4911da5d029f47cd8f
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked validation dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+      - name: Verify committed resources and compile unchanged source
+        run: |
+          mkdir -p out
+          node scripts/generate-ios-background-parser.cjs --check > out/generation-check.txt 2>&1
+          bash scripts/test/build.sh > out/compile-result.txt 2>&1
+      - name: Inspect the exact shipping automation surface
+        run: |
+          node .github/patch-probe/restore-shipping-ci-inputs.cjs
+          cp transport-workflow.yml out/transport-workflow.yml
+          cp shipping-ci-inputs.json out/shipping-ci-inputs.json
+      - name: Reproduce legacy tracer contamination on the same source
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/legacy-repro
+        run: |
+          export NODE_OPTIONS="--require $PWD/.github/patch-probe/trace-original.cjs"
+          node .github/patch-probe/run-traced-suite.cjs out/legacy-control.jsonl legacy-generator scripts/generate-ios-background-parser.cjs --check
+          node .github/patch-probe/run-traced-suite.cjs out/legacy-control.jsonl legacy-isolation --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs
+          unset NODE_OPTIONS
+          node -e 'const r=require("fs").readFileSync("out/legacy-control.jsonl","utf8").trim().split("\n").map(JSON.parse);if(r.length!==2||r.some(x=>x.exitCode===0))throw Error("legacy contamination was not reproduced")'
+      - name: Prepare the same native contract fixtures as official CI
+        run: |
+          node .github/patch-probe/run-traced-suite.cjs out/preflight-results.jsonl native-fixtures node_modules/expo/bin/cli prebuild --platform ios --no-install
+          node -e 'const r=require("fs").readFileSync("out/preflight-results.jsonl","utf8").trim().split("\n").map(JSON.parse);if(r.some(x=>!x.passed))throw Error("native contract fixture preparation failed")'
+          git diff --exit-code HEAD^ -- src modules scripts/test
+      - name: Verify observer isolation and native contracts before full collection
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/trace
+        run: |
+          export NODE_OPTIONS="--require $PWD/.github/patch-probe/parse-trace.cjs"
+          node .github/patch-probe/run-traced-suite.cjs out/preflight-results.jsonl clean-generator scripts/generate-ios-background-parser.cjs --check
+          node .github/patch-probe/run-traced-suite.cjs out/preflight-results.jsonl clean-isolation --test --test-concurrency=1 scripts/test/repair/ios-background-alert-parser.test.cjs scripts/test/repair/history-platform-parity.test.cjs
+          node .github/patch-probe/run-traced-suite.cjs out/preflight-results.jsonl clean-contracts scripts/test/contracts.test.js
+          node .github/patch-probe/run-traced-suite.cjs out/preflight-results.jsonl clean-ios-fixtures scripts/test/ios-capture-setup.test.js
+          unset NODE_OPTIONS
+          node -e 'const r=require("fs").readFileSync("out/preflight-results.jsonl","utf8").trim().split("\n").map(JSON.parse);if(r.some(x=>!x.passed))throw Error("corrected tracer preflight failed; do not collect a partial trace")'
+      - name: Collect complete export tuples and every suite result
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/trace
+        run: |
+          export NODE_OPTIONS="--require $PWD/.github/patch-probe/parse-trace.cjs"
+          cd scripts/test
+          : > "$RUNNER_TEMP/exits.txt"
+          : > "$RUNNER_TEMP/suite-results.jsonl"
+          for t in ../universal-test/run.cjs ../universal-evidence/nonposting-regressions.test.cjs ../universal-evidence/money-regressions.test.cjs ../universal-evidence/evaluator.test.cjs ../universal-evidence-round2/run.cjs; do
+            node "$WAFRA_TRACE_ROOT/.github/patch-probe/run-traced-suite.cjs" "$RUNNER_TEMP/suite-results.jsonl" "$t" "$t" >> "$RUNNER_TEMP/exits.txt"
+          done
+          for t in *.test.js; do
+            node "$WAFRA_TRACE_ROOT/.github/patch-probe/run-traced-suite.cjs" "$RUNNER_TEMP/suite-results.jsonl" "$t" "$t" >> "$RUNNER_TEMP/exits.txt"
+          done
+      - name: Merge tuples and bind the result
+        if: always()
+        run: |
+          mkdir -p out
+          if test -f "$RUNNER_TEMP/exits.txt"; then cp "$RUNNER_TEMP/exits.txt" out/exits.txt; fi
+          if test -f "$RUNNER_TEMP/suite-results.jsonl"; then cp "$RUNNER_TEMP/suite-results.jsonl" out/suite-results.jsonl; fi
+          node .github/patch-probe/merge-trace.cjs "$RUNNER_TEMP/trace" out/trace.jsonl | tee out/summary.txt
+          node -e 'const fs=require("fs"),cp=require("child_process");fs.writeFileSync("out/binding.json",JSON.stringify({shippingHead:cp.execFileSync("git",["rev-parse","HEAD^"],{encoding:"utf8"}).trim(),traceSide:process.env.GITHUB_SHA,meta:JSON.parse(fs.readFileSync("modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json"))},null,2))'
+          git diff --exit-code HEAD^ -- src modules scripts/test
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: trace-repair-*-${{ github.sha }}
+          path: repair-parts
+      - name: Require exhaustive disjoint repair coverage and union all traced tuples
+        run: node .github/patch-probe/assemble-partitioned-trace.cjs
+      - name: Compare every exported tuple and replay all affected money through history
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node -e 'const fs=require("fs"),p="out/suite-results.jsonl";if(!fs.existsSync(p))throw Error("missing trace results");const r=fs.readFileSync(p,"utf8").trim().split("\n").map(JSON.parse);if(r.length!==98||r.some(x=>!x.passed||x.signal||x.error))throw Error("failed or incomplete trace; no retention verdict")'
+          mkdir -p "$RUNNER_TEMP/trace-baseline"
+          gh run download 43567013783 --repo khanjer496-alt/Wafra --name parse-trace-649ff5c7fa6ca58650cecaea5a1d1815271fcfe5 --dir "$RUNNER_TEMP/trace-baseline"
+          python3 .github/patch-probe/compare-complete-trace.py "$RUNNER_TEMP/trace-baseline/trace.jsonl" out/trace.jsonl out/delta.json > out/comparison-summary.txt
+          node .github/patch-probe/trace-retention-audit.cjs out/delta.json out > out/money-retention-result.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repaired-parse-trace-${{ github.sha }}
+          path: out/
+          retention-days: 7
+      - name: Require all collected suites to complete successfully
+        run: |
+          node -e 'const fs=require("fs");const p="out/suite-results.jsonl";if(!fs.existsSync(p))throw Error("no full trace");const r=fs.readFileSync(p,"utf8").trim().split("\n").map(JSON.parse);if(r.length!==98||r.some(x=>!x.passed||x.signal||x.error))throw Error("incomplete or failed traced suite");console.log("All98traced suites exited0; coverage/retention comparison still required")'
+
+  original-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Prove exact source parent
+        run: |
+          test "$(git rev-parse HEAD^)" = 17a788edda298cede6673b4911da5d029f47cd8f
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Check committed parser resources
+        run: |
+          node scripts/generate-ios-background-parser.cjs --check > generation-check.txt 2>&1
+          git diff --exit-code -- src modules scripts/test
+      - name: Run both original reviewer harnesses
+        run: |
+          mkdir -p /tmp/wafra-ts59 .github/reviewer-gate/scratch
+          ln -s "$PWD/node_modules" /tmp/wafra-ts59/node_modules
+          ln -s "$PWD" ".github/reviewer-gate/scratch/$GITHUB_SHA"
+          node -e "require('fs').writeFileSync('reviewer-harness-cases.json',JSON.stringify([...require('./scripts/test/repair/credit-settlement-sweep.json'),...require('./scripts/test/repair/credit-settlement-review-probes.json')]))"
+          REV="$GITHUB_SHA" node .github/reviewer-gate/legacy-probe.cjs reviewer-harness-cases.json legacy-harness-results.json > legacy-harness-summary.txt
+          REV="$GITHUB_SHA" node .github/reviewer-gate/r4-original-probe.cjs reviewer-harness-cases.json reviewer-harness-results.json > reviewer-harness-rows.txt
+          python3 .github/reviewer-gate/reviewer-compare.py > reviewer-harness-check.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-reviewer-harness-${{ github.sha }}
+          path: |
+            generation-check.txt
+            reviewer-harness-cases.json
+            legacy-harness-results.json
+            reviewer-harness-results.json
+            reviewer-harness-summary.json
+            reviewer-harness-check.txt
+          retention-days: 7
+
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [0, 1]
+    env:
+      WAFRA_TRACE_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Bind unchanged shipping source to exact final head
+        run: |
+          test "$(git rev-parse HEAD^)" = 17a788edda298cede6673b4911da5d029f47cd8f
+          git diff --exit-code HEAD^ HEAD -- src modules scripts/test
+      - name: Locked dependencies and exact-source resources
+        run: |
+          npm ci
+          npm --prefix server ci
+          mkdir -p out
+          node scripts/generate-ios-background-parser.cjs --check >> out/generation.txt 2>&1
+          bash scripts/test/build.sh > out/compile.txt 2>&1
+          git fetch --depth=1 origin 17a788edda298cede6673b4911da5d029f47cd8f
+          node .github/patch-probe/restore-shipping-ci-inputs.cjs
+      - name: Prepare unchanged native contract fixtures
+        run: |
+          node .github/patch-probe/run-traced-suite.cjs out/preflight.jsonl native-fixtures node_modules/expo/bin/cli prebuild --platform ios --no-install
+          node -e 'const fs=require("fs"),r=fs.readFileSync("out/preflight.jsonl","utf8").trim().split("\n").map(JSON.parse);if(r.length!==1||r.some(x=>!x.passed||x.signal||x.error))throw Error("native contract fixture setup failed")'
+      - name: Complete disjoint repair partition under unchanged limits
+        env:
+          WAFRA_PARSE_TRACE_DIR: ${{ runner.temp }}/trace
+          NODE_OPTIONS: --require ${{ github.workspace }}/.github/patch-probe/parse-trace.cjs
+        run: node .github/patch-probe/run-repair-partition.cjs ${{ matrix.partition }}
+      - name: Bind and merge actual partition tuples
+        if: always()
+        run: |
+          mkdir -p out
+          node .github/patch-probe/merge-trace.cjs "$RUNNER_TEMP/trace" out/trace.jsonl > out/summary.txt
+          node -e 'const fs=require("fs"),cp=require("child_process");fs.writeFileSync("out/binding.json",JSON.stringify({shippingHead:cp.execFileSync("git",["rev-parse","HEAD^"],{encoding:"utf8"}).trim(),traceSide:process.env.GITHUB_SHA,meta:JSON.parse(fs.readFileSync("modules/wafra-live-capture/ios/Resources/WafraBackgroundParser.meta.json"))},null,2))'
+          git diff --exit-code HEAD^ -- src modules scripts/test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trace-repair-${{ matrix.partition }}-${{ github.sha }}
+          path: out/
+          retention-days: 7
