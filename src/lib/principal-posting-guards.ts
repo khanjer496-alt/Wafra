@@ -464,7 +464,26 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
 export function hasSelectedPendingTransaction(source: string): boolean {
   if (!/pending/iu.test(source)) return false;
   // A named refund or conditional contact footer is not this status.
-  return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+  const status = /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/giu;
+  for (const match of source.matchAll(status)) {
+    const after = match.index! + match[0].length;
+    // Only an independently completed monetary principal in a later clause
+    // can disown this earlier status. A limit, label or unknown predicate
+    // supplies no such proof; a trailing status still governs the receipt.
+    const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
+    const nextStart = boundary ? after + boundary.index + boundary[0].length : source.length;
+    const later = source.slice(nextStart);
+    let independent = false;
+    for (const money of later.matchAll(STATED_PRICE)) {
+      if (firstStatedPrice(money[0]) === null) continue;
+      const start = nextStart + money.index!;
+      const prefixEnd = start + money[0].length;
+      const end = prefixEnd + /^[\d.,]*/u.exec(source.slice(prefixEnd))![0].length;
+      if (isCompletedExpensePrincipal(source, { start, end })) { independent = true; break; }
+    }
+    if (!independent) return true;
+  }
+  return false;
 }
 
 /** Explicit references back to this movement retain their original assertion. */
