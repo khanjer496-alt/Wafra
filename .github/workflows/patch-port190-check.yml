@@ -1,0 +1,40 @@
+name: Parser bound pending ownership and nullable caller controls
+on:
+  push:
+    branches: [patch/port190-pr7-bound-pending-wrapped]
+permissions:
+  contents: read
+jobs:
+  bound:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Check copied resources without regeneration
+        run: node scripts/generate-ios-background-parser.cjs --check > bound-generation.txt 2>&1
+      - name: Replay bound source native capture History controls
+        run: node --test --test-concurrency=1 scripts/test/repair/principal-assertion-boundaries.test.cjs scripts/test/repair/generic-refund-caller-ownership.test.cjs scripts/test/repair/same-fee-reversal.test.cjs scripts/test/repair/selected-retention-cohorts.test.cjs > bound-controls.txt 2>&1
+      - name: Verify exact bound canonical and D8 owned or held contracts
+        run: node .github/patch-probe/owned-split-probe.cjs > owned-split-summary.txt 2>&1
+      - name: Replay two named refusal policy cases
+        run: node .github/patch-probe/named-refusal-probe.cjs
+      - name: Record actual ownership paths
+        if: ${{ !cancelled() }}
+        run: node .github/patch-probe/service-ownership-probe.cjs
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: bound-control-evidence-${{ github.sha }}
+          path: |
+            named-refusal-results.json
+            bound-generation.txt
+            bound-controls.txt
+            service-ownership-results.json
+            owned-split-results.json
+            owned-split-summary.txt
+          retention-days: 7

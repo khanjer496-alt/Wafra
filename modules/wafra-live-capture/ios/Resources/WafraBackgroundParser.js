@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 2a1e2d3d98f3c7eaeb4a77a2f7710b3871b01655ac7c4c3bc60ef7d683ba288f
+// Generated from normal shipping TypeScript. Source SHA-256: 8f5c5385062b98ac35de763ffd3aa51e6820bbed228976ae4d99b414b4583042
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -1938,6 +1938,12 @@ const interpretBankAlert = ({ source, sender, market, overrides = {}, observedAt
     if (decision.outcome === 'review') {
         const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
         if (semantic) {
+            if (semantic.outcome === 'parsed' && semantic.meaning === 'refund' &&
+                semantic.parsed.kind === 'transaction' && semantic.parsed.type === 'income' &&
+                usableLegacy?.kind === 'transaction' && usableLegacy.type === 'expense' &&
+                (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.completedDebitBesideCredit)(source, { sender }))) {
+                return legacyResult(usableLegacy);
+            }
             if (semantic.outcome === 'parsed' && (0, markets_1.withMarketPackForParsing)(market, () => (0, sms_parser_1.hasUnsettledPrincipal)(source, semantic.parsed))) {
                 return usableLegacy ? legacyResult(usableLegacy) : finalFallback(fallback, null);
             }
@@ -8178,7 +8184,7 @@ function parseIosBackgroundAlert(input) {
         const creditReviewOnly = (0, sms_parser_1.hasOnlyUnsettledCredit)(source) || holdCredit || (0, credit_settlement_guards_1.mentionsCredit)(source);
         const refusal = (0, sms_parser_1.nonPostingReason)(source);
         const unsafeMoney = (0, best_effort_autopost_1.isNotAutoPostableMoney)(source);
-        const incomplete = unsafeMoney || (0, best_effort_autopost_1.hasNonCompletedWording)(source, context.country, sender);
+        const incomplete = unsafeMoney || (0, best_effort_autopost_1.hasNonCompletedWording)((0, principal_posting_guards_1.withoutUnrelatedPendingTransactionStatus)(source), context.country, sender);
         const reviewableRefusal = (creditReviewOnly && (0, credit_settlement_guards_1.canReviewCreditRefusal)(source, refusal)) || (!!pair && refusal === 'declined');
         if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
             incomplete))
@@ -10242,6 +10248,7 @@ exports.isLeadingNumericDiscountOffer = isLeadingNumericDiscountOffer;
 exports.hasMobileMoneyCallback = hasMobileMoneyCallback;
 exports.selectedPrincipalClassificationSource = selectedPrincipalClassificationSource;
 exports.hasNegatedPrincipalAssertion = hasNegatedPrincipalAssertion;
+exports.withoutUnrelatedPendingTransactionStatus = withoutUnrelatedPendingTransactionStatus;
 exports.hasSelectedPendingTransaction = hasSelectedPendingTransaction;
 exports.hasIncompletePrincipalReference = hasIncompletePrincipalReference;
 exports.hasSelectedCreditPredicate = hasSelectedCreditPredicate;
@@ -10713,13 +10720,45 @@ function completedPredicate(fragment, debitOnly = false, feePredicate = false, d
     return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
         (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
-function hasSelectedPendingTransaction(source) {
+function withoutUnrelatedPendingTransactionStatus(source) {
+    if (!/pending/iu.test(source))
+        return source;
+    const status = /(?:^|[.!?;\n])\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?(pending\s+(?:approval|authori[sz]ation|confirmation|processing))\b/giu;
+    let scoped = source;
+    for (const match of source.matchAll(status)) {
+        const after = match.index + match[0].length;
+        const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
+        if (!boundary || !/^[.!;]/u.test(boundary[0]))
+            continue;
+        const ownership = source.slice(after, after + boundary.index);
+        if (!/^\s+is\s+(?:separate|unrelated)\s*$/iu.test(ownership))
+            continue;
+        const nextStart = after + boundary.index + boundary[0].length;
+        if (firstStatedPrice(source.slice(0, nextStart)) !== null)
+            continue;
+        for (const money of source.slice(nextStart).matchAll(STATED_PRICE)) {
+            const start = nextStart + money.index;
+            const prefixEnd = start + money[0].length;
+            const end = prefixEnd + /^[\d.,]*/u.exec(source.slice(prefixEnd))[0].length;
+            if (!isCompletedExpensePrincipal(source, { start, end }))
+                continue;
+            const at = after - match[1].length;
+            scoped = scoped.slice(0, at) + ' '.repeat(match[1].length) + scoped.slice(after);
+            break;
+        }
+    }
+    return scoped;
+}
+function hasPendingTransactionStatus(source) {
     if (!/pending/iu.test(source))
         return false;
     return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
 }
+function hasSelectedPendingTransaction(source) {
+    return hasPendingTransactionStatus(withoutUnrelatedPendingTransactionStatus(source));
+}
 function hasIncompletePrincipalReference(tail) {
-    if (hasSelectedPendingTransaction(tail))
+    if (hasPendingTransactionStatus(tail))
         return true;
     const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
     if (!references.length)
@@ -13348,6 +13387,7 @@ function nonPostingReasonInBody(body, suppressible) {
         body = body.replace(/[^\S\r\n]+/gu, ' ');
         suppressible = suppressible.replace(/[^\S\r\n]+/gu, ' ');
     }
+    body = (0, principal_posting_guards_1.withoutUnrelatedPendingTransactionStatus)(body);
     if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible))
         return 'card-lifecycle';
     if (declinedInBody(body, suppressible))
@@ -16886,6 +16926,7 @@ function inspectUniversalBankEvent(source, context = {}) {
         return emptyEvent('empty-input');
     if (source.length > 4096)
         return emptyEvent('input-too-long');
+    source = (0, principal_posting_guards_1.withoutUnrelatedPendingTransactionStatus)(source);
     const latam = (0, latam_alert_templates_1.matchLatamTemplate)(source, { market: context.market, sender: context.sender });
     if (latam)
         return (0, latam_alert_templates_1.latamTemplateEvent)(source, latam);
