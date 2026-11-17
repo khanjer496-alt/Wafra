@@ -531,7 +531,7 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // Bare NOT in a merchant name is not a predicate. Nor does a later
     // refund's verb supply debit authority. Require finite movement/status.
     if (followingReceipts.has(finite) || (feeOwner && COMPLETED_MONEY_VERB.test(finite)) ||
-      DEBIT_OUTCOME.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);
+      COMPLETED_MONEY_VERB.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);
     else {
       // Once the descriptor has its own object, a later auxiliary still
       // belongs to a predicate even when its terminal verb is unfamiliar.
@@ -596,6 +596,10 @@ function selectedPredicateCompletion(lead: string, tail: string, debitOnly = fal
     // authorised charge from a pending purchase/authorisation itself.
     if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite)) continue;
     if (followingReceipts.has(finite)) continue;
+    // A final reversal predicates this same selected fee/purchase. A prior
+    // charged verb cannot certify a debit after that owned credit outcome.
+    if (debitOnly && /\b(?:reversed|refunded|returned|credited)\b/iu.test(finite) &&
+      !EXPLICIT_DEBIT_OUTCOME.test(finite)) return false;
     const ownedFee = feePredicate || followingFees.has(finite);
     if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee, directions)) return false;
   }
