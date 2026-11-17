@@ -213,14 +213,24 @@ function namedMerchantSpans(text: string): PrincipalSpan[] {
   return spans;
 }
 
+/** A finished "service charge was applied/assessed" claim. Bare "the charge,"
+ * and "the charge was applied" stay inside the denied movement. The check is
+ * the low-level fee completion, not a posting guard.
+ */
+function closedServiceChargeAssessment(previous: string): boolean {
+  const assessment = /\bservice\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))\b/iu.exec(previous);
+  return assessment !== null && completedPredicate(assessment[1], false, true);
+}
+
 /** A new completed money subject can follow an independently finite assertion. */
 function hasIndependentCompletedCommaPrincipal(assertion: string, tail: string): boolean {
   for (const comma of assertion.matchAll(/,/gu)) {
     const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
-    // A relative or appositional instrument field still belongs to the denied
-    // movement. A finite clause about a different subject is not that field.
+    // An instrument, movement, or generic charge still belongs to the denied
+    // movement. Only a closed service-charge assessment is a different subject.
+    const closedServiceCharge = closedServiceChargeAssessment(previous);
     if (!previous || /[,;]/u.test(previous) ||
-      /\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous)) continue;
+      (/\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous) && !closedServiceCharge)) continue;
     const auxiliary = /\b(?:was|were|is|are|has|have|had)\s+\p{L}/iu.exec(previous);
     const pastVerb = /\b\p{L}+(?:ed|ied)\s*$/iu.exec(previous);
     if (!(auxiliary && auxiliary.index > 0) && !(pastVerb && pastVerb.index > 0)) continue;

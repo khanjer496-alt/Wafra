@@ -21,6 +21,11 @@ const at = Date.parse('2026-11-14T10:00:00Z');
 const debit = 'AED 250.00 was debited from your card ending 1234 at NOON.';
 const cases = [
   ['false-fee-comma', `It is false that a fee applied, ${debit}`, 'expense'],
+  ['false-service-charge-comma', `It is false that a service charge was applied, ${debit}`, 'expense'],
+  ['false-service-charge-assessed', `It is false that a service charge was assessed, ${debit}`, 'expense'],
+  ['open-service-charge-apposition', `It is false that a service charge, ${debit}`, 'none'],
+  ['denied-generic-charge-apposition', `It is false that the charge, ${debit}`, 'none'],
+  ['denied-generic-charge-applied', `It is false that the charge was applied, ${debit}`, 'none'],
   ['false-store-comma', `It is false that the store was closed, ${debit}`, 'expense'],
   ['issuer-false-fee', `ENBD: It is false that a fee applied, ${debit}`, 'expense'],
   ['greeting-false-store', `Dear Customer, it is false that the store was closed, ${debit}`, 'expense'],
