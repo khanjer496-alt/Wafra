@@ -469,7 +469,7 @@ export function withoutUnrelatedPendingTransactionStatus(source: string): string
   for (const match of source.matchAll(status)) {
     const after = match.index! + match[0].length;
     const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
-    if (!boundary || boundary[0].startsWith('?')) continue;
+    if (!boundary || !/^[.!;]/u.test(boundary[0])) continue;
     // Sentence order alone does not distinguish a pending transaction from
     // the completed wording which follows. Require an affirmative statement
     // that this status belongs to a separate movement; negated, conditional
