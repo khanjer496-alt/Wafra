@@ -213,17 +213,31 @@ function namedMerchantSpans(text: string): PrincipalSpan[] {
   return spans;
 }
 
-const CHARGE_FINITE = /\b(?:was|were|is|are|has|have|had|being)\b(?:\s+(?:not|never|been|being)){0,3}\s+(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b|\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
-
-/** A comma ends a false proposition unless this charge's own verb is still before its amount. */
-function commaEndsFalseProposition(assertion: string): boolean {
-  const text = withoutPriceAnnotations(assertion);
-  let last = -1;
-  for (let i = 0; i < text.length; i++) {
-    const mark = text[i];
-    if (mark === ';' || (mark === ',' && !(/\d/u.test(text[i - 1] ?? '') && /\d/u.test(text[i + 1] ?? '')))) last = i;
+/** A new completed money subject can follow an independently finite assertion. */
+function hasIndependentCompletedCommaPrincipal(assertion: string, tail: string): boolean {
+  for (const comma of assertion.matchAll(/,/gu)) {
+    const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
+    // A relative or appositional instrument field still belongs to the denied
+    // movement. A finite clause about a different subject is not that field.
+    if (!previous || /[,;]/u.test(previous) ||
+      /\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous)) continue;
+    const auxiliary = /\b(?:was|were|is|are|has|have|had)\s+\p{L}/iu.exec(previous);
+    const pastVerb = /\b\p{L}+(?:ed|ied)\s*$/iu.exec(previous);
+    if (!(auxiliary && auxiliary.index > 0) && !(pastVerb && pastVerb.index > 0)) continue;
+    const next = assertion.slice(comma.index! + 1).trim();
+    const predicate = tail.slice(0, predicateDescriptor(tail)?.index ?? tail.length).trim();
+    const nominal = /^(?:(?:a|an|the|your|this)\s+)?(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*)*$/iu.test(next);
+    if ((!next || nominal) && completedPredicate(predicate, !nominal)) return true;
+    // A post-comma verb alone continues the earlier instrument. A new own-card
+    // subject plus its explicit predicate instead owns the selected price.
+    for (const verb of next.matchAll(ACTIVE_MONEY_VERB)) {
+      const before = next.slice(0, verb.index);
+      const finite = PREDICATE_AUXILIARY.exec(before);
+      if (finite && CLOSED_OWN_CARD_PREFIX.test(before.slice(0, finite.index)) &&
+        completedPredicate(next.slice(finite.index), true)) return true;
+    }
   }
-  return last >= 0 && !CHARGE_FINITE.test(text.slice(last + 1));
+  return false;
 }
 
 /** Negation belongs to the selected monetary subject, never a merchant word. */
@@ -243,8 +257,8 @@ export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan
   for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
     const assertion = lead.slice(proposition.index! + proposition[0].length);
     // Instrument punctuation and same-movement FX annotations do not create
-    // a new assertion. A comma with no charge verb before the amount does.
-    if (commaEndsFalseProposition(assertion)) continue;
+    // a new assertion. Only a separately completed comma assertion does.
+    if (hasIndependentCompletedCommaPrincipal(assertion, source.slice(span.end, clause.end))) continue;
     if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null) return true;
   }
   const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
