@@ -117,3 +117,23 @@ for (const row of require('./credit-settlement-review-probes.json').filter(row =
   assert.equal(note.event.amount.value?.minorUnits ?? null, row.noteMinorUnits == null ? null : String(row.noteMinorUnits));
   assert.equal(JSON.stringify(history).includes(row.body), false);
 });
+
+// Exact owned-return migration: no expense, no invented second ledger row,
+// and no amountless supplementary note standing in for the owned money.
+for (const row of require('./credit-settlement-review-probes.json').filter(row => row.requireOwnedSettledReturn)) test(`${row.id}: exact owned return survives source/capture/History`, () => {
+  load('@/lib/country').setActiveCountry('AE'); load('@/lib/markets').setActiveMarket('AE'); load('@/lib/markets').setLedgerCurrency('AED', 2);
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+  const source = load('@/lib/sms-parser').parseSms(row.body, {}, { sender: row.sender, observedAt: at });
+  const parsed = session.parse(row.body, row.sender, session.inspect(row.body, row.sender), undefined, at);
+  for (const result of [source, parsed]) { assert.equal(result?.type, 'income'); assert.equal(result.amountFils, row.minorUnits); assert.equal(result.currency, 'AED'); }
+  const candidate = inspectSourceFreeRefusedAlert({ source: row.body, sender: row.sender, observedAt: at, channel: 'inbox', session });
+  assert.equal(candidate.kind, 'review'); assert.equal(candidate.candidate.kind, 'universal');
+  const event = candidate.candidate.event;
+  assert.equal(event.status, 'informational'); assert.equal(event.direction, 'credit');
+  assert.deepEqual(event.amount.value, { currency: 'AED', minorUnits: String(row.minorUnits), exponent: 2 });
+  assert.equal(isMoneyMovementReview(candidate.candidate), false);
+  const input = JSON.stringify({ v: 1, id: require('node:crypto').createHash('sha256').update(row.id).digest('hex'), text: row.body, sender: row.sender, receivedAt: new Date(at).toISOString() });
+  const history = parseHistoricalMessageRecords([input], {}, new Date(at), new Set(), session);
+  assert.equal(history.parsed.length, 1); assert.equal(history.parsed[0].type, 'income'); assert.equal(history.parsed[0].amountFils, row.minorUnits); assert.equal(history.parsed[0].currency, 'AED');
+  assert.equal(history.reviewCandidates.length, 0);
+});

@@ -460,8 +460,16 @@ function completedPredicate(fragment: string, debitOnly = false, feePredicate = 
     (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
 }
 
+/** Explicit selected status, including a continuation after a typed limit. */
+export function hasSelectedPendingTransaction(source: string): boolean {
+  if (!/pending/iu.test(source)) return false;
+  // A named refund or conditional contact footer is not this status.
+  return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+}
+
 /** Explicit references back to this movement retain their original assertion. */
 export function hasIncompletePrincipalReference(tail: string): boolean {
+  if (hasSelectedPendingTransaction(tail)) return true;
   const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
   if (!references.length) return false;
   const entities = namedMerchantSpans(tail);
@@ -635,6 +643,7 @@ function principalClause(source: string, span: PrincipalSpan | undefined): { sta
  * This is Review ownership only; it never proves settlement or posting.
  */
 export function hasSelectedCreditPredicate(source: string, span: PrincipalSpan | undefined): boolean {
+  if (hasCompletedPrincipalReturn(source, span)) return true;
   const clause = principalClause(source, span);
   if (!clause || !span) return false;
   const directions = new Set<'credit' | 'debit'>();
@@ -670,6 +679,7 @@ export function isIncompletePrincipal(source: string, span: PrincipalSpan | unde
   const { start, end } = clause;
   if (hasNegatedPrincipalAssertion(source, span)) return true;
   if (expensePredicate && hasIncompletePrincipalReference(source.slice(span.end))) return true;
+  if (expensePredicate && hasCompletedPrincipalReturn(source, span)) return true;
   // A question that ends the selected completion verb is not an assertion.
   // Ordinary fraud-contact questions after a completed receipt remain scoped
   // to their own footer, not to the earlier monetary predicate.
@@ -875,7 +885,26 @@ export function refundPrincipalStatus(
 }
 
 /** The selected purchase itself was refunded; a previous or hypothetical refund cannot qualify it. */
+/** A completed return explicitly refers to the sole selected prior debit.
+ * A new price/request/condition cannot borrow that debit's amount. */
+export function hasCompletedPrincipalReturn(source: string, span: PrincipalSpan | undefined): boolean {
+  if (!span || !/\b(?:refunded|returned|reversed|credited)\b/iu.test(source)) return false;
+  const scope = sentenceAround(source, span, true);
+  if (!/\b(?:was\s+debited|was\s+charged)\b/iu.test(scope.text) ||
+    firstStatedPrice(source.slice(span.end, scope.end)) !== null) return false;
+  if (hasCreditCondition(scope.text) || hasPendingCreditStatus(scope.text) ||
+    selectedPredicateCompletion(source.slice(scope.start, span.start), source.slice(span.end, scope.end), true) !== true) return false;
+  const next = source.slice(scope.end).replace(/^[.!?\s]+/u, '').trim();
+  if (!next || firstStatedPrice(next) !== null || hasCreditCondition(next) || hasPendingCreditStatus(next)) return false;
+  if (/^(?:it|this\s+amount|a\s+refund\s+of\s+the\s+same)\s+(?:has\s+been|was)\s+(?:refunded|returned|reversed|credited|processed\s+and\s+credited)\s+to\s+your\s+(?:account|card)[.!]?$/iu.test(next)) return true;
+  const merchant = /^([\p{L}\p{N}._&'’-]+(?:\s+[\p{L}\p{N}._&'’-]+){0,5}?)\s+(?:has\s+)?(?:refunded|returned|reversed|credited)\s+the\s+purchase\s+to\s+your\s+(?:account|card)[.!]?$/iu.exec(next);
+  if (!merchant) return false;
+  const name = merchant[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`\\bat\\s+${name}(?=\\s|[,;]|$)`, 'iu').test(scope.text);
+}
+
 export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan | undefined): boolean {
+  if (hasCompletedPrincipalReturn(source, span)) return true;
   if (!span) return false;
   const scope = sentenceAround(source, span);
   if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text) || hasCreditCondition(scope.text)) return false;

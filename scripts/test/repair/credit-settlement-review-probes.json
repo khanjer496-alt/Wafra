@@ -9480,12 +9480,12 @@
     "body": "Your card ending 1234 was charged AED 250.00 at NOON.COM on 01/11. A refund of the same has been credited to your card.",
     "sender": "ENBD",
     "origin": "reviewer-0dd-preserved-probes",
-    "expected": "expense",
+    "expected": "income",
     "minorUnits": 25000,
-    "expectationBasis": "independent meaning/approved completed-debit-note contract, not copied observed output",
-    "requireDebitParity": true,
-    "requireSupplementaryNote": true,
-    "noteMinorUnits": null
+    "expectationBasis": "CEO owned-refund resolution 07bf606b76736d092c7d93cc2bf336ca743529b55ddc8eee95e0ccff2622d57d: uniquely bound selected amount and completed return; strict app credit and native credit Review, not observed-output copying",
+    "requireOwnedSettledReturn": true,
+    "nativeExpected": "review-credit",
+    "requireNoSupplementaryNote": true
   },
   {
     "id": "reviewer-0dd-control:11",
@@ -9871,11 +9871,12 @@
     "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your card.",
     "sender": "ENBD",
     "origin": "independent-stated-note-money-versus-debit-balance-fee-ownership",
-    "expected": "expense",
+    "expected": "income",
     "minorUnits": 25000,
-    "requireDebitParity": true,
-    "requireSupplementaryNote": true,
-    "noteMinorUnits": null
+    "requireOwnedSettledReturn": true,
+    "nativeExpected": "review-credit",
+    "requireNoSupplementaryNote": true,
+    "expectationBasis": "CEO owned-refund resolution 07bf606b76736d092c7d93cc2bf336ca743529b55ddc8eee95e0ccff2622d57d: uniquely bound selected amount and completed return; strict app credit and native credit Review, not observed-output copying"
   },
   {
     "id": "note-apposition-money:5",
