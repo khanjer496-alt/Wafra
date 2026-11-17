@@ -1,0 +1,29 @@
+name: Nullable refund caller baseline-proven contract correction
+on:
+  push:
+    branches: [patch/port190-pr7-nullable-generic-history-corrected]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/generate-ios-background-parser.cjs > generation.txt 2>&1
+      - run: node scripts/generate-ios-background-parser.cjs --check >> generation.txt 2>&1
+      - run: node .github/patch-probe/generic-history-probe.cjs generic-history-results.json
+      - run: node --test --test-concurrency=1 scripts/test/repair/generic-refund-caller-ownership.test.cjs > nullable-contracts.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nullable-generic-history-corrected
+          path: |
+            generic-history-results.json
+            generation.txt
+            nullable-contracts.txt
