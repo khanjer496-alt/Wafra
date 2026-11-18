@@ -143,15 +143,30 @@ function judge(row, evidence) {
   // interpreting its reversal note as income. The original oracle is kept
   // pinned; this explicit product-policy overlay does not rewrite its rows.
   const c = row.case;
+  // CEO 3e710253: the definite Arabic amount is the same ownership class
+  // as This amount. Keep the pinned INCOME_DEBIT oracle and corpus intact.
+  const arabicOwnedReturn = row.lang === 'AR' && row.rule.startsWith('D8') && c?.debit &&
+    c.subject === 'impersonal' && c.verb === 'refunded' && c.aspect === 'has been' &&
+    c.leader === 'none' && c.amount === 'none' && c.trail === 'none' &&
+    ['your card', 'your account'].includes(c.dest);
+  if (arabicOwnedReturn && c.dest === 'your account') {
+    if (got.parseSms !== 'none' || got.session !== 'none' || !heldInformational ||
+      event.instrument.value !== null || event.instrument.evidence !== 'missing' ||
+      event.instrument.alternatives.length !== 0 || nativeResult.notification.instrument !== null) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'unresolved owned-return account contract mismatch', ...got, event, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'held-owned-account-return' };
+  }
   // Reviewed semantic split; the frozen D8 generator and every body stay pinned.
   // Same-money reference or returning the identified purchase binds its amount.
   // A merchant crediting "your refund" or bare "The refund" leaves amount unknown.
-  const linkedSelectedReturn = row.lang === 'EN' && row.rule.startsWith('D8') && c?.debit &&
+  const linkedSelectedReturn = arabicOwnedReturn || row.lang === 'EN' && row.rule.startsWith('D8') && c?.debit &&
     (['it', 'this amount', 'a refund of the same'].includes(c.subject) ||
       (c.subject === 'merchant' && !c.verb.startsWith('processed')));
   if (linkedSelectedReturn) {
     // Preserve the preexisting exact-money, marker-protected credit Review contract.
-    if (heldInformational) return { got, gaps, nativeIgnoredIncome: false, policy: 'held-informational' };
+    if (heldInformational && !arabicOwnedReturn) return { got, gaps, nativeIgnoredIncome: false, policy: 'held-informational' };
     if (got.parseSms !== 'income 25000' || got.session !== 'income 25000' ||
       nativeResult.route !== 'review' || nativeResult.notification?.style !== 'review' ||
       nativeResult.notification.direction !== 'credit' || !exactAed(nativeResult.notification.amount, '25000')) {
@@ -187,6 +202,22 @@ const knownFile = JSON.parse(knownText);
 const known = knownFile.gaps;
 const rows = buildOracleRows();
 const rowById = new Map(rows.map((row) => [row.id, row]));
+for (const [name, rowId, mutate] of [
+  ['card cannot substitute held source', 'AR-04449', e => { e.got.parseSms = e.got.session = 'none'; }],
+  ['account cannot post automatically', 'AR-04455', e => { e.got.parseSms = e.got.session = 'income 25000'; }],
+  ['account cannot inherit debited card', 'AR-04455', e => { e.nativeResult.notification.instrument = { kind: 'card', last4: '1234' }; }],
+  ['account cannot lose source money', 'AR-04455', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['account cannot lose refusal marker', 'AR-04455', e => { e.event.issues = []; }],
+]) test(`owned Arabic policy rejects ${name}`, () => {
+  const row = rowById.get(rowId);
+  const e = { got: rowId === 'AR-04449'
+    ? { parseSms: 'income 25000', session: 'income 25000', native: 'review' }
+    : { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.ok(judge(row, e).policyError);
+});
 // Mutation controls exercise the policy judge, not the parser oracle. The
 // unmodified payload comes from a real held-credit row; each mutation must
 // lose retention acceptance even when the route names remain unchanged.

@@ -926,7 +926,29 @@ export function refundPrincipalStatus(
 /** The selected purchase itself was refunded; a previous or hypothetical refund cannot qualify it. */
 /** A completed return explicitly refers to the sole selected prior debit.
  * A new price/request/condition cannot borrow that debit's amount. */
+export function completedArabicPrincipalReturnTarget(source: string, span: PrincipalSpan | undefined): 'card' | 'account' | null {
+  if (!span || !source.includes('المبلغ') || !source.includes('استرداد')) return null;
+  // Folding preserves the money reader's offsets. The definite amount is an
+  // antecedent; an indefinite refund amount cannot borrow the debit's price.
+  const raw = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي');
+  const scope = sentenceAround(raw, span, true);
+  if (!/[.!;]/u.test(raw[scope.end] ?? '')) return null;
+  const next = raw.slice(scope.end + 1).trim();
+  const returned = /^تم\s+استرداد\s+المبلغ\s+الي\s+(بطاقتك|حسابك)[.!]?$/u.exec(next);
+  if (!returned) return null;
+  // Prove the original debit through the same guard, on its original prefix.
+  // That prefix has no return clause, so this does not recurse on the return.
+  if (!isCompletedExpensePrincipal(raw.slice(0, scope.end + 1), span)) return null;
+  const outside = raw.slice(0, span.start) + ' '.repeat(span.end - span.start) + raw.slice(span.end);
+  const withoutCard = outside.replace(/(من\s+بطاقتك\s+المنتهيه\s+بـ?\s*)\p{Nd}{4}(?!\p{Nd})/u, '$1');
+  // Only the selected price and the one identified debited card are admitted.
+  // Another price, identifier or numeric qualification cannot supply ownership.
+  if (withoutCard === outside || /\p{N}/u.test(withoutCard)) return null;
+  return returned[1] === 'بطاقتك' ? 'card' : 'account';
+}
+
 export function hasCompletedPrincipalReturn(source: string, span: PrincipalSpan | undefined): boolean {
+  if (source.includes('استرداد') && completedArabicPrincipalReturnTarget(source, span)) return true;
   if (!span || !/\b(?:refunded|returned|reversed|credited)\b/iu.test(source)) return false;
   const scope = sentenceAround(source, span, true);
   if (!/\b(?:was\s+debited|was\s+charged)\b/iu.test(scope.text) ||

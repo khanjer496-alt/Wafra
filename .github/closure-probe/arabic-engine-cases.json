@@ -1,0 +1,85 @@
+[
+  {
+    "id": "fd9789c5f106162382d440f65bcd6238afed59385406bffc24f8cce1a1311eda",
+    "target": "card",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تم استرداد المبلغ إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "income",
+    "minorUnits": 25000,
+    "requireOwnedSettledReturn": true
+  },
+  {
+    "id": "8675082fde76ea261f0f65a1784bc7b4a6cd0268da79a54db9138cd9025e701d",
+    "target": "account",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تم استرداد المبلغ إلى حسابك.",
+    "sender": "ENBD",
+    "expected": "none",
+    "minorUnits": 25000,
+    "requireHeldOwnedReturnAccount": true,
+    "requireReview": true,
+    "reviewMinorUnits": 25000
+  },
+  {
+    "id": "indefinite-amount",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تم استرداد مبلغ إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "different-explicit-amount",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "future-return",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. سيتم استرداد المبلغ إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "negated-return",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. لم يتم استرداد المبلغ إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "conditional-return",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. إذا تم استرداد المبلغ إلى بطاقتك، سيظهر لاحقاً.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "competing-debit",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تم خصم مبلغ 100.00 درهم من بطاقتك المنتهية بـ 5678 لدى IKEA. تم استرداد المبلغ إلى بطاقتك.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  },
+  {
+    "id": "generic-refund-event",
+    "body": "تم خصم مبلغ 250.00 درهم من بطاقتك المنتهية بـ 1234 لدى NOON.COM. تمت معالجة طلب الاسترداد.",
+    "sender": "ENBD",
+    "expected": "expense",
+    "minorUnits": 25000,
+    "requireDebitParity": true,
+    "nativeExpected": "debit"
+  }
+]
