@@ -1,0 +1,28 @@
+name: Arabic owned return caller regression
+on:
+  push:
+    branches: [patch/port190-pr7-arabic-owned-return-red]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/generate-ios-background-parser.cjs > generation.txt 2>&1
+      - run: node .github/patch-probe/arabic-owned-probe.cjs
+      - run: node --test --test-concurrency=1 scripts/test/repair/arabic-owned-return.test.cjs > controls.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pending-distinct-controls
+          path: |
+            arabic-caller-results.json
+            generation.txt
+            controls.txt
