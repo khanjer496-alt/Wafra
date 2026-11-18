@@ -1,0 +1,240 @@
+[
+  {
+    "id": "owned-split-generic",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-partial",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A partial refund has been credited to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-earlier",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A previous refund has been credited to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-pending40",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. Your refund request for AED 40.00 is pending.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": 4000,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-same-explicit100",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same, 100.00 AED, will be credited to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": 10000,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-it-explicit100",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It, AED 100.00, has been refunded to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": 10000,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-linked-pending",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It will be refunded to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-linked-conditional",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. If it has been refunded to your card, you will receive an SMS.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-linked-negated",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has not been refunded to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-mismatching-merchant",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. OTHER.MARKET has reversed the purchase to your card.",
+    "sender": "ENBD",
+    "market": "AE",
+    "currency": "AED",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "review": {
+        "status": "informational",
+        "direction": "none",
+        "amountMinorUnits": null,
+        "confirmable": false
+      }
+    }
+  },
+  {
+    "id": "owned-split-plain",
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026.",
+    "sender": "ENBD",
+    "source": "expense:25000",
+    "session": "expense:25000",
+    "native": "parsed:movement:debit:25000",
+    "history": {
+      "parsed": [
+        "expense:25000"
+      ],
+      "reviewCandidates": 0
+    }
+  },
+  {
+    "id": "owned-split-annual-fee",
+    "body": "Annual fee AED 250.00 charged\nto card 1234 was reversed.",
+    "sender": "FAB",
+    "source": "income:25000",
+    "session": "income:25000",
+    "native": "review:review:credit:25000",
+    "history": {
+      "parsed": [
+        "income:25000"
+      ],
+      "reviewCandidates": 0
+    }
+  }
+]

@@ -15,7 +15,7 @@ import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { getActiveCountry } from '@/lib/country';
-import { withoutUnrelatedPendingTransactionStatus, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
+import { completedArabicPrincipalReturnTarget, withoutUnrelatedPendingTransactionStatus, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, hasLinkCallToAction, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnpostedCardBalanceClaim, isQualifiedCardRepaymentReceipt, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isCompletedPrincipalRefund, isCompletedExpensePrincipal, hasCompletedExpensePredicate, hasIncompletePrincipalReference, hasSelectedPendingTransaction, isHedgedPrincipal, isIncompletePrincipal, refundPrincipalStatus, type PrincipalSpan } from '@/lib/principal-posting-guards';
 import { extractUniversalMoney } from '@/lib/universal-money';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -10068,6 +10068,8 @@ function hasUnsettledPrincipalInContext(context: PrincipalContext, parsed: Parse
   if (hasUnsupportedPrincipal(raw, parsed, spans[0])) return true;
   if (parsed.kind === 'transaction' && (isUnqualifiedCardRepayment(raw) || isQualifiedCardRepaymentReceipt(raw))) return true;
   if (parsed.type === 'income' && isUnqualifiedCardCredit(raw, spans[0])) return true;
+  // A refund to an unnamed account cannot inherit the debited card's binding.
+  if (parsed.type === 'income' && raw.includes('استرداد') && completedArabicPrincipalReturnTarget(raw, spans[0]) === 'account') return true;
   if (principalNeedsTransferReview(raw, spans[0], parsed)) return true;
   if (parsed.type === 'expense' && spans[0] &&
     /(?:تم\s+اضافه|تم\s+ايداع)\s*$/i.test(raw.slice(Math.max(0, spans[0].start - 50), spans[0].start)) &&
