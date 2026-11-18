@@ -23,6 +23,7 @@ import {
 } from '@/lib/markets';
 import {
   creditNoteBesideDebit,
+  completedDebitBesideCredit,
   hasArabicRefundHeading,
   hasMalformedBankAmount,
   hasOnlyUnsettledCredit,
@@ -35,6 +36,7 @@ import {
 } from '@/lib/sms-parser';
 import {
   hasAffirmativeSettledMovement,
+  launchPrincipalClassificationSource,
   inspectUnparsedLaunchAlert,
   inspectUnparsedLaunchSemantics,
   type UnparsedLaunchAlertDecision,
@@ -173,7 +175,9 @@ const parseSemanticReview = (
   if ('market' in decision.review && decision.review.market !== market) return null;
   const trustedInstitution = 'market' in decision.review;
   const evidence = reviewEvidence(decision.review, trustedInstitution);
-  const meaning = automaticMeaning(source, decision.review, legacy);
+  const classificationSource = decision.review.direction === 'debit'
+    ? launchPrincipalClassificationSource(source, market) : source;
+  const meaning = automaticMeaning(classificationSource, decision.review, legacy);
   if (!meaning) {
     if (!legacy && trustedInstitution && fallback.outcome === 'review') {
       return {
@@ -379,6 +383,17 @@ export const interpretBankAlert = ({
   if (decision.outcome === 'review') {
     const semantic = parseSemanticReview(source, market, fallback, decision, usableLegacy);
     if (semantic) {
+      // A semantic refund label cannot borrow an independently proven debit's
+      // price for an amount-free note. Preserve the mature receipt here too,
+      // before callers that have no pinned ledger currency see the result.
+      // Owned completed returns fail this separate-debit proof and keep their
+      // existing credit/held routes. No nullable currency fallback is relaxed.
+      if (semantic.outcome === 'parsed' && semantic.meaning === 'refund' &&
+        semantic.parsed.kind === 'transaction' && semantic.parsed.type === 'income' &&
+        usableLegacy?.kind === 'transaction' && usableLegacy.type === 'expense' &&
+        withMarketPackForParsing(market, () => completedDebitBesideCredit(source, { sender }))) {
+        return legacyResult(usableLegacy);
+      }
       if (semantic.outcome === 'parsed' && withMarketPackForParsing(market, () =>
         hasUnsettledPrincipal(source, semantic.parsed))) {
         return usableLegacy ? legacyResult(usableLegacy) : finalFallback(fallback, null);

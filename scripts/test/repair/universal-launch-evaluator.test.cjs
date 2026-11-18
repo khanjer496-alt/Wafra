@@ -84,5 +84,5 @@ test('path-specific receipt allowance never permits History to accept an unverif
   const results = evaluateRows([row]).results;
   assert.deepEqual(results.map((result) => result.verdict), ['pass', 'pass']);
   assert.deepEqual(results.map((result) => result.acceptedCount), [1, 0]);
-  assert.deepEqual(results.map((result) => result.reviewCount), [null, 1]);
+  assert.deepEqual(results.map((result) => result.reviewCount), [0, 1]);
 });

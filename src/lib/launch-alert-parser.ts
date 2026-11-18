@@ -1,3 +1,4 @@
+import { informationalCreditReview, hasUnsettledCreditToken, mentionsCredit, mentionsRefund, hasConditionalDebitLead, creditSourceDisposition } from '@/lib/credit-settlement-guards';
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, dateOrderForCountry, getActiveCountry } from '@/lib/country';
@@ -19,22 +20,75 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { moneyNoticeKind, nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { completedDebitBesideCredit, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, hasUnsettledPrincipal, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
-import { unqualifiedCardCreditCurrencyAliases } from '@/lib/universal-money';
+import { completedArabicPrincipalReturnTarget, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, hasNegatedPrincipalAssertion, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { unqualifiedCardCreditCurrencyAliases, extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
-import type { UniversalBankEvent, UniversalField, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
+import { missingUniversalField, type UniversalBankEvent, type UniversalField, type UniversalMoney, type UniversalParseContext } from '@/lib/universal-types';
 
 type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
+
+/** A note about the requested reversal, not a second movement or an income. */
+export function inspectSupplementaryReversal(source: string, sender: string): UniversalBankEvent | null {
+  const pair = completedDebitBesideCredit(source, { sender });
+  if (!pair) return null;
+  const debit = parseSms(pair.debit, undefined, { sender });
+  if (debit?.kind !== 'transaction' || debit.type !== 'expense') return null;
+  const market = detectLaunchMarketFromSender(sender);
+  const currencyAliases: CurrencyAliasMap = market === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+    : market === 'SA' ? { 'ريال': ['SAR'] } : {};
+  // Read money from the reversal note ONLY. The debit's amount is never
+  // borrowed to fill an unstated refund amount.
+  // The posting splitter separates commas too. An appositional own amount
+  // ("It, AED 100.00, has been refunded") still belongs to its note sentence.
+  // Recover the verbatim note for informational facts only. Exclude the
+  // selected debit span, not its entire sentence: a comma-joined note still
+  // owns its explicit money. The posting proof above remains unchanged.
+  const notes = source.split(/(?<=[.!?؟])\s+|[;؛\n]+/u).flatMap(sentence => {
+    const start = sentence.indexOf(pair.debit);
+    if (start < 0) return [sentence];
+    if (sentence.lastIndexOf(pair.debit) !== start) return [];
+    return [sentence.slice(0, start), sentence.slice(start + pair.debit.length)];
+  }).filter(sentence => sentence.split(/(?<![0-9٠-٩۰-۹])[,،]|[,،](?![0-9٠-٩۰-۹])/u).some(part =>
+      part.trim() && mentionsCredit(part) && pair.credit.includes(part.trim())));
+  const noteSource = notes.length ? notes.join(' ') : pair.credit;
+  const event = inspectUniversalBankEvent(noteSource, { sender, currencyAliases });
+  // The generic reader may select a lone fee as its principal. That fee is
+  // still not refund money: retain only this note's transaction/unknown spans,
+  // never an overlapping labelled fee, balance or statement field.
+  // Credit Review can relabel its selected field as a transaction. Recover
+  // the money reader's original roles, admitting only candidates the event
+  // already retained; identifiers/dates/references cannot re-enter here.
+  const context = { sender, currencyAliases };
+  const candidates = inspectUniversalMoneyDraft(noteSource, context).candidates;
+  const retained = event.observations.flatMap(observation => observation.field.spans);
+  const excluded = candidates.filter(candidate => !retained.some(span =>
+    span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+  const merchantSpans = event.merchant.evidence === 'explicit' ? event.merchant.spans : [];
+  const originalMoney = extractUniversalMoney(noteSource, context, merchantSpans, excluded);
+  const information = originalMoney.observations.filter(observation => observation.role !== 'transaction' && observation.role !== 'unknown');
+  const owned = originalMoney.observations.filter(observation => observation.role === 'transaction' || observation.role === 'unknown')
+    .flatMap(observation => observation.field.spans);
+  const excludedInformation = candidates.filter(candidate => !owned.some(span =>
+    span.start === candidate.span.start && span.end === candidate.span.end)).map(candidate => candidate.span);
+  const ownMoney = information.length ? extractUniversalMoney(noteSource, context, merchantSpans, excludedInformation).amount : event.amount;
+  const amount = ownMoney.evidence === 'explicit' ? ownMoney : missingUniversalField<UniversalMoney>();
+  return { ...event, decision: 'review', family: 'refund', status: 'informational', direction: 'none',
+    amount,
+    statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
+    creditLimit: missingUniversalField(), observations: amount.evidence === 'explicit'
+      ? [{ role: 'transaction', field: amount }] : [],
+    issues: [...new Set([...event.issues, 'supplementary-reversal-info'])] };
+}
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
@@ -209,10 +263,13 @@ export const inspectGenericBankEventForReview = (
   market?: string | null,
   sourceContext?: UniversalParseContext,
 ): UniversalBankEvent | null => {
-  if (hasPersonalMessagePrefix(source, sender) || hasNegatedPrincipalMovement(source) ||
+  const creditReviewOnly = hasOnlyUnsettledCredit(source) || (mentionsCredit(source) && hasUnsettledCreditToken(source));
+  if (hasPersonalMessagePrefix(source, sender) || (hasNegatedPrincipalMovement(source) && !creditReviewOnly) ||
     isUnpostedCardBalanceClaim(source)) return null;
   // An exact LatAm bank template is bank-alert context in its own right.
   const noContext = !hasGenericBankAlertContext(source, sender) && !matchLatamTemplate(source, { sender });
+  const informationalRefundClaim = noContext && mentionsRefund(source) &&
+    creditSourceDisposition(source) === 'review' && hasBankAlertMoneyHint(source);
   // A "money arrived" claim from a phone number, e-mail, generic header or
   // no sender has no bank context of its own. From an unverified sender the
   // best-effort policy will not auto-add it (unverified-sender); without a
@@ -255,15 +312,71 @@ export const inspectGenericBankEventForReview = (
         ? detectLaunchMarketFromAlert(source) : null);
     if (launch) cardCreditAliases = unqualifiedCardCreditCurrencyAliases(source, launch, sourceContext?.currencyAliases);
   }
-  if (noContext && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
+  if (noContext && !informationalRefundClaim && !claimAdmitted && !footerAdmitted && !cardAdmitted && !cardCreditAliases) return null;
   const context: UniversalParseContext = isGulfNeighbourMarket(market)
     ? { sender, market, dateOrder: dateOrderForCountry(market) ?? undefined }
     : sourceContext ? { ...sourceContext, sender }
       : universalSourceParseContext(hasUniversalInstitutionSender(sender)
         ? inspectUniversalAlert({ source, sender }) : null, sender, getActiveCountry());
+  const creditReviewMarket = creditReviewOnly || creditSourceDisposition(source) !== 'not-credit'
+    ? detectLaunchMarketFromSender(sender) : null;
+  const creditReviewAliases: CurrencyAliasMap = creditReviewMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+    : creditReviewMarket === 'SA' ? { 'ريال': ['SAR'] } : {};
+  // A tatweel used before a number is an amount separator. Replace it 1:1
+  // for field reading so source spans remain exact; guards see the original.
+  const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
-    ? gulfNeighbourReadSource(source, market) : source, cardCreditAliases
-      ? { ...context, currencyAliases: { ...cardCreditAliases, ...context.currencyAliases } } : context);
+    ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  // The receiving account is unproved, but this completed owned return still
+  // owns its source money. Use a known issuer's literal unit only after the
+  // shared principal proof succeeds; a parser miss never supplies that proof.
+  const ownedReturnMarket = detectLaunchMarketFromSender(sender);
+  if (moneySource.includes('استرداد') && moneySource.includes('حسابك') && moneySource.includes('المبلغ') &&
+    (ownedReturnMarket === 'AE' || ownedReturnMarket === 'SA')) {
+    const ownedAliases: CurrencyAliasMap = ownedReturnMarket === 'AE'
+      ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+    const candidate = inspectUniversalBankEvent(moneySource, { ...context,
+      currencyAliases: { ...ownedAliases, ...context.currencyAliases } });
+    if (candidate.amount.evidence === 'explicit' && candidate.amount.spans.length === 1 &&
+      candidate.amount.value?.currency === (ownedReturnMarket === 'AE' ? 'AED' : 'SAR') &&
+      candidate.status === 'informational' && candidate.direction === 'credit' &&
+      completedArabicPrincipalReturnTarget(moneySource, candidate.amount.spans[0]) === 'account') event = candidate;
+  }
+  if (event.amount.spans.some(span => hasNegatedPrincipalAssertion(moneySource, span))) return null;
+  const incompletePrincipal = event.amount.spans.some(span => {
+    const leads = moneySource.slice(0, span.start).split(/(?<=[.!?])\s+|[;؛\n]/u);
+    const lead = leads[leads.length - 1] ?? '';
+    const tail = moneySource.slice(span.end).split(/(?<=[.!?])\s+|[;؛\n]/u)[0]
+      .split(/\b(?:using|with|via|at|from|to|into|on|by|for|merchant|card|account|wallet)\b/iu)[0];
+    // The same nominal receipt label can precede or follow its money field.
+    // A later refund note cannot change that selected amount's ownership.
+    const debit = /\b(?:debited|charged|deducted|spent|withdrawn|paid|purchased|used)\b/iu.test(lead + ' ' + tail) ||
+      /\b(?:purchase|payment|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead) ||
+      /^\s*(?:purchase|payment|withdrawal|transaction)\b/iu.test(tail);
+    return (debit || event.direction === 'debit') && isIncompletePrincipal(moneySource, span, true);
+  });
+  // This amount belongs to an unfinished debit, not the later refund note.
+  // Safe refusal also protects native's informational-credit preview from
+  // displaying the purchase amount as an unstated/different refund amount.
+  const incompleteExpense = incompletePrincipal && !event.amount.spans.every(span => hasSelectedCreditPredicate(moneySource, span));
+  if (incompleteExpense) {
+    if (mentionsCredit(source)) return null;
+    // A structurally uncertain expense still belongs in informational Review.
+    // Keep its own facts without granting confirmation or credit authority.
+    event = { ...event, status: 'informational', direction: event.direction === 'credit' ? 'unknown' : event.direction,
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+  }
+  // Unknown direction is not completion evidence. Keep the original token
+  // hold on Review authority without inventing an incoming/outgoing direction.
+  if (hasUnsettledCreditToken(source) && event.status === 'unknown' &&
+    (event.direction === 'unknown' || event.direction === 'none')) {
+    event = { ...event, status: 'informational',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+  }
+  if (!incompleteExpense && !cardCreditAliases && !(event.direction === 'debit' && event.status === 'posted') &&
+    (creditReviewOnly || (event.direction === 'credit' && hasUnsettledCreditToken(source)) ||
+    (mentionsCredit(source) && (event.direction === 'unknown' || event.direction === 'none') &&
+      (event.status === 'unknown' || event.status === 'informational')))) event = informationalCreditReview(source, event);
   if (event.decision !== 'review') return null;
   if (cardCreditAliases) {
     if (event.status !== 'posted' && event.status !== 'unknown') return null;
@@ -286,7 +399,7 @@ export const inspectGenericBankEventForReview = (
     event.instrument.value?.kind !== 'card' || event.instrument.value.last4 !== senderlessCard?.[1])) return null;
   if (hasNativeCurrencyAccountContext(source) && !hasBankAlertMoneyHint(source) &&
     (event.amount.evidence !== 'explicit' || event.amount.value?.currency !== 'ZAR')) return null;
-  if (noContext && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
+  if (noContext && !informationalRefundClaim && !cardCreditAliases && !((event.direction === 'credit' || ((footerAdmitted || cardAdmitted) && event.direction === 'debit')) &&
     event.status === 'posted' && event.amount.evidence !== 'missing')) return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
@@ -874,7 +987,7 @@ const launchSenderAnswersFor = (source: string, sender: string, parsed: ParsedSm
     parsed.card?.kind === 'credit' && /^\d{4}$/u.test(parsed.card.last4) &&
     parsed.currency === pinnedLedgerCurrencyCode() && parsed.fxSource !== 'fallback' &&
     isSafeCardRepaymentReviewSource(source) && !hasNonCompletedWording(source, null, sender);
-  if (isNotAutoPostableMoney(source) && !provedSettlement) return false;
+  if (isNotAutoPostableMoney(withoutUncompletedRequestNotes(source)) && !provedSettlement) return false;
   if (!isAbsentLaunchSender(sender)) return !isUnverifiedAlertSender(sender);
   if (parsed.kind !== 'transaction') return true;
   return parsed.type !== 'income' || namesOwnInstrumentTail(source, 'credit');
@@ -1132,7 +1245,29 @@ export const createLaunchAlertSession = ({
     });
   };
 
-  return { inspect, parse, parseUnproven, detectedMarket: () => detected };
+  // All exits, including semantic reconstruction and early request-note
+  // reparsing, pass the same original-text credit veto.
+  const guard = (reader: typeof parse): typeof parse => (source, sender, inspection, forcedMarket, observedAt) => {
+    const holdCredit = hasUnsettledCreditToken(source);
+    if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
+    const result = reader(source, sender, inspection, forcedMarket, observedAt);
+    if (result?.kind === 'transaction' && result.type === 'expense') return hasUnsettledPrincipal(source, result, true) ? null : result;
+    const pair = completedDebitBesideCredit(source, { sender });
+    const reason = pair ? nonPostingReason(source) : null;
+    // The regional grammar can preserve its known debit. A clipped fragment
+    // must never upgrade an uncertified worldwide format's posting authority.
+    if (pair && (pinnedCurrency === 'AED' || pinnedCurrency === 'SAR') &&
+      (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasPersonalMessagePrefix(source, sender) &&
+      !hasClickLinkPrompt(source) && !/https?:\/\/|www\./iu.test(source)) {
+      const debit = reader(pair.debit, sender, inspect(pair.debit, sender), forcedMarket, observedAt);
+      if (debit?.kind === 'transaction' && debit.type === 'expense') return { ...debit, raw: source };
+    }
+    return result?.kind === 'transaction' && result.type === 'income' && holdCredit ? null : result;
+  };
+  const guardedUnproven = guard((source, sender, inspection, _forcedMarket, observedAt) =>
+    parseUnproven(source, sender, inspection, observedAt));
+  return { inspect, parse: guard(parse), parseUnproven: (source, sender, inspection, observedAt) =>
+    guardedUnproven(source, sender, inspection, undefined, observedAt), detectedMarket: () => detected };
 };
 
 /**

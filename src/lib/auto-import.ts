@@ -1,3 +1,4 @@
+import { canReviewCreditRefusal, hasUnsettledCreditToken, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -27,7 +28,9 @@ import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
+  completedDebitBesideCredit,
   nonPostingReason,
+  hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
   parseSms,
   PARSER_VERSION,
@@ -39,6 +42,7 @@ import {
   hasBankAlertMoneyHint,
   hasGenericBankAlertContext,
   inspectGenericBankEventForReview,
+  inspectSupplementaryReversal,
   isHeldLaunchCredit,
   isUnaccountableLaunchSender,
   type LaunchAlertSession,
@@ -67,7 +71,7 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, isSafeCardRepaymentReviewSource, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import { missingUniversalField, type UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
@@ -983,7 +987,7 @@ function parsedUniversalPosting(
  * capture. Source and sender are consumed only while inspecting; neither can
  * appear in the returned decision.
  */
-export function inspectSourceFreeRefusedAlert(input: {
+function inspectSourceFreeRefusedAlertCore(input: {
   source: string;
   sender: string;
   observedAt: number;
@@ -992,6 +996,8 @@ export function inspectSourceFreeRefusedAlert(input: {
   existingInspection?: UniversalAlertReview | null;
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
+  /** Internal collector context: the primary debit is already accepted. Never authorizes it. */
+  acceptedExpense?: ParsedSms;
 }): SourceFreeRefusedAlertDecision {
   // A footer made of link WORDS only ("If not you, tap here to block your card") names no address, so it cannot be a
   // phishing link; the debit above it must reach Review, never be dropped. It is blanked for this inspection only:
@@ -1004,6 +1010,37 @@ export function inspectSourceFreeRefusedAlert(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
+    completedDebitBesideCredit(input.source, { sender: input.sender }) && !/https?:\/\/|www\./iu.test(input.source)) {
+    const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
+    const pair = completedDebitBesideCredit(input.source, { sender: input.sender })!;
+    const note = inspectSupplementaryReversal(input.source, input.sender);
+    let event = accepted ? note : note ? inspectGenericBankEventForReview(pair.debit, input.sender) : null;
+    if (!accepted && event) event = { ...event, decision: 'review', status: 'informational', direction: 'debit',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+    const review = event ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  // An unsettled credit is financial evidence, not confirmation authority.
+  // Prefer its typed informational Review before the legacy refusal/template path.
+  if (canReviewCreditRefusal(source, reason) && hasBankAlertMoneyHint(source) &&
+    !(input.channel === 'push' && isPromotionalBankPush(source))) {
+    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    const heldMoney = event?.issues.includes('unsettled-credit-not-posting') || hasOnlyUnsettledCredit(input.source) ||
+      hasUnsettledCreditToken(input.source) || mentionsCredit(input.source);
+    const review = heldMoney && event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;
@@ -1117,6 +1154,37 @@ export function inspectSourceFreeRefusedAlert(input: {
     ...candidate
   } = reviewPrepared;
   return { kind: 'review', candidate };
+}
+
+/** Last-line authority guard also covers registered templates and enrichment. */
+function guardIncomingReview(source: string, decision: SourceFreeRefusedAlertDecision, hold: boolean): SourceFreeRefusedAlertDecision {
+  if (decision.kind !== 'review' || !hold) return decision;
+  const candidate = decision.candidate;
+  if (candidate.kind === 'universal') {
+    if (candidate.event.direction !== 'credit' && !(candidate.event.direction === 'unknown' && mentionsCredit(source))) return decision;
+    return { kind: 'review', candidate: { ...candidate, event: informationalCreditReview(source, candidate.event) } };
+  }
+  if (candidate.direction !== 'credit') return decision;
+  const amount = { value: candidate.amount, evidence: 'explicit' as const, spans: [], alternatives: [], issues: [] };
+  const event: UniversalBankEvent = { version: 1, decision: 'review', family: candidate.family,
+    status: 'informational', direction: 'credit', amount,
+    statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
+    creditLimit: missingUniversalField(), merchant: missingUniversalField(), transactionDate: missingUniversalField(),
+    dueDate: missingUniversalField(), statementDate: missingUniversalField(), instrument: candidate.instrument
+      ? { value: candidate.instrument, evidence: 'explicit', spans: [], alternatives: [], issues: [] } : missingUniversalField(),
+    observations: [{ role: 'transaction', field: amount }], issues: ['unsettled-credit-not-posting'] };
+  const prepared = prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+    observedAt: candidate.observedAt, channel: candidate.channel, event });
+  if (!prepared) return { kind: 'ignored', reason: 'unrecognized' };
+  const { id: _id, sourceKey: _sourceKey, ...free } = prepared;
+  return { kind: 'review', candidate: free };
+}
+
+export function inspectSourceFreeRefusedAlert(
+  input: Parameters<typeof inspectSourceFreeRefusedAlertCore>[0],
+): SourceFreeRefusedAlertDecision {
+  const hold = hasUnsettledCreditToken(input.source) || hasOnlyUnsettledCredit(input.source);
+  return guardIncomingReview(input.source, inspectSourceFreeRefusedAlertCore(input), hold);
 }
 
 /** Attach an opaque identity only after review admission has removed source. */
@@ -1264,7 +1332,9 @@ export async function scanInbox(
     notificationId?: string,
     /** The parser read an obligation that this transport may only review. */
     preferParsedFallback = false,
+    acceptedExpense?: ParsedSms,
   ): Promise<SourceFreeRefusedAlertDecision> => {
+    const holdIncomingOriginal = hasUnsettledCreditToken(body) || hasOnlyUnsettledCredit(body);
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
@@ -1273,6 +1343,7 @@ export async function scanInbox(
       session: launchSession,
       existingInspection,
       skipUniversalFallback,
+      acceptedExpense,
     });
     if (preferParsedFallback && parsedFallback && decision.kind === 'review') {
       decision = { kind: 'review', candidate: parsedFallback };
@@ -1306,6 +1377,7 @@ export async function scanInbox(
         } else decision = { kind: 'review', candidate: aiCandidate };
       }
     }
+    decision = guardIncomingReview(body, decision, holdIncomingOriginal);
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
     // came from a business sender ID. Letters in the sender mark an
@@ -1527,12 +1599,14 @@ export async function scanInbox(
         const shadowInspection = inspectGenericBankEventForReview(sms.body, sms.address);
         if (shadowInspection) queueLocalSemanticParserShadow(sms.body, shadowInspection);
       }
-      const reviewDecision = p && shouldReviewParsedIncome(p)
+      const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
+      const reviewDecision = p && (shouldReviewParsedIncome(p) || supplementary)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
+            undefined, undefined, false, false, undefined, false, supplementary ? p : undefined,
           )
         : null;
-      const reviewed = reviewDecision?.kind === 'review';
+      const reviewed = !supplementary && reviewDecision?.kind === 'review';
       if (p && !reviewed) {
         // A parser improvement can turn an old review into a normal parsed
         // row. Attest its old identity before planning, but do no extra source
@@ -1644,11 +1718,12 @@ export async function scanInbox(
           const heldPayment = p?.kind === 'cardPayment' && p.bestEffort ? p : null;
           const obligation = heldPayment ? parsedFinancialCandidateReview(heldPayment, sms.date) : null;
           const deliveryFallback = obligation ? { ...obligation, channel: 'delivery' as const } : null;
-          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p))
+          const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
+          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p) || supplementary)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
-                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment)
+                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment, supplementary ? p : undefined)
             : null;
-          const reviewed = reviewDecision?.kind === 'review';
+          const reviewed = !supplementary && reviewDecision?.kind === 'review';
           if (p && !reviewed && !heldPayment) {
             parsed.push({
               ...p,
@@ -1920,14 +1995,15 @@ export async function scanInbox(
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
         const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
-        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
+        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && autoAuthorized && !!completedDebitBesideCredit(source, { sender });
+        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized || supplementary)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
               reviewFallback, skipKnownLaunchUniversal,
-              false, n.id,
+              false, n.id, false, supplementary ? p : undefined,
             )
           : null;
-        const reviewed = refusal?.kind === 'review';
+        const reviewed = !supplementary && refusal?.kind === 'review';
         let handled = false;
         if (p && autoAuthorized && !reviewed) {
           parsed.push({

@@ -1,3 +1,4 @@
+import { creditSourceDisposition, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { missingUniversalField, type UniversalBankEvent, type UniversalParseContext } from '@/lib/universal-types';
 import {
   accountMovementDirection, cjkNonPostingVerdict, hasDeclinedWording, inspectMarketAlert, nonPostingTailVerdict, runWithClauseMemo,
@@ -5,7 +6,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus } from '@/lib/principal-posting-guards';
+import { completedArabicPrincipalReturnTarget, withoutUnrelatedPendingTransactionStatus, isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -307,6 +308,7 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
 export function inspectUniversalBankEvent(source: string, context: UniversalParseContext = {}): UniversalBankEvent {
   if (typeof source !== 'string' || !source.trim()) return emptyEvent('empty-input');
   if (source.length > 4096) return emptyEvent('input-too-long');
+  source = withoutUnrelatedPendingTransactionStatus(source);
   // An exact Brazilian, Colombian, Mexican or Peruvian bank template owns its
   // whole message: its money, family, direction and posting decision come from
   // that template alone (src/lib/latam-alert-templates.ts).
@@ -607,10 +609,25 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     !money.observations.some((observation) => observation.role === 'fee')) {
     family = ownAccountMovementFamily(maskedSource, direction) ?? family;
   }
+  // Preserve source-level selected-movement refusals at the generic Review
+  // boundary too. A confirmation cannot manufacture settlement of this source.
+  // Folding these Arabic letters is length-preserving, so money spans stay bound.
+  const statusSource = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي').replace(/ؤ/gu, 'و');
+  const selectedNonPosting = direction !== 'credit' && money.amount.spans.some(span =>
+    isIncompletePrincipal(statusSource, span) || hasIncompletePrincipalReference(statusSource.slice(span.end)));
+  const samePrincipalReturn = money.amount.spans.some(span => hasCompletedPrincipalReturn(source, span));
+  const unresolvedReturnAccount = source.includes('استرداد') && money.amount.spans.some(span =>
+    completedArabicPrincipalReturnTarget(source, span) === 'account');
+  if (selectedNonPosting) status = 'informational';
+  if (samePrincipalReturn) {
+    family = 'refund'; direction = 'credit'; status = 'informational';
+  }
+  const creditReviewOnly = creditSourceDisposition(source) === 'review';
+
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
-  const decision = reviewable && status !== 'failed' && !authentication && !pending && !promotion ? 'review' : 'ignore';
+  const decision = reviewable && status !== 'failed' && !authentication && (!pending || creditReviewOnly) && !promotion ? 'review' : 'ignore';
   // Banks with synthetic-only evidence (Plin, Interbank, BBVA Perú, Santander
   // México, Citibanamex) are identified for Review but never post. Only with
   // that market's context: "Interbank transfer of $500.00" is a US alert.
@@ -632,15 +649,20 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
     ...(authentication ? ['authentication-not-posting'] : []),
     ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
+    ...(selectedNonPosting || samePrincipalReturn ? ['unsettled-credit-not-posting'] : []),
     ...(cardSettlement ? ['settlement-adapter-required'] : []),
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),
   ];
-  return {
+
+  const event: UniversalBankEvent = {
     version: 1, decision, family, status, direction,
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,
     balance: money.balance, creditLimit: money.creditLimit,
-    ...fields, observations: money.observations, issues: [...new Set(issues)],
+    ...fields,
+    ...(unresolvedReturnAccount ? { instrument: missingUniversalField<NonNullable<UniversalBankEvent['instrument']['value']>>() } : {}),
+    observations: money.observations, issues: [...new Set(issues)],
   };
+  return creditReviewOnly ? informationalCreditReview(source, event) : event;
 }

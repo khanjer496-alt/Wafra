@@ -10,7 +10,7 @@ const {
   isInformationOnlyAlert,
 } = require('./build/sms-parser');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, retainedCredits = 0;
 /**
  * `options` is the optional third argument to parseSms — today just
  * `{ sender }`. Every call that omits it exercises the no-sender path, which
@@ -19,8 +19,21 @@ let pass = 0, fail = 0;
 function t(name, msg, expect, options) {
   const p = parseSms(msg, undefined, options);
   const errs = [];
+  let retained = false;
   if (expect === null) {
     if (p !== null) errs.push(`expected SKIP, got ${JSON.stringify({m:p.merchant,a:p.amountFils,k:p.kind,t:p.type})}`);
+  } else if (expect.review || (!p && expect.type === 'income')) {
+    if (p !== null) errs.push('uncertain credit must not create a ledger candidate');
+    const { createLaunchAlertSession } = require('./build/launch-alert-parser');
+    const current = require('./build/markets').getActiveMarket();
+    const session = createLaunchAlertSession({ overrides: {}, activeMarket: current.id, pinnedCurrency: expect.currency ?? current.currency.code });
+    const held = require('./build/auto-import').inspectSourceFreeRefusedAlert({ source: msg, sender: options?.sender ?? '',
+      observedAt: Date.parse('2026-11-14T10:00:00Z'), channel: 'inbox', session });
+    const event = held.kind === 'review' && held.candidate.kind === 'universal' ? held.candidate.event : null;
+    if (event?.status !== 'informational' || event.amount.value?.minorUnits !== String(expect.amountFils) ||
+      (expect.currency && event.amount.value?.currency !== expect.currency)) errs.push('exact money must remain in informational Review');
+    retained = event?.status === 'informational' && errs.length === 0;
+    if (event && require('./build/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event })) errs.push('informational credit cannot be confirmed into the ledger');
   } else {
     if (!p) errs.push('expected parse, got null');
     else {
@@ -66,7 +79,7 @@ function t(name, msg, expect, options) {
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
-  else { pass++; console.log(`✓ ${name}`); }
+  else { pass++; if (retained) retainedCredits++; console.log(`✓ ${name}${retained ? " [informational, not posted]" : ""}`); }
 }
 
 /** For the handful of claims that are about something other than one parse. */
@@ -2451,9 +2464,8 @@ t('an automated savings rule is a transfer too',
   'AED 4,000.00 has been debited from your account no. 096XXX13XXX 0007 RULE TRANSFER TO EMERGENCY FUNDS WITH ONE-SHOT SAV. The available balance is AED 4,000.95.',
   { merchant: 'Savings transfer', amountFils: 400000, transfer: true });
 
-t('a refund says so',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { merchant: 'Refund', type: 'income', amountFils: 5889 });
+t('issuing a refund does not prove money reached the account',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 t("Etisalat's own app is telecom, not Other",
   'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
@@ -4445,9 +4457,8 @@ bank('(not a bank)', 'merchant and delivery senders',
   'The parser must read what a shop sends too, and must not mistake it for a\n   bank alert.');
 
 // REAL corpus #346 (seen 1x). Suffix currency, no card, no bank.
-fmt('REAL', 'merchant refund with a suffix currency and no card',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { type: 'income', amountFils: 5889, merchant: 'Refund', category: 'other', card: null });
+fmt('REAL', 'issued merchant refund does not prove a settled bank credit',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 // ─────────── Sender attribution and the no-sender guarantee ───────────
 bank('(sender plumbing)', 'all of the above', 'That the sender is read, and that omitting it changes nothing.');
@@ -5641,7 +5652,7 @@ t('a purchase that "has been refunded" reverses too',
   { type: 'income', amountFils: 30000 });
 t('the multi-line "Debit Card Refund" header is a refund',
   'Debit Card Refund\nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE\n19/02/26 15:45\nBalance AED 1780.67',
-  { type: 'income', amountFils: 5358 });
+  { review: true, amountFils: 5358 });
 // CONTROL: an ordinary debit-card purchase is still spending. The refund rule
 // may not claim a message just because it names a debit card.
 t('a plain debit-card purchase is untouched by the refund rule',
@@ -6232,11 +6243,12 @@ for (const [merchant, footer] of [
   setActiveMarket('AE');
   const overrides = { 'expense:starbucks': 'groceries', 'income:starbucks': 'other' };
   const expense = parseSms('Purchase of AED 45.00 with Credit Card ending 1234 at STARBUCKS.', overrides);
-  const income = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides);
+  ok('a bare refund heading cannot acquire posting authority from a category override', parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides) === null);
+  const income = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', overrides);
   ok('directional merchant rules give purchases and refunds independent defaults',
     expense.categoryGuess === 'groceries' && expense.categoryPinned === true &&
     income.categoryGuess === 'other' && income.categoryPinned === true);
-  const legacy = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
+  const legacy = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
   ok('legacy expense Other does not silently become an income rule', legacy.categoryPinned !== true);
   ok('direction compatibility accepts Other both ways and rejects unknown IDs',
     overrideFitsDirection('other', 'income') && overrideFitsDirection('other', 'expense') &&
@@ -6565,9 +6577,9 @@ t('the single-movement twin of the two-movement Arabic alert still posts',
 t('the single-movement twin of the two-movement English alert still posts',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery.',
   { amountFils: 6200, type: 'expense', merchant: 'Harbor Lamp Bakery' });
-t('two separate movements in one alert are not posted as one',
+t('a completed debit remains its own expense beside a separate refund note',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery. A separate refund of AED 18.50 from Olive Crate Store was also credited today.',
-  null);
+  { type: 'expense', amountFils: 6200, merchant: 'Harbor Lamp Bakery' });
 t('two separate Arabic movements in one alert are not posted as one',
   'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٣٠٠.',
   null);
@@ -7431,5 +7443,5 @@ t('control: a payment credited to a named biller account stays an expense',
   ok('fold review control: the spaced four-digit ADCB tail is •6383', adcb?.card?.last4 === '6383', adcb?.card);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed; ${retainedCredits} incoming controls retained informationally`);
 process.exit(fail ? 1 : 0);

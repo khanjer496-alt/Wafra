@@ -2448,6 +2448,11 @@ ok('the spoken label matches the visible repayment exception and direction',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',
+    // A refund headline's money subject recognizes ISO currency tokens.
+    'credit-settlement-guards.ts',
+    // Completion proof locates stated price/FX boundaries without choosing,
+    // converting or changing the selected amount or its currency.
+    'principal-posting-guards.ts',
     // Learned formats re-check exponents.
     'learned-alert-formats.ts',
     // Gulf-neighbour posting checks the launch grammar's original amount is

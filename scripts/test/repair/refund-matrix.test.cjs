@@ -35,7 +35,9 @@ const load = require('../../universal-test/load-ts.cjs').createLoader();
 const markets = load('@/lib/markets');
 const country = load('@/lib/country');
 const { parseSms } = load('@/lib/sms-parser');
-const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
+const { createLaunchAlertSession, inspectGenericBankEventForReview, inspectSupplementaryReversal } = load('@/lib/launch-alert-parser');
+const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
+const { planConfirmedUniversalImport } = load('@/lib/universal-import');
 const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 
 // Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
@@ -44,13 +46,13 @@ const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
 // Predicate PR 2 (the Arabic table) brought false income to 0 on every path, in both languages: the store gate's number.
 const CEILING = {
   falseIncome: { parseSms: 0, session: 0, native: 0 },
-  wrongDirection: { parseSms: 42, session: 40, native: 0 },
+  wrongDirection: { parseSms: 0, session: 0, native: 0 },
   wrongAmount: { parseSms: 0, session: 0, native: 0 },
-  lostIncome: { parseSms: 36, session: 36, native: 0 },
-  droppedDebit: { parseSms: 208, session: 208, native: 0 },
-  postedNotReview: { parseSms: 21, session: 21, native: 10 },
+  lostIncome: { parseSms: 0, session: 0, native: 0 },
+  droppedDebit: { parseSms: 37, session: 37, native: 0 },
+  postedNotReview: { parseSms: 12, session: 12, native: 10 },
 };
-const NATIVE_IGNORED_INCOME_CEILING = 157;
+const NATIVE_IGNORED_INCOME_CEILING = 38;
 // Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
 // C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
 // "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23
@@ -59,18 +61,16 @@ const NATIVE_IGNORED_INCOME_CEILING = 157;
 // "completed beside pending" rows; from #242's follow-up, the ten C29 bare-alef "ان" refunds). They are pinned by id and
 // kept out of the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails.
 // Delete an id when native posts its row.
-const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05407',
-  'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05475', 'CTL-05476',
-  'CTL-05477', 'CTL-05478', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05507', 'CTL-05508', 'CTL-05510', 'CTL-05511',
-  'CTL-05512', 'CTL-05513', 'CTL-05514', 'CTL-05515', 'CTL-05531', 'CTL-05532', 'CTL-05533', 'CTL-05534', 'CTL-05535',
-  'CTL-05536', 'CTL-05547', 'CTL-05548', 'CTL-05558', 'CTL-05559', 'CTL-05560', 'CTL-05561', 'CTL-05565', 'CTL-05566',
-  'CTL-05567', 'CTL-05568', 'CTL-05569', 'CTL-05581', 'CTL-05582', 'CTL-05583', 'CTL-05584', 'CTL-05585']);
+const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05508', 'CTL-05510', 'CTL-05511',
+  'CTL-05512', 'CTL-05513', 'CTL-05548', 'CTL-05558', 'CTL-05559', 'CTL-05560', 'CTL-05561', ]);
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen).
 const ORACLE_PIN = { rows: 5586, sha256: '8622534b13c09b1f57797ea07fea2c515bff75239745e21c402001b2a8e205c7' };
 
 const PATHS = ['parseSms', 'session', 'native'];
-const at = Date.parse('2026-11-05T10:00:00Z');
+// The synthetic completed receipts are dated Nov 12/13. Observe them after
+// those dates; a future-date preview refusal is a different, separately tested policy.
+const at = Date.parse('2026-11-14T10:00:00Z');
 const root = path.resolve(__dirname, '../../..');
 const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
 const meta = JSON.parse(fs.readFileSync(path.join(resources, 'WafraBackgroundParser.meta.json')));
@@ -88,6 +88,8 @@ const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pi
 const shape = (p) => (p ? `${p.kind === 'transaction' ? p.type : p.kind} ${p.amountFils}` : 'none');
 const nativeShape = (n) => (n.route === 'parsed' ? `${n.notification.direction} ${n.notification.amount?.minorUnits}` : n.route);
 const isIncomeRow = (expected) => expected === 'INCOME_REFUND' || expected === 'INCOME_DEBIT';
+const EXPLICIT_DEBIT_CONTROL_MINOR_UNITS = { 'CTL-05408': '25000', 'CTL-05390': '5000' };
+const EXPLICIT_NOTE_CONTROL_MINOR_UNITS = { 'CTL-05408': '10000', 'CTL-05390': null };
 
 // The class of a wrong outcome; null when the path agrees with the oracle.
 function gapClass(expected, pathName, got) {
@@ -109,13 +111,87 @@ function gapClass(expected, pathName, got) {
   return posted ? 'postedNotReview' : null;
 }
 
-function judge(row) {
-  const got = {
+const exactAed = (money, minor) => minor === null ? money === null :
+  money?.currency === 'AED' && money.exponent === 2 && money.minorUnits === minor;
+function informationalRefuses(event, marker) {
+  if (event?.decision !== 'review' || event.status !== 'informational' || !event.issues.includes(marker) ||
+    isMoneyMovementReview({ kind: 'universal', event })) return false;
+  return [event, { ...event, status: 'posted' }].every(candidate => {
+    const result = planConfirmedUniversalImport({ hydrated: true }, candidate,
+      { confirmed: true, postingStatus: 'posted', direction: 'credit', amount: { currency: 'AED', minorUnits: '25000' } });
+    return result.outcome === 'refused' && result.reason === 'not-posted';
+  });
+}
+function judge(row, evidence) {
+  const nativeResult = evidence ? evidence.nativeResult : native(row.body);
+  const got = evidence ? evidence.got : {
     parseSms: shape(parseSms(row.body, {}, { sender: 'ENBD', observedAt: at })),
     session: shape(session.parse(row.body, 'ENBD', session.inspect(row.body, 'ENBD'), undefined, at)),
-    native: nativeShape(native(row.body)),
+    native: nativeShape(nativeResult),
   };
   const gaps = {};
+  const event = evidence ? evidence.event : inspectGenericBankEventForReview(row.body, 'ENBD');
+  const heldCandidate = isIncomeRow(row.expected) && got.parseSms === 'none' && got.session === 'none' &&
+    got.native === 'review' && event?.decision === 'review' && event.status === 'informational';
+  const heldInformational = heldCandidate && event.direction === 'credit' && exactAed(event.amount.value, '25000') &&
+    informationalRefuses(event, 'unsettled-credit-not-posting') && nativeResult.route === 'review' &&
+    nativeResult.notification?.style === 'review' && nativeResult.notification.direction === 'credit' &&
+    exactAed(nativeResult.notification.amount, '25000');
+  if (heldCandidate && !heldInformational) return { got, gaps, nativeIgnoredIncome: false,
+    policyError: { id: row.id, body: row.body, reason: 'held credit money or refusal mismatch', event, nativeResult } };
+  // CEO 524bd56e: retain the independently stated completed debit instead of
+  // interpreting its reversal note as income. The original oracle is kept
+  // pinned; this explicit product-policy overlay does not rewrite its rows.
+  const c = row.case;
+  // CEO 3e710253: the definite Arabic amount is the same ownership class
+  // as This amount. Keep the pinned INCOME_DEBIT oracle and corpus intact.
+  const arabicOwnedReturn = row.lang === 'AR' && row.rule.startsWith('D8') && c?.debit &&
+    c.subject === 'impersonal' && c.verb === 'refunded' && c.aspect === 'has been' &&
+    c.leader === 'none' && c.amount === 'none' && c.trail === 'none' &&
+    ['your card', 'your account'].includes(c.dest);
+  if (arabicOwnedReturn && c.dest === 'your account') {
+    if (got.parseSms !== 'none' || got.session !== 'none' || !heldInformational ||
+      event.instrument.value !== null || event.instrument.evidence !== 'missing' ||
+      event.instrument.alternatives.length !== 0 || nativeResult.notification.instrument !== null) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'unresolved owned-return account contract mismatch', ...got, event, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'held-owned-account-return' };
+  }
+  // Reviewed semantic split; the frozen D8 generator and every body stay pinned.
+  // Same-money reference or returning the identified purchase binds its amount.
+  // A merchant crediting "your refund" or bare "The refund" leaves amount unknown.
+  const linkedSelectedReturn = arabicOwnedReturn || row.lang === 'EN' && row.rule.startsWith('D8') && c?.debit &&
+    (['it', 'this amount', 'a refund of the same'].includes(c.subject) ||
+      (c.subject === 'merchant' && !c.verb.startsWith('processed')));
+  if (linkedSelectedReturn) {
+    // Preserve the preexisting exact-money, marker-protected credit Review contract.
+    if (heldInformational && !arabicOwnedReturn) return { got, gaps, nativeIgnoredIncome: false, policy: 'held-informational' };
+    if (got.parseSms !== 'income 25000' || got.session !== 'income 25000' ||
+      nativeResult.route !== 'review' || nativeResult.notification?.style !== 'review' ||
+      nativeResult.notification.direction !== 'credit' || !exactAed(nativeResult.notification.amount, '25000')) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'owned-return contract mismatch', ...got, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'owned-selected-return' };
+  }
+  const debitWithCreditNote = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ||
+    (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) ||
+      (row.lang === 'EN' && c.subject === 'merchant') || c.trail === 'reversed'));
+  if (debitWithCreditNote) {
+    const note = evidence ? evidence.note : inspectSupplementaryReversal(row.body, 'ENBD');
+    const minor = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ?? '25000';
+    // The frozen generator states AED100 only when the separate note has its
+    // own amount. Control C13 also explicitly names AED100; C6 names none.
+    const noteMinor = Object.hasOwn(EXPLICIT_NOTE_CONTROL_MINOR_UNITS, row.id) ? EXPLICIT_NOTE_CONTROL_MINOR_UNITS[row.id]
+      : c?.debit && c.amount !== 'none' ? '10000' : null;
+    if (got.parseSms !== `expense ${minor}` || got.session !== `expense ${minor}` || got.native !== `debit ${minor}` ||
+      !exactAed(nativeResult.notification?.amount, minor) || note?.direction !== 'none' ||
+      !exactAed(note?.amount.value, noteMinor) || !informationalRefuses(note, 'supplementary-reversal-info')) return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, ...got, noteMinor, note: note ?? null } };
+  }
+  if (heldInformational || debitWithCreditNote) return { got, gaps, nativeIgnoredIncome: false,
+    policy: heldInformational ? 'held-informational' : 'debit-plus-note' };
   for (const name of PATHS) if (gapClass(row.expected, name, got[name])) gaps[name] = got[name];
   const nativeIgnoredIncome = isIncomeRow(row.expected) && !/^(credit|debit) /.test(got.native);
   return { got, gaps, nativeIgnoredIncome };
@@ -126,6 +202,57 @@ const knownFile = JSON.parse(knownText);
 const known = knownFile.gaps;
 const rows = buildOracleRows();
 const rowById = new Map(rows.map((row) => [row.id, row]));
+for (const [name, rowId, mutate] of [
+  ['card cannot substitute held source', 'AR-04449', e => { e.got.parseSms = e.got.session = 'none'; }],
+  ['account cannot post automatically', 'AR-04455', e => { e.got.parseSms = e.got.session = 'income 25000'; }],
+  ['account cannot inherit debited card', 'AR-04455', e => { e.nativeResult.notification.instrument = { kind: 'card', last4: '1234' }; }],
+  ['account cannot lose source money', 'AR-04455', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['account cannot lose refusal marker', 'AR-04455', e => { e.event.issues = []; }],
+]) test(`owned Arabic policy rejects ${name}`, () => {
+  const row = rowById.get(rowId);
+  const e = { got: rowId === 'AR-04449'
+    ? { parseSms: 'income 25000', session: 'income 25000', native: 'review' }
+    : { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.ok(judge(row, e).policyError);
+});
+// Mutation controls exercise the policy judge, not the parser oracle. The
+// unmodified payload comes from a real held-credit row; each mutation must
+// lose retention acceptance even when the route names remain unchanged.
+for (const [name, mutate] of [
+  ['generic wrong amount', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['generic wrong currency', e => { e.event.amount.value.currency = 'USD'; }],
+  ['generic debit direction', e => { e.event.direction = 'debit'; }],
+  ['generic missing refusal marker', e => { e.event.issues = []; }],
+  ['native wrong amount', e => { e.nativeResult.notification.amount.minorUnits = '1'; }],
+  ['native wrong currency', e => { e.nativeResult.notification.amount.currency = 'USD'; }],
+  ['native debit direction', e => { e.nativeResult.notification.direction = 'debit'; }],
+  ['native movement style', e => { e.nativeResult.notification.style = 'movement'; }],
+]) test(`retention policy rejects ${name}`, () => {
+  const row = rowById.get('AR-04077');
+  const e = { got: { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.notEqual(judge(row, e).policy, 'held-informational');
+});
+for (const [name, mutate] of [
+  ['borrowed amount', n => { n.amount.value = { currency: 'AED', exponent: 2, minorUnits: '25000' }; }],
+  ['wrong currency', n => { n.amount.value = { currency: 'USD', exponent: 2, minorUnits: '10000' }; }],
+  ['credit direction', n => { n.direction = 'credit'; }],
+  ['missing refusal marker', n => { n.issues = []; }],
+]) test(`debit-note policy rejects ${name}`, () => {
+  const row = rows.find(r => r.case?.debit && r.case.amount === 'before' && judge(r).policy === 'debit-plus-note');
+  assert.ok(row, 'a frozen row with an independently stated AED100 note exists');
+  const note = structuredClone(inspectSupplementaryReversal(row.body, 'ENBD'));
+  mutate(note);
+  const e = { got: { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' },
+    nativeResult: native(row.body), event: inspectGenericBankEventForReview(row.body, 'ENBD'), note };
+  assert.notEqual(judge(row, e).policy, 'debit-plus-note');
+});
+
 const groups = new Map();
 for (const row of rows) {
   const key = `${row.lang} ${row.rule.split(' ')[0]} ${row.expected}`;
@@ -134,7 +261,7 @@ for (const row of rows) {
 }
 
 const current = {};
-const report = { total: rows.length, gaps: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
+const report = { total: rows.length, gaps: [], policy: [], policyFailures: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
   falseIncomeByLang: {} };
 for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
   test(`refund matrix ${key} (${list.length} cases)`, (t) => {
@@ -143,6 +270,13 @@ for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     let pinned = 0;
     for (const row of list) {
       const verdict = judge(row);
+      if (verdict.policyError) {
+        report.policyFailures.push(verdict.policyError); failures.push(`${row.id} debit parity ${JSON.stringify(verdict.policyError)}`); continue;
+      }
+      if (verdict.policy) {
+        report.policy.push({ id: row.id, policy: verdict.policy, expected: row.expected, ...verdict.got });
+        continue;
+      }
       if (NATIVE_IGNORED_CONTROL_ROWS.has(row.id)) {
         if (verdict.nativeIgnoredIncome) pinned++;
         else failures.push(`${row.id} STALE native ignore: native now ${verdict.got.native}; delete it from NATIVE_IGNORED_CONTROL_ROWS`);

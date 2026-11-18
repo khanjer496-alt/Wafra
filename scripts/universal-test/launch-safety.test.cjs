@@ -287,8 +287,6 @@ const round4Never = [
   ['SA', 'AlRajhiBank', 'Refund | Merchant: SAMPLE STORE | Card: ·4937 | Transaction amount: SAR 633.00 debited'],
   ['AE', 'EmiratesNBD', 'Your Debit Card ending 1234 has been used for AED 245.50 at SAMPLE MART, will be approved shortly.'],
   ['AE', 'EmiratesNBD', 'Your Debit Card ending 1234 has been used for AED 245.50 at SAMPLE MART. The transaction is under process.'],
-  // A refund that also states a withdrawal/payment: direction unproven.
-  ['AE', 'EmiratesNBD', 'تم إرجاع مبلغ 724.87 درهم إلى حسابك. تم سحب مبلغ 724.87 درهم من حسابك لدى SAMPLE'],
   // An SNB correction heading over a withdrawal field.
   ['SA', 'SNB-AlAhli', 'تصحيح سحب نقدي\nمبلغ: 500 SAR\nبطاقة: 1234\nصراف: 4521'],
   ['SA', 'SNB-AlAhli', 'تصحيح سحب نقدي\nسحب نقدي\nمبلغ: 500 SAR\nبطاقة: 1234'],
@@ -384,4 +382,14 @@ for (const [country, sender, withFooter, withoutFooter] of [
     assert.equal(footer?.type, 'expense', 'the Gulf debit posts');
     assert.equal(footer.amountFils, 64000);
   }
+});
+
+// CEO 61af00a6: preserve the completed withdrawal and retain the reversal as
+// a separate informational note. It is never reclassified as incoming money.
+test('a completed Arabic withdrawal beside a refund keeps its expense and separate note', () => {
+  const row = { country: 'AE', sender: 'EmiratesNBD', body: 'تم إرجاع مبلغ 724.87 درهم إلى حسابك. تم سحب مبلغ 724.87 درهم من حسابك لدى SAMPLE' };
+  const parsed = android(row); assert.equal(parsed?.type, 'expense'); assert.equal(parsed.amountFils, 72487);
+  const result = historyOutcome(row); assert.equal(result.parsed.length, 1); assert.equal(result.parsed[0].type, 'expense');
+  assert.equal(result.reviewCandidates.length, 1); assert.equal(result.reviewCandidates[0].event.status, 'informational');
+  assert.equal(result.reviewCandidates[0].event.direction, 'none'); assert.equal(result.reviewCandidates[0].event.amount.value.minorUnits, '72487');
 });
