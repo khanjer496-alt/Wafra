@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 8f5c5385062b98ac35de763ffd3aa51e6820bbed228976ae4d99b414b4583042
+// Generated from normal shipping TypeScript. Source SHA-256: 8072cadc9558aba9749700039bdbce4d7f2af0fb28d82f583ff2c5b185a17a69
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -8895,6 +8895,19 @@ const inspectGenericBankEventForReview = (source, sender = '', market, sourceCon
     const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
     let event = (0, universal_parser_1.inspectUniversalBankEvent)((0, gulf_neighbour_alerts_1.isGulfNeighbourMarket)(market)
         ? (0, gulf_neighbour_alerts_1.gulfNeighbourReadSource)(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+    const ownedReturnMarket = (0, markets_1.detectLaunchMarketFromSender)(sender);
+    if (moneySource.includes('استرداد') && moneySource.includes('حسابك') && moneySource.includes('المبلغ') &&
+        (ownedReturnMarket === 'AE' || ownedReturnMarket === 'SA')) {
+        const ownedAliases = ownedReturnMarket === 'AE'
+            ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+        const candidate = (0, universal_parser_1.inspectUniversalBankEvent)(moneySource, { ...context,
+            currencyAliases: { ...ownedAliases, ...context.currencyAliases } });
+        if (candidate.amount.evidence === 'explicit' && candidate.amount.spans.length === 1 &&
+            candidate.amount.value?.currency === (ownedReturnMarket === 'AE' ? 'AED' : 'SAR') &&
+            candidate.status === 'informational' && candidate.direction === 'credit' &&
+            (0, principal_posting_guards_1.completedArabicPrincipalReturnTarget)(moneySource, candidate.amount.spans[0]) === 'account')
+            event = candidate;
+    }
     if (event.amount.spans.some(span => (0, principal_posting_guards_1.hasNegatedPrincipalAssertion)(moneySource, span)))
         return null;
     const incompletePrincipal = event.amount.spans.some(span => {
@@ -10257,6 +10270,7 @@ exports.hasCompletedExpensePredicate = hasCompletedExpensePredicate;
 exports.isIncompletePrincipal = isIncompletePrincipal;
 exports.isHedgedPrincipal = isHedgedPrincipal;
 exports.refundPrincipalStatus = refundPrincipalStatus;
+exports.completedArabicPrincipalReturnTarget = completedArabicPrincipalReturnTarget;
 exports.hasCompletedPrincipalReturn = hasCompletedPrincipalReturn;
 exports.isCompletedPrincipalRefund = isCompletedPrincipalRefund;
 exports.isQualifiedCardRepaymentReceipt = isQualifiedCardRepaymentReceipt;
@@ -11137,7 +11151,28 @@ function refundPrincipalStatus(source, spans, monetarySpans = spans) {
         return 'pending';
     return 'completed';
 }
+function completedArabicPrincipalReturnTarget(source, span) {
+    if (!span || !source.includes('المبلغ') || !source.includes('استرداد'))
+        return null;
+    const raw = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي');
+    const scope = sentenceAround(raw, span, true);
+    if (!/[.!;]/u.test(raw[scope.end] ?? ''))
+        return null;
+    const next = raw.slice(scope.end + 1).trim();
+    const returned = /^تم\s+استرداد\s+المبلغ\s+الي\s+(بطاقتك|حسابك)[.!]?$/u.exec(next);
+    if (!returned)
+        return null;
+    if (!isCompletedExpensePrincipal(raw.slice(0, scope.end + 1), span))
+        return null;
+    const outside = raw.slice(0, span.start) + ' '.repeat(span.end - span.start) + raw.slice(span.end);
+    const withoutCard = outside.replace(/(من\s+بطاقتك\s+المنتهيه\s+بـ?\s*)\p{Nd}{4}(?!\p{Nd})/u, '$1');
+    if (withoutCard === outside || /\p{N}/u.test(withoutCard))
+        return null;
+    return returned[1] === 'بطاقتك' ? 'card' : 'account';
+}
 function hasCompletedPrincipalReturn(source, span) {
+    if (source.includes('استرداد') && completedArabicPrincipalReturnTarget(source, span))
+        return true;
     if (!span || !/\b(?:refunded|returned|reversed|credited)\b/iu.test(source))
         return false;
     const scope = sentenceAround(source, span, true);
@@ -15674,6 +15709,8 @@ function hasUnsettledPrincipalInContext(context, parsed) {
         return true;
     if (parsed.type === 'income' && (0, principal_posting_guards_1.isUnqualifiedCardCredit)(raw, spans[0]))
         return true;
+    if (parsed.type === 'income' && raw.includes('استرداد') && (0, principal_posting_guards_1.completedArabicPrincipalReturnTarget)(raw, spans[0]) === 'account')
+        return true;
     if (principalNeedsTransferReview(raw, spans[0], parsed))
         return true;
     if (parsed.type === 'expense' && spans[0] &&
@@ -17151,6 +17188,7 @@ function inspectUniversalBankEvent(source, context = {}) {
     const statusSource = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي').replace(/ؤ/gu, 'و');
     const selectedNonPosting = direction !== 'credit' && money.amount.spans.some(span => (0, principal_posting_guards_1.isIncompletePrincipal)(statusSource, span) || (0, principal_posting_guards_1.hasIncompletePrincipalReference)(statusSource.slice(span.end)));
     const samePrincipalReturn = money.amount.spans.some(span => (0, principal_posting_guards_1.hasCompletedPrincipalReturn)(source, span));
+    const unresolvedReturnAccount = source.includes('استرداد') && money.amount.spans.some(span => (0, principal_posting_guards_1.completedArabicPrincipalReturnTarget)(source, span) === 'account');
     if (selectedNonPosting)
         status = 'informational';
     if (samePrincipalReturn) {
@@ -17192,7 +17230,9 @@ function inspectUniversalBankEvent(source, context = {}) {
         amount: family === 'statement' || family === 'balance' ? (0, universal_types_1.missingUniversalField)() : money.amount,
         statementTotal: money.statementTotal, minimumDue: money.minimumDue,
         balance: money.balance, creditLimit: money.creditLimit,
-        ...fields, observations: money.observations, issues: [...new Set(issues)],
+        ...fields,
+        ...(unresolvedReturnAccount ? { instrument: (0, universal_types_1.missingUniversalField)() } : {}),
+        observations: money.observations, issues: [...new Set(issues)],
     };
     return creditReviewOnly ? (0, credit_settlement_guards_1.informationalCreditReview)(source, event) : event;
 }
@@ -17300,6 +17340,7 @@ const primaryMoney = (source, market, expensePredicate = false) => {
     if (expensePredicate && (0, principal_posting_guards_1.isIncompletePrincipal)(source, candidate.span, true))
         return null;
     return {
+        returnTarget: draft.normalizedText.includes('استرداد') ? (0, principal_posting_guards_1.completedArabicPrincipalReturnTarget)(draft.normalizedText, candidate.span) : null,
         amount: {
             currency: localCurrency,
             minorUnits: candidate.minorUnits,
@@ -17383,7 +17424,7 @@ const inspectUnparsedLaunchSemantics = (source, market, allowFutureFooter = fals
             direction,
             family: familyFrom(selected.classificationSource, direction),
             rail: null,
-            instrument: instrumentFrom(selected.classificationSource),
+            instrument: selected.returnTarget === 'account' ? null : instrumentFrom(selected.classificationSource),
         },
     };
 };
