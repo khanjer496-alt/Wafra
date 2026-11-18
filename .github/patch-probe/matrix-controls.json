@@ -1,0 +1,1682 @@
+[
+  {
+    "id": "EN-01471",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01477",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been refunded to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01484",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was refunded to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01490",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was refunded to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01549",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been reversed to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01555",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been reversed to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01562",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was reversed to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01568",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was reversed to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01627",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01633",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01640",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01646",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01705",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01711",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01718",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01724",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01861",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01867",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It has been processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01874",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01880",
+    "lang": "EN",
+    "case": {
+      "subject": "it",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. It was processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01939",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been refunded to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01945",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been refunded to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01952",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was refunded to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-01958",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was refunded to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02017",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been reversed to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02023",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been reversed to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02030",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was reversed to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02036",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was reversed to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02095",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02101",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02108",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02114",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02173",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02179",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02186",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02192",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02329",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02335",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount has been processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02342",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02348",
+    "lang": "EN",
+    "case": {
+      "subject": "this amount",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. This amount was processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02407",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02413",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02420",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02426",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02485",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02491",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02498",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02504",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02641",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02647",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund has been processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02654",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02660",
+    "lang": "EN",
+    "case": {
+      "subject": "the refund",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. The refund was processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Definite article alone permits a partial refund"
+  },
+  {
+    "id": "EN-02719",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02725",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02732",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was returned to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02738",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was returned to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02797",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02803",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02810",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02816",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02953",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02959",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same has been processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02966",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was processed and credited to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-02972",
+    "lang": "EN",
+    "case": {
+      "subject": "a refund of the same",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. A refund of the same was processed and credited to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Unique selected-money reference"
+  },
+  {
+    "id": "EN-03031",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has refunded the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03037",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "refunded",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has refunded the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03042",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM refunded the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03048",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "refunded",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM refunded the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03108",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has reversed the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03114",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "reversed",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has reversed the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03119",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM reversed the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03125",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "reversed",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM reversed the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": true,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03185",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has returned the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03191",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "returned",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has returned the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03196",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM returned the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03202",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "returned",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM returned the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03262",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has credited the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03268",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has credited the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03273",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM credited the purchase to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03279",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM credited the purchase to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "explicit-selected-return",
+    "reason": "Matching merchant returns the identified purchase"
+  },
+  {
+    "id": "EN-03416",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has processed and credited your refund to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Merchant credits an unspecified refund; no complete-purchase amount link"
+  },
+  {
+    "id": "EN-03422",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "processed and credited",
+      "aspect": "has been",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM has processed and credited your refund to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Merchant credits an unspecified refund; no complete-purchase amount link"
+  },
+  {
+    "id": "EN-03427",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your card",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM processed and credited your refund to your card.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Merchant credits an unspecified refund; no complete-purchase amount link"
+  },
+  {
+    "id": "EN-03433",
+    "lang": "EN",
+    "case": {
+      "subject": "merchant",
+      "verb": "processed and credited",
+      "aspect": "was",
+      "leader": "none",
+      "dest": "your account",
+      "amount": "none",
+      "trail": "none",
+      "debit": true
+    },
+    "body": "AED 250.00 was debited from your card ending 1234 at NOON.COM on 12/11/2026. NOON.COM processed and credited your refund to your account.",
+    "expected": "INCOME_DEBIT",
+    "rule": "D8 the debited purchase itself was refunded, reversed, returned or credited back",
+    "previousFailure52": false,
+    "ownership": "generic-refund-unknown-amount",
+    "reason": "Merchant credits an unspecified refund; no complete-purchase amount link"
+  }
+]

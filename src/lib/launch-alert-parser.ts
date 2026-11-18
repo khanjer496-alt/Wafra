@@ -27,7 +27,7 @@ import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMar
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { alertMarketPack } from '@/lib/alert-market-packs';
 import { normalizeAlertText } from '@/lib/alert-draft';
-import { hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, hasNegatedPrincipalAssertion, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
+import { completedArabicPrincipalReturnTarget, hasExplicitPersonalMoneyClaim, hasClickLinkPrompt, isIncompletePrincipal, hasSelectedCreditPredicate, hasNegatedPrincipalAssertion, isUnqualifiedCardCredit, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt } from '@/lib/principal-posting-guards';
 import { unqualifiedCardCreditCurrencyAliases, extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
 import { isLatamOwnCardPayment, latamOwnTransferTitle, latamPolicySource, matchLatamTemplate } from '@/lib/latam-alert-templates';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -327,6 +327,21 @@ export const inspectGenericBankEventForReview = (
   const moneySource = source.replace(/\u0640(?=[0-9٠-٩۰-۹])/g, ' ');
   let event = inspectUniversalBankEvent(isGulfNeighbourMarket(market)
     ? gulfNeighbourReadSource(moneySource, market) : moneySource, { ...context, currencyAliases: { ...creditReviewAliases, ...cardCreditAliases, ...context.currencyAliases } });
+  // The receiving account is unproved, but this completed owned return still
+  // owns its source money. Use a known issuer's literal unit only after the
+  // shared principal proof succeeds; a parser miss never supplies that proof.
+  const ownedReturnMarket = detectLaunchMarketFromSender(sender);
+  if (moneySource.includes('استرداد') && moneySource.includes('المبلغ') &&
+    (ownedReturnMarket === 'AE' || ownedReturnMarket === 'SA')) {
+    const ownedAliases: CurrencyAliasMap = ownedReturnMarket === 'AE'
+      ? { 'درهم': ['AED'], 'دراهم': ['AED'] } : { 'ريال': ['SAR'] };
+    const candidate = inspectUniversalBankEvent(moneySource, { ...context,
+      currencyAliases: { ...ownedAliases, ...context.currencyAliases } });
+    if (candidate.amount.evidence === 'explicit' && candidate.amount.spans.length === 1 &&
+      candidate.amount.value?.currency === (ownedReturnMarket === 'AE' ? 'AED' : 'SAR') &&
+      candidate.status === 'informational' && candidate.direction === 'credit' &&
+      completedArabicPrincipalReturnTarget(moneySource, candidate.amount.spans[0]) === 'account') event = candidate;
+  }
   if (event.amount.spans.some(span => hasNegatedPrincipalAssertion(moneySource, span))) return null;
   const incompletePrincipal = event.amount.spans.some(span => {
     const leads = moneySource.slice(0, span.start).split(/(?<=[.!?])\s+|[;؛\n]/u);

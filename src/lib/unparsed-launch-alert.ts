@@ -3,7 +3,7 @@ import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammar
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import { MARKETS } from '@/lib/markets';
 import { isNonCashNotice, nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
-import { isIncompletePrincipal, selectedPrincipalClassificationSource } from '@/lib/principal-posting-guards';
+import { completedArabicPrincipalReturnTarget, isIncompletePrincipal, selectedPrincipalClassificationSource } from '@/lib/principal-posting-guards';
 
 export const UNPARSED_LAUNCH_REVIEW_VERSION = 1;
 
@@ -129,7 +129,7 @@ const primaryMoney = (
   source: string,
   market: 'AE' | 'SA',
   expensePredicate = false,
-): { amount: UnparsedLaunchAlertReview['amount']; classificationSource: string } | null => {
+): { amount: UnparsedLaunchAlertReview['amount']; classificationSource: string; returnTarget: 'card' | 'account' | null } | null => {
   const localCurrency = market === 'AE' ? 'AED' : 'SAR';
   const aliases: CurrencyAliasMap = market === 'AE'
     ? { Dhs: ['AED'] as const, dirham: ['AED'] as const, dirhams: ['AED'] as const, 'درهم': ['AED'] as const, 'دراهم': ['AED'] as const }
@@ -162,6 +162,7 @@ const primaryMoney = (
   // another amount after refusing it.
   if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return null;
   return {
+    returnTarget: completedArabicPrincipalReturnTarget(draft.normalizedText, candidate.span),
     amount: {
       currency: localCurrency,
       minorUnits: candidate.minorUnits as string,
@@ -249,7 +250,7 @@ export const inspectUnparsedLaunchSemantics = (
       direction,
       family: familyFrom(selected.classificationSource, direction),
       rail: null,
-      instrument: instrumentFrom(selected.classificationSource),
+      instrument: selected.returnTarget === 'account' ? null : instrumentFrom(selected.classificationSource),
     },
   };
 };

@@ -6,7 +6,7 @@ import {
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { withoutUnrelatedPendingTransactionStatus, isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
+import { completedArabicPrincipalReturnTarget, withoutUnrelatedPendingTransactionStatus, isUnqualifiedCardCredit, isHedgedPrincipal, refundPrincipalStatus, isIncompletePrincipal, hasIncompletePrincipalReference, hasCompletedPrincipalReturn } from '@/lib/principal-posting-guards';
 import {
   isReviewOnlyLatamInstitution,
   latamTemplateEvent,
@@ -616,6 +616,8 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const selectedNonPosting = direction !== 'credit' && money.amount.spans.some(span =>
     isIncompletePrincipal(statusSource, span) || hasIncompletePrincipalReference(statusSource.slice(span.end)));
   const samePrincipalReturn = money.amount.spans.some(span => hasCompletedPrincipalReturn(source, span));
+  const unresolvedReturnAccount = money.amount.spans.some(span =>
+    completedArabicPrincipalReturnTarget(source, span) === 'account');
   if (selectedNonPosting) status = 'informational';
   if (samePrincipalReturn) {
     family = 'refund'; direction = 'credit'; status = 'informational';
@@ -658,7 +660,9 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     amount: family === 'statement' || family === 'balance' ? missingUniversalField() : money.amount,
     statementTotal: money.statementTotal, minimumDue: money.minimumDue,
     balance: money.balance, creditLimit: money.creditLimit,
-    ...fields, observations: money.observations, issues: [...new Set(issues)],
+    ...fields,
+    ...(unresolvedReturnAccount ? { instrument: missingUniversalField<NonNullable<UniversalBankEvent['instrument']['value']>>() } : {}),
+    observations: money.observations, issues: [...new Set(issues)],
   };
   return creditReviewOnly ? informationalCreditReview(source, event) : event;
 }
