@@ -177,7 +177,7 @@
           "const": "36.0.0"
         },
         "manifestReader": {
-          "const": "apkanalyzer-manifest-print"
+          "const": "apk-binary-axml-v1+bundletool-dump-manifest"
         }
       }
     },
@@ -390,6 +390,7 @@
                     "name",
                     "exported",
                     "enabled",
+                    "enabledReference",
                     "permission",
                     "authorities",
                     "structureSha256"
@@ -419,6 +420,14 @@
                         "boolean",
                         "null"
                       ]
+                    },
+                    "enabledReference": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 130,
+                      "pattern": "@(?:bool/[A-Za-z0-9_]{1,120}|0x[0-9a-f]{8})"
                     },
                     "permission": {
                       "type": [

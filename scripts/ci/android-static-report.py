@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Pre-seal static evidence only. Never builds, uploads, decrypts or prints tool output."""
-import argparse,copy,hashlib,json,os,re,subprocess,sys,zipfile
+import argparse,copy,hashlib,json,os,re,struct,subprocess,sys,zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 ROOT=Path(__file__).resolve().parents[2]
@@ -12,6 +12,19 @@ SCHEMA='scripts/ci/android-static-report.schema.json'
 SELF='scripts/ci/android-static-report.py'
 NS='{http://schemas.android.com/apk/res/android}'
 class Refusal(Exception):pass
+# Resource-valued android:enabled (e.g. WorkManager's @bool/enable_*_default) cannot be resolved
+# statically. It is reported explicitly as enabled=null plus enabledReference, never as a default.
+# APK binary form is @0x########; bundletool's AAB form is @bool/name. exported stays literal-only.
+ENABLED_REFERENCE=re.compile(r'@(?:bool/[A-Za-z0-9_]{1,120}|0x[0-9a-f]{8})')
+MANIFEST_READER='apk-binary-axml-v1+bundletool-dump-manifest'
+ANDROID_URI='http://schemas.android.com/apk/res/android'
+# Android resolves manifest attributes by resource ID, not name text. Gated attributes must carry exactly
+# their framework ID (SDK platforms/android-36 public-final.xml), and those IDs may not hide under another name.
+GATED_ATTRS={'name':0x01010003,'permission':0x01010006,'enabled':0x0101000e,'debuggable':0x0101000f,'exported':0x01010010,
+             'authorities':0x01010018,'value':0x01010024,'minSdkVersion':0x0101020c,'versionCode':0x0101021b,
+             'versionName':0x0101021c,'targetSdkVersion':0x01010270}
+GATED_IDS={v:k for k,v in GATED_ATTRS.items()}
+STAGE={'role':None,'kind':None,'reader':None}
 
 def require(value,code):
     if not value:raise Refusal(code)
@@ -75,14 +88,26 @@ def version_stamp(before,after,code):
     expected=copy.deepcopy(before);expected['expo'].setdefault('android',{})['versionCode']=code
     require(expected==after,'unexpected-app-config-drift');return True
 
-def raw_run(argv):
+def raw_run(argv,stream='mixed'):
+    # stream='stdout' for machine-readable output (XML); stderr is bounded but never parsed or emitted.
+    # stream='mixed' keeps the historical stdout+stderr text for tools that report on stderr (java -version).
+    require(stream in ['mixed','stdout'],'tool-stream')
     p=subprocess.run(argv,cwd=ROOT,capture_output=True,text=True,timeout=120,env=dict(os.environ,LC_ALL='C',LANG='C'))
     require(p.returncode==0,'tool-failed');require(len(p.stdout)+len(p.stderr)<=8*1024*1024,'tool-output-size')
-    return p.stdout+'\n'+p.stderr
+    return p.stdout if stream=='stdout' else p.stdout+'\n'+p.stderr
 
-def checked(run,argv,label=None):
-    try:return run([str(x) for x in argv])
+def checked(run,argv,label=None,stream='mixed'):
+    if label is not None:STAGE['reader']=label
+    try:return run([str(x) for x in argv]) if stream=='mixed' else run([str(x) for x in argv],stream=stream)
     except Exception:raise Refusal('tool-failed') from None
+
+def annotation(error):
+    # Allowlisted, structured failure category only: no tool output, XML, paths or exception text.
+    code=str(error) if isinstance(error,Refusal) else 'invalid-input'
+    if not re.fullmatch('[a-z0-9-]{1,40}',code):code='invalid-input'
+    fields=[('category',code)]+[(k,STAGE[k]) for k in ['role','kind','reader']]
+    safe=','.join(k+'='+(v if isinstance(v,str) and re.fullmatch('[a-z0-9-]{1,40}',v) else 'none') for k,v in fields)
+    return '::error title=android-static-report::'+safe
 
 def snapshot(run=raw_run):
     paths=checked(run,['git','ls-files','-z']).strip('\n').split('\0');paths=[x for x in paths if x]
@@ -114,11 +139,13 @@ def manifest(xml,code,role):
         if item.tag in ['activity','activity-alias','service','receiver','provider']:
             name=item.get(NS+'name','');require(re.fullmatch('[A-Za-z0-9_.$]+',name),'component-name')
             exported=item.get(NS+'exported');enabled=item.get(NS+'enabled')
+            reference=enabled if enabled is not None and ENABLED_REFERENCE.fullmatch(enabled) else None
+            if reference:enabled=None
             require(exported in [None,'true','false'] and enabled in [None,'true','false'],'component-boolean')
             permission=item.get(NS+'permission');authorities=item.get(NS+'authorities')
             require(permission is None or re.fullmatch('[A-Za-z0-9_.]+',permission),'component-permission')
-            require(authorities is None or re.fullmatch('[A-Za-z0-9_.;]+',authorities),'component-authority')
-            components.append({'kind':item.tag,'name':name,'exported':None if exported is None else exported=='true','enabled':None if enabled is None else enabled=='true','permission':permission,'authorities':authorities,'structureSha256':digest(ET.tostring(item,encoding='utf-8'))})
+            require(authorities is None or re.fullmatch('[A-Za-z0-9_.;-]+',authorities),'component-authority')
+            components.append({'kind':item.tag,'name':name,'exported':None if exported is None else exported=='true','enabled':None if enabled is None else enabled=='true','enabledReference':reference,'permission':permission,'authorities':authorities,'structureSha256':digest(ET.tostring(item,encoding='utf-8'))})
     require(len(components)<=200,'component-count');components.sort(key=lambda x:(x['kind'],x['name']))
     headers=[x.get(NS+'value','') for x in app.findall('meta-data') if x.get(NS+'name')=='expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY']
     production=False
@@ -129,6 +156,99 @@ def manifest(xml,code,role):
     overlay='android.permission.SYSTEM_ALERT_WINDOW' in permissions
     if role=='rc':require(production and not overlay,'production-manifest')
     return {'package':'app.wafra.android','versionName':'1.0.0','versionCode':code,'minSdk':24,'targetSdk':36,'debuggable':False,'permissions':permissions,'permissionDetails':details,'components':components,'productionChannel':production,'overlayPermission':overlay,'xmlSha256':digest(xml.encode())}
+
+def binary_manifest(path):
+    # Typed reader for the packaged binary AndroidManifest.xml (Android AXML). Builds the element tree
+    # directly from the string pool and typed attribute values, so XML escaping is ElementTree's, not a
+    # tool's text rendering (apkanalyzer/aapt2 print JSON attribute values with unescaped quotes).
+    def fail(cond):
+        if not cond:raise Refusal('apk-binary-manifest')
+    try:
+        with zipfile.ZipFile(path) as z:
+            info=z.getinfo('AndroidManifest.xml');fail(info.file_size<=4*1024*1024);data=z.read(info)
+    except Refusal:raise
+    except Exception:raise Refusal('apk-binary-manifest') from None
+    try:return decode_axml(data,fail)
+    except Refusal:raise
+    except Exception:raise Refusal('apk-binary-manifest') from None
+
+def decode_axml(data,fail):
+    fail(len(data)>=8)
+    def u16(o):fail(0<=o and o+2<=len(data));return struct.unpack_from('<H',data,o)[0]
+    def u32(o):fail(0<=o and o+4<=len(data));return struct.unpack_from('<I',data,o)[0]
+    fail(u16(0)==0x0003 and u16(2)==8 and u32(4)==len(data))
+    # Budgets: decoded string text and attribute output are capped in aggregate before any tree is built.
+    strings=None;resmap=None;stack=[];root=None;count=0;off=8;scopes=[];budget={'decoded':0,'output':0}
+    def spend(kind,amount,limit):
+        budget[kind]+=amount;fail(budget[kind]<=limit)
+    def text(i):
+        fail(strings is not None and 0<=i<len(strings));return strings[i]
+    def opt(i):return None if i==0xFFFFFFFF else text(i)
+    while off<len(data):
+        ctype,hsize,csize=u16(off),u16(off+2),u32(off+4);end=off+csize
+        fail(8<=hsize<=csize and end<=len(data) and csize%4==0)
+        if ctype==0x0001:
+            fail(strings is None and hsize==28)
+            n,styles,flags,sstart,ystart=struct.unpack_from('<IIIII',data,off+8)
+            # Physical layout: no styles in a manifest; offsets table then string data, all inside this chunk.
+            fail(n<=100000 and styles==0 and ystart==0 and sstart==hsize+4*n and sstart<=csize)
+            utf8=bool(flags&0x100);strings=[];seen={}
+            for i in range(n):
+                rel=u32(off+hsize+4*i)
+                if rel in seen:strings.append(strings[seen[rel]]);continue  # shared offset: decode once
+                seen[rel]=i;o=off+sstart+rel;fail(o<end)
+                if utf8:
+                    def l8(o):
+                        fail(o+1<end);b=data[o]
+                        return ((b&0x7f)<<8|data[o+1],o+2) if b&0x80 else (b,o+1)
+                    _,o=l8(o);size,o=l8(o);fail(o+size<end and data[o+size]==0);raw=data[o:o+size].decode('utf-8')
+                else:
+                    fail(o+2<=end);size=u16(o);o+=2
+                    if size&0x8000:fail(o+2<=end);size=((size&0x7fff)<<16)|u16(o);o+=2
+                    fail(o+2*size+2<=end and u16(o+2*size)==0);raw=data[o:o+2*size].decode('utf-16-le')
+                fail(len(raw)<=65536);spend('decoded',len(raw),1048576);strings.append(raw)
+        elif ctype==0x0180:
+            fail(hsize==8 and resmap is None and strings is not None and root is None and (csize-8)//4<=len(strings))
+            resmap=list(struct.unpack_from('<%dI'%((csize-8)//4),data,off+8))
+        elif ctype in [0x0100,0x0101]:
+            # Namespace scopes nest like elements: END must close the innermost open START exactly.
+            fail(hsize==16 and csize==24);prefix,uri=u32(off+16),u32(off+20);opt(prefix);text(uri)
+            if ctype==0x0100:fail(len(scopes)<16);scopes.append((prefix,uri))
+            else:fail(scopes and scopes[-1]==(prefix,uri));scopes.pop()
+        elif ctype==0x0102:
+            fail(hsize==16 and csize>=36);ns,name,astart,asize,acount=struct.unpack_from('<IIHHH',data,off+16)
+            fail(astart==20 and asize==20 and acount<=200 and 16+astart+20*acount==csize);count+=1;fail(count<=20000 and len(stack)<64)
+            tag=text(name);fail(ns==0xFFFFFFFF and re.fullmatch('[A-Za-z][A-Za-z0-9_.-]{0,120}',tag));spend('output',2*len(tag)+5,262144)
+            attrs={};ids=set()
+            for k in range(acount):
+                a=off+16+astart+20*k;ans,aname,raw=u32(a),u32(a+4),u32(a+8);vsize,vres,vtype,vdata=struct.unpack_from('<HBBI',data,a+12)
+                fail(vsize==8 and vres==0);key=text(aname);fail(re.fullmatch('[A-Za-z][A-Za-z0-9_]{0,120}',key))
+                rid=resmap[aname] if resmap is not None and aname<len(resmap) else 0
+                if ans!=0xFFFFFFFF:
+                    fail(any(u==ans for _,u in scopes));uri=text(ans)
+                    if uri==ANDROID_URI:fail(rid>>16==0x0101 and GATED_ATTRS.get(key,rid)==rid and GATED_IDS.get(rid,key)==key)
+                    key='{'+uri+'}'+key
+                fail(rid not in GATED_IDS or key=='{'+ANDROID_URI+'}'+GATED_IDS[rid])
+                fail(rid==0 or rid not in ids);ids.add(rid)
+                if vtype==0x03:value=text(vdata)
+                elif vtype==0x01:value='@0x%08x'%vdata
+                elif vtype==0x02:value='?0x%08x'%vdata
+                elif vtype==0x10:value=str(struct.unpack('<i',struct.pack('<I',vdata))[0])
+                elif vtype==0x11:value='0x%08x'%vdata
+                elif vtype==0x12:fail(vdata in [0,0xFFFFFFFF,1]);value='false' if vdata==0 else 'true'
+                elif vtype in [0x04,0x05,0x06,0x1c,0x1d,0x1e,0x1f]:value='(type 0x%02x)0x%08x'%(vtype,vdata)
+                else:fail(False)
+                fail(key not in attrs);spend('output',len(key)+len(value)+4,262144);attrs[key]=value
+            element=ET.Element(tag,attrs)
+            if stack:stack[-1].append(element)
+            else:fail(root is None);root=element
+            stack.append(element)
+        elif ctype==0x0103:
+            fail(hsize==16 and csize==24 and stack and u32(off+16)==0xFFFFFFFF and text(u32(off+20))==stack[-1].tag);stack.pop()
+        else:fail(False)  # CDATA or unknown chunks are refused, never skipped
+        off=end
+    fail(root is not None and not stack and not scopes and off==len(data))
+    return ET.tostring(root,encoding='unicode')
 
 def apk_signer(text):
     matches=re.findall(r'^Signer #[0-9]+ certificate SHA-256 digest: ([a-fA-F0-9]{64})\s*$',text,re.M)
@@ -181,7 +301,7 @@ def tool_version(run,argv,pattern):
     out=checked(run,argv);m=re.search(pattern,out);require(m,'tool-version');return m.group(1)
 
 def collect(baseline,bundletool,env,run=raw_run):
-    identity=provenance(env);code=identity['versionCode'];role=identity['role']
+    identity=provenance(env);code=identity['versionCode'];role=identity['role'];STAGE['role']=role
     raw=json.loads(env.get('STATIC_INPUTS_JSON','null'));safe=inputs(raw,role)
     require(baseline['provenance']==identity and baseline['inputs']==safe,'baseline-identity')
     require(checked(run,['git','rev-parse','HEAD']).strip()==identity['source'],'checkout-sha')
@@ -190,28 +310,30 @@ def collect(baseline,bundletool,env,run=raw_run):
     version_stamp(baseline['appConfig'],json.loads((ROOT/'app.json').read_text()),code)
     require(file_hash(bundletool)==BUNDLETOOL_SHA,'bundletool-digest')
     sdk=Path(env.get('ANDROID_HOME') or env.get('ANDROID_SDK_ROOT') or '/missing')
-    tools=sdk/'build-tools/36.0.0';analyzer=sdk/'cmdline-tools/latest/bin/apkanalyzer'
+    tools=sdk/'build-tools/36.0.0'
     files=[];parser=parser_identity()
     for kind in (['apk','aab'] if role=='rc' else ['apk']):
-        path=ROOT/('wafra.'+kind);abis=inventory(path,kind)
-        output=checked(run,['node','scripts/android-build-flags.cjs','verify-production',path])
+        STAGE['kind']=kind;STAGE['reader']='inventory';path=ROOT/('wafra.'+kind);abis=inventory(path,kind)
+        output=checked(run,['node','scripts/android-build-flags.cjs','verify-production',path],'build-flags')
         try:flags=compiled_flags(json.loads(output))
         except Refusal:raise
         except Exception:raise Refusal('flags-output') from None
         if kind=='apk':
-            apk_signer(checked(run,[tools/'apksigner','verify','--print-certs',path]))
-            xml=checked(run,[analyzer,'manifest','print',path]).strip()
+            apk_signer(checked(run,[tools/'apksigner','verify','--print-certs',path],'apksigner'))
+            STAGE['reader']='apk-binary-manifest';xml=binary_manifest(path)
         else:
-            verified=checked(run,['jarsigner','-J-Duser.language=en','-J-Duser.country=US','-verify',path])
+            verified=checked(run,['jarsigner','-J-Duser.language=en','-J-Duser.country=US','-verify',path],'jarsigner')
             require('jar verified.' in verified and 'unsigned entries' not in verified,'aab-integrity')
-            cert=checked(run,['keytool','-J-Duser.language=en','-J-Duser.country=US','-printcert','-jarfile',path])
+            cert=checked(run,['keytool','-J-Duser.language=en','-J-Duser.country=US','-printcert','-jarfile',path],'keytool')
             certs=re.findall(r'SHA256:\s*([A-Fa-f0-9:]{64,95})',cert)
             require(len(certs)==1 and certs[0].replace(':','').lower()==EXPECTED_SIGNER,'aab-signer')
-            xml=checked(run,['java','-jar',bundletool,'dump','manifest','--module=base','--bundle='+str(path)]).strip()
-        mf=manifest(xml,code,role)
+            xml=checked(run,['java','-jar',bundletool,'dump','manifest','--module=base','--bundle='+str(path)],'bundletool-manifest',stream='stdout').strip()
+        STAGE['reader']='manifest-'+kind;mf=manifest(xml,code,role)
+        STAGE['reader']='payload-'+kind
         files.append({'kind':kind,'sha256':file_hash(path),'bytes':path.stat().st_size,'signerSha256':EXPECTED_SIGNER,'signatureVerified':True,'abis':abis,'flags':flags,'manifest':mf,'payload':payload(path,kind,parser)})
-    versions={'python':'.'.join(map(str,sys.version_info[:3])),'node':tool_version(run,['node','--version'],r'v(22\.[0-9]+\.[0-9]+)'), 'java':tool_version(run,['java','-version'],r'version "(17\.[0-9.]+)'), 'apksigner':tool_version(run,[tools/'apksigner','version'],r'\b([0-9]+(?:\.[0-9]+)+)\b'),'bundletool':'1.18.3','bundletoolSha256':BUNDLETOOL_SHA,'sdkBuildTools':'36.0.0','manifestReader':'apkanalyzer-manifest-print'}
-    require(snapshot(run)==current,'post-inspection-source-drift')
+    STAGE['kind']=None;STAGE['reader']='tool-versions'
+    versions={'python':'.'.join(map(str,sys.version_info[:3])),'node':tool_version(run,['node','--version'],r'v(22\.[0-9]+\.[0-9]+)'), 'java':tool_version(run,['java','-version'],r'version "(17\.[0-9.]+)'), 'apksigner':tool_version(run,[tools/'apksigner','version'],r'\b([0-9]+(?:\.[0-9]+)+)\b'),'bundletool':'1.18.3','bundletoolSha256':BUNDLETOOL_SHA,'sdkBuildTools':'36.0.0','manifestReader':MANIFEST_READER}
+    STAGE['reader']='post-snapshot';require(snapshot(run)==current,'post-inspection-source-drift')
     report={'schema':'wafra-android-static-v1','status':'passed','provenance':identity,'inputs':safe,'producer':{'workflowBlob':checked(run,['git','hash-object',WORKFLOW]).strip(),'helperSha256':file_hash(ROOT/SELF),'schemaSha256':file_hash(ROOT/SCHEMA),'flagsCheckerSha256':file_hash(ROOT/'scripts/android-build-flags.cjs')},'tools':versions,'source':{'trackedFileCount':len(current),'beforeSha256':digest(json.dumps(baseline['tracked'],sort_keys=True).encode()),'afterSha256':digest(json.dumps(current,sort_keys=True).encode()),'onlyVersionStamp':True},'parser':parser,'files':files,'limits':{'staticOnly':True,'deviceAcceptance':False,'billingRestoreAcceptance':False,'reproducibleBuildClaim':False}}
     validate_report(report);encoded(report);return report
 
@@ -225,6 +347,8 @@ def validate_report(report):
         require(f['manifest']['versionCode']==p['versionCode'],'report-code')
         if role=='rc':require(f['manifest']['productionChannel'] and not f['manifest']['overlayPermission'],'report-production')
         if f['kind']=='aab':require(f['bytes']<=100000000,'report-aab-size')
+        # An unresolved resource reference is never reported as a literal or a default.
+        require(all(c['enabled'] is None for c in f['manifest']['components'] if c['enabledReference'] is not None),'report-enabled-reference')
     return True
 
 def main():
@@ -243,4 +367,5 @@ if __name__=='__main__':
     try:main()
     except Exception as error:
         # Never emit exception/tool output that could contain credential material.
-        print('android-static-report:'+ (str(error) if isinstance(error,Refusal) else 'invalid-input'),file=sys.stderr);sys.exit(1)
+        print('android-static-report:'+ (str(error) if isinstance(error,Refusal) else 'invalid-input'),file=sys.stderr)
+        print(annotation(error));sys.exit(1)
