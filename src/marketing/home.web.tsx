@@ -82,7 +82,7 @@ function CaptureStage() {
         <span>Pause animations</span>
       </label>
       <figcaption className={styles.previewCaption}>
-        Illustration · sample data · automatic capture depends on your bank’s alert format
+        Illustration · Sample data · automatic capture depends on your bank’s alert format
       </figcaption>
     </figure>
   );
@@ -101,7 +101,7 @@ export default function MarketingHome() {
           content="budget app, expense tracker, worldwide money manager, bill tracker, subscription tracker, private finance app"
         />
         <meta property="og:type" content="website" />
-        <meta property="og:site_name" content="Wafra" />
+        <meta property="og:site_name" content="Wafra: Budget & Money Tracker" />
         <meta property="og:title" content={MARKETING_TITLE} />
         <meta property="og:description" content={MARKETING_DESCRIPTION} />
         <meta name="twitter:card" content="summary_large_image" />
@@ -134,12 +134,12 @@ export default function MarketingHome() {
             <a href="#privacy">Privacy</a>
             <a href="#questions">Questions</a>
           </div>
-          <span className={styles.availability}>iPhone + Android</span>
+          <span className={styles.availability}>iPhone beta · Android coming soon</span>
         </nav>
 
         <header className={styles.hero} id="top">
           <div className={styles.heroCopy}>
-            <p className={styles.eyebrow}>Your everyday money, clearly.</p>
+            <p className={styles.eyebrow}>Wafra: Budget &amp; Money Tracker</p>
             <h1>Know your spending.<br />Plan what comes next.</h1>
             <p className={styles.lede}>
               Spending, budgets and bills in one private ledger. No bank login needed.
@@ -150,15 +150,16 @@ export default function MarketingHome() {
                 href={DOWNLOAD_PATHS.iphone}
                 target="_blank"
                 rel="noopener"
-                aria-label="Join the Wafra beta on Apple TestFlight"
+                aria-label="Join the iPhone beta on TestFlight"
               >
-                <span className={styles.actionPlatform}>iPhone</span>
-                <span>Join TestFlight</span>
+                <span>Join the iPhone beta on TestFlight</span>
                 <span className={styles.actionArrow} aria-hidden="true">↗</span>
               </a>
             </div>
             <p className={styles.betaNote}>Public iPhone beta on TestFlight. Android: Google Play coming soon.</p>
+            <p className={styles.captureDisclosure}>Optional iPhone automation can queue matching Messages, including personal conversations. Manual-only mode is available. <a href="/privacy/#iphone-automatic-capture">How Message text is handled</a>.</p>
             <p className={styles.languageNote}>Available in English and Arabic.</p>
+            <p className={styles.languageNote}>Published by Naser Khanjar.</p>
           </div>
 
           <CaptureStage />
@@ -180,14 +181,17 @@ export default function MarketingHome() {
                   <h3>{lane.platform}</h3>
                   <span>{lane.note}</span>
                 </div>
-                <ol className={styles.track}>
-                  {lane.steps.map((step, stepIndex) => (
-                    <li key={step.title}>
-                      <span className={styles.trackIndex}>{String(stepIndex + 1).padStart(2, '0')}</span>
-                      <div><strong>{step.title}</strong><span>{step.copy}</span></div>
-                    </li>
-                  ))}
-                </ol>
+                <details className={styles.captureDetails}>
+                  <summary>How {lane.platform} capture works</summary>
+                  <ol className={styles.track}>
+                    {lane.steps.map((step, stepIndex) => (
+                      <li key={step.title}>
+                        <span className={styles.trackIndex}>{String(stepIndex + 1).padStart(2, '0')}</span>
+                        <div><strong>{step.title}</strong><span>{step.copy}</span></div>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
               </li>
             ))}
           </ol>
@@ -208,6 +212,7 @@ export default function MarketingHome() {
           </div>
 
           <div className={styles.sorter}>
+            <p className={styles.sampleLabel}>Sample data</p>
             <div className={styles.sorterHead} aria-hidden="true">
               <span>From your bank</span><span>In Wafra</span>
             </div>
@@ -251,6 +256,7 @@ export default function MarketingHome() {
           </div>
 
           <div className={styles.radarBoard}>
+            <p className={styles.sampleLabel}>Sample data</p>
             <div className={styles.timeline} aria-hidden="true">
               <span className={styles.today}>Today</span>
               {renewals.filter((item) => item.day !== null).map((item, index) => (
@@ -293,15 +299,15 @@ export default function MarketingHome() {
           </div>
           <div className={styles.screenGrid}>
             <figure className={styles.screenPreview}>
-              <figcaption><h3>Home</h3><p>Today’s spending and what’s left in your budgets first. Then the month’s in and out, the last seven days and the next payments.</p></figcaption>
+              <figcaption><span className={styles.sampleLabel}>Sample data</span><h3>Home</h3><p>Today’s spending and what’s left in your budgets first. Then the month’s in and out, the last seven days and the next payments.</p></figcaption>
               <img src="/wafra-app-home.png" alt="Wafra Home: today's spending, what is left in budgets, the month's spent, in and net, the last seven days and the next payment; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
             <figure className={styles.screenPreview}>
-              <figcaption><h3>Spending</h3><p>Every category as its own coloured coin, sized by the category’s share of total spending. Budget usage is labelled separately.</p></figcaption>
+              <figcaption><span className={styles.sampleLabel}>Sample data</span><h3>Spending</h3><p>Every category as its own coloured coin, sized by the category’s share of total spending. Budget usage is labelled separately.</p></figcaption>
               <img src="/wafra-app-spending.png" alt="Wafra Spending: the month's total, a row of coloured category coins sized by share, each category's amount and share, then the category rows; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
             <figure className={styles.screenPreview}>
-              <figcaption><h3>Bills</h3><p>Subscriptions and utilities in separate sections. Dates and estimated charges stay visible.</p></figcaption>
+              <figcaption><span className={styles.sampleLabel}>Sample data</span><h3>Bills</h3><p>Subscriptions and utilities in separate sections. Dates and estimated charges stay visible.</p></figcaption>
               <img src="/wafra-app-bills-light.png" alt="Wafra Bills: the total due in the next 30 days, a dated row of payment logos, then subscriptions with renewal dates and estimates; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
           </div>
@@ -354,9 +360,9 @@ export default function MarketingHome() {
         </section>
 
         <footer className={styles.footer}>
-          <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra</span></div>
+          <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra: Budget &amp; Money Tracker</span></div>
           <div>
-            <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
+            <p>Published by Naser Khanjar. iPhone beta · Android coming soon.</p>
             <p><a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a> · <a href="/support/">Support</a></p>
           </div>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
