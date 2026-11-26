@@ -1457,7 +1457,10 @@ function ktSources(dir) {
     /privacyRetentionExact:\s*\{[\s\S]*?\n\s*\},\n\s*privacySecurityExact:/,
   )?.[0] || '';
   const privacySecurity = copy.match(
-    /privacySecurityExact:\s*\{[\s\S]*?\n\s*\},\n\s*country:/,
+    /privacySecurityExact:\s*\{[\s\S]*?\n\s*\},\n\s*privacySecurityExactIos:/,
+  )?.[0] || '';
+  const privacySecurityIos = copy.match(
+    /privacySecurityExactIos:\s*\{[\s\S]*?\n\s*\},\n\s*country:/,
   )?.[0] || '';
   ok('privacy copy separates source-free UI counts from encrypted pending Message records',
     /capture status and warning/.test(privacyRetention) &&
@@ -1476,6 +1479,14 @@ function ktSources(dir) {
       /remove it or Wafra confirms retirement/.test(privacySecurity) &&
       /أتمتة[^\n]*الاختصار[^\n]*القديمة/.test(privacySecurity) &&
       /رفع[^\n]*إلى أن/.test(privacySecurity));
+  ok('the iPhone privacy copy keeps the legacy Shortcut disclosure without naming Android',
+    /old Wafra Shortcut automation/.test(privacySecurityIos) &&
+      /continue uploading/.test(privacySecurityIos) &&
+      /remove it or Wafra confirms retirement/.test(privacySecurityIos) &&
+      /never uploads SMS content/.test(privacySecurityIos) &&
+      /أتمتة[^\n]*الاختصار[^\n]*القديمة/.test(privacySecurityIos) &&
+      /رفع[^\n]*إلى أن/.test(privacySecurityIos) &&
+      !/Android|Google|أندرويد/.test(privacySecurityIos));
 
   const accuracyScreen = read('src/app/accuracy.tsx');
   const settingsAccuracyRow = copy.match(

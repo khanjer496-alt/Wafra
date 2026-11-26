@@ -1274,7 +1274,12 @@ export default function SettingsScreen() {
             reviewed paragraph leads with its first sentence, and every other
             sentence is one line under it. None is dropped or reworded. */}
         <View style={styles.privacySheet} testID="settings-privacy-sheet">
-          {[t('privacyBuiltInBody'), t('privacyRetentionExact'), t('privacySecurityExact')].map((body) => {
+          {/* iOS names only iPhone (App Store Review Guideline 2.3.10). */}
+          {[
+            t(Platform.OS === 'ios' ? 'privacyBuiltInBodyIos' : 'privacyBuiltInBody'),
+            t('privacyRetentionExact'),
+            t(Platform.OS === 'ios' ? 'privacySecurityExactIos' : 'privacySecurityExact'),
+          ].map((body) => {
             const [lead, ...points] = privacySentences(body);
             return <View key={lead} style={styles.privacySection}>
               <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{lead}</ThemedText>

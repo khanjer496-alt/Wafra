@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 8072cadc9558aba9749700039bdbce4d7f2af0fb28d82f583ff2c5b185a17a69
+// Generated from normal shipping TypeScript. Source SHA-256: 12f378402fd1da6c8c4c5cf97133078a958f379fd5dde6f58c9f1f38b6282604
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6058,6 +6058,10 @@ const S = {
         en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
         ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
     },
+    privacyBuiltInBodyIos: {
+        en: 'Privacy is built into Wafra. Your ledger is encrypted on this iPhone. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
+        ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على هذا الآيفون، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
+    },
     onlineLogosTitle: { en: 'Online merchant logos', ar: 'شعارات التجار عبر الإنترنت' },
     onlineLogosDetail: { en: 'Off by default. When on, merchant and bank names are sent to Brandfetch, a logo service. It also sees your network address.', ar: 'متوقفة افتراضياً. عند تفعيلها تُرسل أسماء التجار والبنوك إلى خدمة الشعارات Brandfetch، التي ترى أيضاً عنوان اتصالك بالشبكة.' },
     onlineLogosPaused: { en: 'Paused by your local-only preference.', ar: 'متوقفة بسبب تفضيل المعالجة المحلية.' },
@@ -6092,6 +6096,10 @@ const S = {
     privacySecurityExact: {
         en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. On iPhone, Wafra cannot directly access the Messages inbox. Wafra cannot sign in to a bank, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
         ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. على الآيفون، لا تستطيع وفرة الوصول مباشرةً إلى صندوق الرسائل. ولا تستطيع وفرة تسجيل الدخول إلى بنك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
+    },
+    privacySecurityExactIos: {
+        en: 'Automatic capture is optional. Local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank messages you selected until you remove it or Wafra confirms retirement. On iPhone, Wafra cannot directly access the Messages inbox. Wafra cannot sign in to a bank, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+        ar: 'الالتقاط التلقائي اختياري. لا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع رسائل البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. على الآيفون، لا تستطيع وفرة الوصول مباشرةً إلى صندوق الرسائل. ولا تستطيع وفرة تسجيل الدخول إلى بنك أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
     },
     country: { en: 'Country', ar: 'الدولة' },
     language: { en: 'Language', ar: 'اللغة' },
@@ -6743,6 +6751,10 @@ const S = {
         en: 'Install Wafra from the App Store or Google Play to purchase Pro.',
         ar: 'ثبّت وفرة من App Store أو Google Play لشراء برو.',
     },
+    playOnlyBodyIos: {
+        en: 'Install Wafra from the App Store to purchase Pro.',
+        ar: 'ثبّت وفرة من App Store لشراء برو.',
+    },
     priceLoading: { en: 'Loading price…', ar: 'جارٍ تحميل السعر…' },
     priceUnavailable: { en: 'Price unavailable', ar: 'السعر غير متاح' },
     priceUnavailableBody: {
@@ -6755,6 +6767,10 @@ const S = {
     manageSubscriptionFailedBody: {
         en: 'Open your App Store or Google Play account to manage the subscription.',
         ar: 'افتح حسابك في App Store أو Google Play لإدارة الاشتراك.',
+    },
+    manageSubscriptionFailedBodyIos: {
+        en: 'Open your App Store account to manage the subscription.',
+        ar: 'افتح حسابك في App Store لإدارة الاشتراك.',
     },
     subscriptionRenewalTermsIos: {
         en: 'Payment is charged to your store account. The subscription renews automatically unless cancelled at least 24 hours before the current period ends.',

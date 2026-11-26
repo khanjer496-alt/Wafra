@@ -76,7 +76,7 @@ const OFFERS = [
 
 function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios', billingAction = null,
   selectedPlan = 'yearly', largeText = false, surface = 'sheet', available = true, laterOffers = null, notice = null,
-  outcome = 'cancelled' } = {}) {
+  outcome = 'cancelled', pro = false } = {}) {
   // State slots: the sheet's previous feature (0) and open session (1), then
   // useProCheckout's billingAction (2), offers (3), offerState (4),
   // selectedPlan (5) and notice (6). An open sheet is rendered as the session
@@ -85,7 +85,7 @@ function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, l
   const states = { [offset]: billingAction, [offset + 1]: offers, [offset + 2]: offers.length ? 'ready' : 'unavailable',
     [offset + 3]: selectedPlan, [offset + 4]: notice };
   if (surface === 'sheet' && feature) Object.assign(states, { 0: feature, 1: { feature, id: 1 } });
-  const h = createWorkflowHarness({ language, platform, largeText, state: { pro: false, founderPro: false }, states });
+  const h = createWorkflowHarness({ language, platform, largeText, state: { pro, founderPro: false }, states });
   const d = h.deps;
   const purchases = [];
   const fetches = [];
@@ -218,6 +218,62 @@ test('a build without a storefront keeps the old button, whose answer is the Pla
   const { tree, t } = sheetHarness({ offers: [], available: false });
   assert.equal(walk(tree).find((n) => n.props?.testID === 'pro-sheet-buy').props.accessibilityLabel, t('getPro'));
 });
+
+// App Store Review Guideline 2.3.10: an iPhone paywall names only Apple's
+// store. Android keeps its Google Play wording exactly as before.
+const OTHER_PLATFORM = /Android|Google|Play Store|أندرويد|اندرويد|جوجل/;
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+for (const surface of ['sheet', 'screen']) for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) {
+  test(`${surface}/${language}/${platform}: a build without a storefront names only this platform's store`, async () => {
+    const run = sheetHarness({ surface, language, platform, offers: [], available: false, legal: true });
+    const expected = run.t(platform === 'ios' ? 'playOnlyBodyIos' : 'playOnlyBody');
+    const all = text(run.tree);
+    assert.ok(all.includes(expected), 'the panel says where Pro can be bought');
+    walk(run.tree).find((n) => n.props?.testID === (surface === 'sheet' ? 'pro-sheet-buy' : 'pro-buy')).props.onPress();
+    await settle();
+    const notices = run.h.events.filter((e) => e[0] === 'state' && e[2]?.title === run.t('purchaseUnavailable'));
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0][2].body, expected);
+    assert.deepEqual(run.purchases, [], 'no storefront, no purchase call');
+    if (platform === 'ios') {
+      assert.doesNotMatch(all, OTHER_PLATFORM);
+      assert.doesNotMatch(notices[0][2].body, OTHER_PLATFORM);
+    } else {
+      assert.match(expected, /Google Play/);
+    }
+  });
+}
+
+for (const surface of ['sheet', 'screen']) for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) {
+  test(`${surface}/${language}/${platform}: a store that answers "unavailable" to a purchase names only this platform's store`, async () => {
+    const run = sheetHarness({ surface, language, platform, legal: true, outcome: 'unavailable' });
+    walk(run.tree).find((n) => n.props?.testID === (surface === 'sheet' ? 'pro-sheet-buy' : 'pro-buy')).props.onPress();
+    await settle();
+    assert.deepEqual(run.purchases, ['fixture.yearly'], 'the store was asked');
+    const notices = run.h.events.filter((e) => e[0] === 'state' && e[2]?.title === run.t('purchaseUnavailable'));
+    assert.equal(notices.length, 1);
+    const expected = run.t(platform === 'ios' ? 'playOnlyBodyIos' : 'playOnlyBody');
+    assert.equal(notices[0][2].body, expected);
+    if (platform === 'ios') assert.doesNotMatch(expected, OTHER_PLATFORM);
+    else assert.match(expected, /Google Play/);
+  });
+}
+
+for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) {
+  test(`Pro screen ${language}/${platform}: a subscription page that will not open names only this platform's store`, async () => {
+    const run = sheetHarness({ surface: 'screen', language, platform, pro: true, legal: true });
+    const button = walk(run.tree).find((n) => n.props?.onPress && n.props.accessibilityLabel === run.t('manageSubscription'));
+    assert.ok(button, 'an active subscriber can manage the subscription');
+    await button.props.onPress();
+    await settle();
+    const notices = run.h.events.filter((e) => e[0] === 'state' && e[2]?.title === run.t('manageSubscriptionFailed'));
+    assert.equal(notices.length, 1);
+    const expected = run.t(platform === 'ios' ? 'manageSubscriptionFailedBodyIos' : 'manageSubscriptionFailedBody');
+    assert.equal(notices[0][2].body, expected);
+    if (platform === 'ios') assert.doesNotMatch(expected, OTHER_PLATFORM);
+    else assert.match(expected, /Google Play/);
+  });
+}
 
 test('buying from the sheet refuses without legal links and otherwise goes through the shared checkout', async () => {
   const missing = sheetHarness({ legal: false });
