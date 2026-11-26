@@ -480,6 +480,12 @@ const PERSISTED_INCOME_ORIGINATOR_RE =
  */
 interface PersistedMigrationOptions {
   reuseCompletedReparse?: boolean;
+  /**
+   * The state is a backup whose rows were already repaired by the build that
+   * wrote it (see `backupRowsAreFinal`). A restore then gives back exactly the
+   * rows that were saved instead of re-running the parser repairs over them.
+   */
+  restoreRowsExactly?: boolean;
 }
 
 export function migratePersistedState(
@@ -526,13 +532,14 @@ export function migratePersistedState(
   // Trust only the exact revision-2 receipt here. The compatibility logic
   // later in this function may accept an older revision-1 receipt for raw-SMS
   // reparsing, but revision 1 never promised that all row-local transforms had
-  // completed. Backup restore also deliberately bypasses this shortcut: an
-  // imported file must be normalized by the receiving build even if it carries
-  // a receipt copied from another installation.
+  // completed. Backup restore never trusts a receipt carried in the file: a
+  // backup written before Wafra 1.0.0 is normalized by the receiving build, and
+  // one written by 1.0.0 or later is restored exactly as saved because its own
+  // build already ran these repairs (`restoreRowsExactly`, issue #262).
   const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
   const reparseKey = JSON.stringify([2, PARSER_BACKFILL_VERSION, grammarMarketId]);
-  const persistedRowRepairsAreCurrent =
-    options?.reuseCompletedReparse === true && parsed.hydrationReparseKey === reparseKey;
+  const persistedRowRepairsAreCurrent = options?.restoreRowsExactly === true ||
+    (options?.reuseCompletedReparse === true && parsed.hydrationReparseKey === reparseKey);
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -880,13 +887,18 @@ export function migratePersistedState(
     // us skip the expensive pass. The grammar receipt is already exact, so no
     // parser/global-market mutation is needed on this path.
     markLaunchPhase('ledger-row-transforms-complete');
+    // An exactly restored backup carries no receipt of its own. Stamp this
+    // build's, or the next launch would run the repairs the restore skipped
+    // and change the restored rows after all.
+    if (options?.restoreRowsExactly === true) parsed.hydrationReparseKey = reparseKey;
   }
   markLaunchPhase('ledger-reparse-complete');
 
   // One-time category repair for rows a body-wide BNPL keyword filed as Loan.
-  // Hydration trusts its own receipt; a restored backup always runs it, since
-  // it is idempotent and the file's receipt describes another installation.
-  if (parsed.transactions && (
+  // Hydration trusts its own receipt; a restored pre-1.0.0 backup always runs
+  // it, since it is idempotent and the file's receipt describes another
+  // installation. Every 1.0.0 build already ran it before writing a backup.
+  if (parsed.transactions && options?.restoreRowsExactly !== true && (
     options?.reuseCompletedReparse !== true ||
     (parsed.bnplCategoryRepairVersion ?? 0) < BNPL_CATEGORY_REPAIR_VERSION
   )) {
@@ -956,6 +968,42 @@ function captureMarketContext(): () => void {
   };
 }
 
+/** PARSER_BACKFILL_VERSION of Wafra 1.0.0, the first public release. Fixed on purpose. */
+const FIRST_RELEASE_PARSER_BACKFILL_VERSION = 50;
+
+/**
+ * Was this backup written by Wafra 1.0.0 or later? A restore must give back
+ * exactly what was saved (issue #262): re-running the persisted-row repairs
+ * over such a file re-filed SMS rows saved as Other by merchant name.
+ *
+ * Restore has run those repairs since the first build (942a3f2e, 9e11a787)
+ * for a real reason: a file from an older build holds rows that build never
+ * repaired — masked card numbers as titles, anonymous income in Business,
+ * stale transfer flags, BNPL rows in Loan, a narrower merchant vocabulary.
+ * The build that writes a backup has already applied every one of those
+ * repairs to its own rows at launch, and they last changed on 25 Sep 2026, so
+ * rows from a 1.0.0 or later build need none of them. What a later build adds
+ * is parser vocabulary, and a restore keeps the saved answer rather than
+ * re-filing it. Only an older file still gets the repairs. (Separately, an
+ * Android ledger whose `parserVersion` is behind this build's still starts the
+ * device's own history re-read in the reducer, which heals rows from the SMS
+ * inbox on that phone; that is the in-place upgrade path, not this migration.)
+ *
+ * Exports strip the repair receipts, so the build is read from evidence every
+ * 1.0.0 file carries:
+ *  - `onlineLogosEnabled` / `hideWidgetAmountsWhenLocked` are ledger defaults
+ *    since 9b8d47bd (9 Nov 2026), so every 1.0.0 export on either platform
+ *    writes them (restore itself ignores their values);
+ *  - an Android `parserVersion` of 50 or more proves the whole inbox was
+ *    re-read under the 1.0.0 grammar (October 2026) or a later one.
+ * A file with neither is treated as older and keeps the full migration.
+ */
+function backupRowsAreFinal(data: Partial<Omit<AppState, 'hydrated'>>): boolean {
+  return typeof data.onlineLogosEnabled === 'boolean' ||
+    typeof data.hideWidgetAmountsWhenLocked === 'boolean' ||
+    (data.parserVersion ?? 0) >= FIRST_RELEASE_PARSER_BACKFILL_VERSION;
+}
+
 /** Validate and migrate an imported backup before it reaches the reducer. */
 export function parseBackupForRestore(
   json: string,
@@ -976,7 +1024,10 @@ export function parseBackupForRestore(
     const incoming = parsed.data as Partial<Omit<AppState, 'hydrated'>>;
     // Device keys are deliberately absent from portable backups. Even this
     // phone's own old export cannot resurrect an erased local teaching rule.
-    return migratePersistedState({ ...incoming, privateAlertFormats: emptyPrivateAlertFormatStore() });
+    return migratePersistedState(
+      { ...incoming, privateAlertFormats: emptyPrivateAlertFormatStore() },
+      { restoreRowsExactly: backupRowsAreFinal(incoming) },
+    );
   } catch {
     return null;
   } finally {
@@ -3874,6 +3925,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
       bnplCategoryRepairVersion: _bnplCategoryRepairVersion,
+      // Keep onlineLogosEnabled and hideWidgetAmountsWhenLocked in the file:
+      // restore ignores their values, but they mark it as written by 1.0.0 or
+      // later, which restores its rows exactly (backupRowsAreFinal).
       ...data
     } = authoritativeState.current;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });

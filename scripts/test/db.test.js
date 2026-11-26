@@ -3502,9 +3502,19 @@ asyncSuites.push((async () => {
   h.migratePersistedState(upgraded);
   ok('ordinary migration callers still force saved-SMS repair', calls === 3);
   const beforeRestoreNormalize = normalizeCalls;
-  const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
+  // A pre-1.0.0 file (no 1.0.0 marker, no Android parser receipt) carrying a
+  // copied startup receipt still gets the full repair.
+  const { parserVersion: _inboxReceipt, ...olderBackup } = upgraded;
+  const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: olderBackup }));
   ok('restored backups cannot use a local startup receipt to bypass repair',
     restored && calls === 4 && normalizeCalls > beforeRestoreNormalize);
+  // A 1.0.0 or later file is restored exactly (issue #262): its own build
+  // already repaired these rows, so the receiving build does not re-read them.
+  const beforeExactGuess = guessCalls;
+  const exact = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
+  ok('a 1.0.0 backup restores its rows exactly without re-running the repairs',
+    exact && calls === 4 && guessCalls === beforeExactGuess &&
+      JSON.stringify(exact.transactions) === JSON.stringify(upgraded.transactions));
   // Upgrading to the grammar-only receipt must not cost a re-read. A stored
   // revision-1 receipt naming this same parser version and market already
   // proves the ledger was healed under this grammar, so it is accepted and
