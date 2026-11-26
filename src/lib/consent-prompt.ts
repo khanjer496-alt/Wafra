@@ -1,4 +1,5 @@
 export interface ConsentPrompt {
+  androidCapture?: 'sms-history' | 'sms-live' | 'bank-notifications';
   question: string;
   body: string;
   confirmLabel: string;

@@ -23,14 +23,14 @@ export const INCOMING_STATEMENT_EXTENSIONS: readonly string[] = [
 ];
 
 /** The statement import route's parameter that carries the one-time token. */
-export const INCOMING_STATEMENT_PARAM = 'incomingStatement';
+const INCOMING_STATEMENT_PARAM = 'incomingStatement';
 
 const MAX_URL_LENGTH = 2048;
 const MAX_NAME_LENGTH = 255;
 /** iOS's per-app copy folder under tmp/, named after the bundle identifier. */
 const TMP_INBOX_FOLDER = /^[A-Za-z0-9][A-Za-z0-9.-]{0,200}-Inbox$/;
 
-export interface IncomingStatementFile {
+interface IncomingStatementFile {
   /** The file:// URL exactly as iOS gave it. */
   uri: string;
   /** The decoded file name, for the import's per-file result. */
@@ -113,7 +113,7 @@ let sequence = 0;
 let superseded: string[] = [];
 
 /** Remember a validated file and return the one-time token that claims it. */
-export function registerIncomingStatement(file: IncomingStatementFile): string {
+function registerIncomingStatement(file: IncomingStatementFile): string {
   if (pending && pending.file.uri !== file.uri) superseded.push(pending.file.uri);
   sequence += 1;
   const token = `${sequence.toString(36)}${Math.random().toString(36).slice(2, 10)}`;

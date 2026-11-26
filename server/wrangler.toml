@@ -68,8 +68,20 @@ crons = ["*/30 * * * *"]
 
 [observability]
 enabled = true
-# Message text is never logged, but keeping sampling explicit means nobody
-# later assumes logs are a place to debug parsing from.
+# Do not retain URL-bearing invocation logs for the finance relay. Redaction
+# also applies if an operator later enables a diagnostic destination.
+head_sampling_rate = 0.1
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+persist = false
+
+# Preserve the existing live trace configuration on a future full deploy.
+[observability.traces]
+enabled = false
+persist = true
 head_sampling_rate = 0.1
 
 # Required production secrets (never commit values). server/DEPLOY.md is the

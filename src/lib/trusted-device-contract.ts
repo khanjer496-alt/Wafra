@@ -7,9 +7,9 @@
  */
 
 export const MAX_TRUSTED_DEVICES = 8;
-export const TRUSTED_DEVICE_INVITE_VERSION = 1;
+const TRUSTED_DEVICE_INVITE_VERSION = 1;
 
-export type TrustedDeviceRole = 'owner' | 'member';
+type TrustedDeviceRole = 'owner' | 'member';
 
 export interface TrustedDevice {
   id: string;
@@ -26,7 +26,7 @@ export interface TrustedDeviceInvite {
   expiresIn: number;
 }
 
-export interface ParsedTrustedDeviceInvite {
+interface ParsedTrustedDeviceInvite {
   relayUrl: string;
   inviteToken: string;
 }

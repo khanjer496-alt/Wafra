@@ -4,16 +4,37 @@ _Prepared 10 September 2026. Complete against the exact archive selected in App 
 
 ## App Privacy draft
 
-Wafra does not track users for advertising and the repository contains no ad SDK
-or third-party analytics SDK. The privacy answers must still describe the union
-of Wafra plus Superwall and every optional network feature enabled in the
-submitted binary.
+The draft tracking answer requires verification of SDK and dashboard data uses.
+Superwall collects identifiers, purchase information and product events. The
+privacy answers must describe Wafra plus Superwall and every optional network
+feature enabled in the submitted binary; absence of an ATT prompt alone does
+not prove absence of tracking.
 
 Relevant categories to review in App Store Connect include financial information
 and purchase history used for app functionality, customer-support content sent
 only when the user explicitly submits feedback, and any identifier/purchase data
 Superwall documents for the shipping SDK version. The main ledger itself is
 stored in encrypted app storage on the device and is not a Wafra account/profile.
+
+QA-008 update: online merchant and bank logos are off by default on both iOS and
+Android, including older saved states without an explicit logo preference.
+Settings → Online merchant logos explains that opting in shares cleaned names
+with Brandfetch, which also sees requested domains and the network address.
+Private Mode overrides that choice. Turning the switch off revokes queued
+lookups and removes remote image sources; requests already sent cannot be recalled.
+App Privacy must still disclose the union of enabled optional collection:
+Purchase History remains in the draft because of Superwall, and Brandfetch
+merchant lookups are an additional source only after opt-in. Do not remove a
+data category merely because this optional feature starts off. Retention,
+linkage and dashboard integration evidence remain release gates.
+
+QA-009 update: App Lock enables a native iOS inactive-window cover and Android
+secure-window protection for the recent-apps preview. Hide widget amounts with
+App Lock starts on, omitting monetary values from the shared widget summary
+while App Lock is enabled, even after unlocking the app. Names, dates and counts
+can remain visible. Native candidate QA must verify recents, Face ID/passcode
+return, cold start, Home Screen widgets and preference changes; source tests
+do not prove the operating system has refreshed an existing widget image.
 
 The current iPhone automatic-capture path is user-configured Apple Message
 automation invoking Wafra's local App Intent on the same iPhone. Do not say that

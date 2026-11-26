@@ -27,5 +27,11 @@ android {
     // this build-time variable explicitly; every other variant compiles the
     // method closed even if JavaScript is modified later.
     buildConfigField 'boolean', 'WAFRA_SMS_CORPUS_EXPORT', smsCorpusExportEnabled.toString()
+    // What Gradle actually compiled, as a string the packaged dex keeps:
+    // build-apk.yml fails a Play build unless it reads "=off"
+    // (scripts/android-build-flags.cjs). Returned by buildFlags() so it stays a
+    // runtime value; never derive a gate from it.
+    buildConfigField 'String', 'WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE',
+      smsCorpusExportEnabled ? '"wafra-build-flag:sms-corpus-native=on"' : '"wafra-build-flag:sms-corpus-native=off"'
   }
 }

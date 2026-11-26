@@ -65,7 +65,7 @@ export function transferPersonName(transaction: Transaction): string | undefined
  * A row waiting for an answer that the reconciler does not queue: ownership
  * unknown, nothing linking it to another of the person's accounts.
  */
-export function isUnqueuedWaiting(record: TransferActivityRecord): boolean {
+function isUnqueuedWaiting(record: TransferActivityRecord): boolean {
   return !record.confirmed && !record.needsReview && record.assessment.status === 'ownership-unknown' &&
     !record.transaction.transferDecision &&
     (record.transaction.type === 'income' || record.transaction.type === 'expense');
@@ -135,7 +135,7 @@ export function transferPeople(activity: readonly TransferActivityRecord[]): Tra
 }
 
 /** How many transfers wait for an answer, and with how many people. */
-export interface TransferWaitingSummary {
+interface TransferWaitingSummary {
   /**
    * Every transfer kept out of the totals until the person answers: the
    * reconciler's queue and every other unconfirmed transfer. A linked or
@@ -176,7 +176,7 @@ export function transferWaitingSummary(activity: readonly TransferActivityRecord
 }
 
 /** One thing the Transfers card asks: a person (every transfer with them), or one entry. */
-export type TransferQuestion<T extends TransferActivityRecord = TransferActivityRecord> =
+type TransferQuestion<T extends TransferActivityRecord = TransferActivityRecord> =
   | { kind: 'person'; key: string; person: TransferPersonGroup }
   | { kind: 'entry'; key: string; record: T };
 

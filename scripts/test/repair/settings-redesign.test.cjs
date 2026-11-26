@@ -60,12 +60,9 @@ test('Arabic counts use singular, dual and plural forms', () => {
   assert.equal(ar.merchantsToPlace(103), '103 عناصر بانتظار التصنيف');
   assert.equal(ar.merchantsToPlace(111), '111 عنصرًا بانتظار التصنيف');
   assert.equal(ar.merchantsToPlace(200), '200 عنصر بانتظار التصنيف');
-  assert.equal(ar.proTrialBody(1), 'الالتقاط التلقائي متاح ليوم واحد إضافي.');
-  assert.equal(ar.proTrialBody(2), 'الالتقاط التلقائي متاح ليومين إضافيين.');
-  assert.equal(ar.proTrialBody(9), 'الالتقاط التلقائي متاح لمدة 9 أيام إضافية.');
-  assert.equal(ar.proTrialBody(14), 'الالتقاط التلقائي متاح لمدة 14 يومًا إضافيًا.');
   const en = copyModule.settingsCopy('en');
-  assert.equal(en.proTrialBody(1), 'Automatic capture is included for 1 more day.');
+  assert.equal(ar.proTrialTitle, 'الالتقاط التلقائي المجاني');
+  assert.equal(en.proTrialTitle, 'Free automatic capture');
   assert.equal(en.unreadFormats(3), '3 formats Wafra couldn’t read');
   assert.equal(en.smsAllowed(0), 'Allowed · no SMS entries this month yet');
   assert.equal(en.smsAllowed(1), 'Allowed · 1 SMS entry this month');

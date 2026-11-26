@@ -12,7 +12,7 @@ type SectionHeaderTrailing =
   | { value?: never; action?: never; trailing: React.ReactNode }
   | { value?: never; action?: never; trailing?: never };
 
-export type SectionHeaderProps = SectionHeaderTrailing & { title: string };
+type SectionHeaderProps = SectionHeaderTrailing & { title: string };
 
 export function SectionHeader({ title, value, action, trailing }: SectionHeaderProps) {
   return (

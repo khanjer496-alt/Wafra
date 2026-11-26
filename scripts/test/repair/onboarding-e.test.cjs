@@ -67,11 +67,11 @@ test('E copy: every Arabic line is Arabic and every English line is not', () => 
 
 test('E copy: Arabic counts agree with their nouns', () => {
   const { ar, en } = ONBOARDING_E_COPY;
-  assert.equal(en.startFree(3), 'Start the free 3 days');
-  assert.equal(en.startFree(1), 'Start the free day');
+  assert.equal(en.startFree(3), 'Start 3 days of free automatic capture');
+  assert.equal(en.startFree(1), 'Start 1 day of free automatic capture');
   assert.equal(en.trialEnd(3), 'Within 3 days', 'trialDaysLeft rounds up, so never an exact count');
-  assert.equal(ar.startFree(3), 'ابدأ 3 أيام مجانية');
-  assert.equal(ar.startFree(2), 'ابدأ اليومين المجانيين');
+  assert.equal(ar.startFree(3), 'ابدأ الالتقاط التلقائي المجاني: 3 أيام');
+  assert.equal(ar.startFree(2), 'ابدأ الالتقاط التلقائي المجاني: يومان');
   assert.equal(ar.trialEnd(2), 'خلال يومين');
   assert.equal(ar.trialEnd(3), 'خلال 3 أيام');
   assert.equal(ar.trialEnd(11), 'خلال 11 يوماً');
@@ -394,7 +394,14 @@ test('the paywall sells through the real billing layer and never writes a price'
   assert.doesNotMatch(paywall, /PRO_REFERENCE_PRICE_STRINGS|PRO_PRICES|(?:US\$|\$|€|£|AED|SAR)\s?\d/);
   assert.match(paywall, /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]{0,120}configuredPublicUrl\('termsOfUseUrl'\)/);
   assert.match(paywall, /if \(!legalReady\) \{ setNotice\(\{ title: t\('purchaseUnavailable'\), body: t\('purchaseLegalMissingBody'\) \}\)/);
-  assert.match(paywall, /if \(outcome === 'cancelled'\) return;/);
+  // A cancel (the store's, or an SDK answer with no reason) is one calm neutral line under the Pro button, never the
+  // titled alert box and never the purchaseFailed notice.
+  assert.match(paywall, /if \(outcome === 'cancelled'\) \{ setNotice\(\{ title: '', body: t\('purchaseNotCompleted'\), tone: 'neutral' \}\); return; \}/);
+  assert.match(paywall, /checkout\.notice && checkout\.notice\.tone !== 'neutral' \? <View accessibilityRole="alert"/);
+  assert.match(paywall, /proShown && checkout\.notice\?\.tone === 'neutral' \? <ThemedText type="meta" testID="onboarding-paywall-purchase-note"/);
+  assert.ok(paywall.indexOf('testID="onboarding-paywall-pro"') < paywall.indexOf('testID="onboarding-paywall-purchase-note"'),
+    'the line sits after the Pro button');
+  assert.doesNotMatch(paywall, /outcome === 'cancelled'[^\n]*purchaseFailed/);
   assert.match(paywall, /if \(outcome === 'pending'\)/);
   // The free way on is always there and needs no store.
   assert.match(paywall, /testID="onboarding-paywall-free"/);

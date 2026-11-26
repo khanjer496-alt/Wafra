@@ -49,7 +49,7 @@ node scripts/e2e/e2e-home-pattern.mjs
 node scripts/e2e/e2e-home-layout.mjs
 node scripts/e2e/e2e-merchant-spending.mjs
 node scripts/e2e/e2e-merchant-entrypoints.mjs
-node scripts/e2e/e2e-smoke.mjs
+OUT=artifacts/e2e-smoke node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
 node scripts/e2e/e2e-spending-period-details.mjs
 node scripts/e2e/e2e-card-activity.mjs

@@ -59,7 +59,7 @@ export interface SharedAlertFormat {
   shape: SharedAlertShape;
 }
 
-export type SharedShapeRefusal =
+type SharedShapeRefusal =
   | 'no-sender'
   | 'phone-like-sender'
   | 'email-sender'
@@ -71,7 +71,7 @@ export type SharedShapeRefusal =
   | 'too-large'
   | 'invalid-shape';
 
-export type SharedShapeResult =
+type SharedShapeResult =
   | { ok: true; shape: SharedAlertShape; hash: string }
   | { ok: false; reason: SharedShapeRefusal };
 
@@ -87,8 +87,8 @@ export interface SharedMatchOptions {
   dateOrder?: LearnedDateOrder | null;
 }
 
-export const SHARED_SHAPE_MAX_TOKENS = 160;
-export const SHARED_SHAPE_MAX_BYTES = 8192;
+const SHARED_SHAPE_MAX_TOKENS = 160;
+const SHARED_SHAPE_MAX_BYTES = 8192;
 export const SHARED_FORMATS_MAX_LIST = 2000;
 const MAX_LITERAL = 64;
 const MAX_ALIASES = 8;

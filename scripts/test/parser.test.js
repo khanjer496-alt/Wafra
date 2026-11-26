@@ -10,7 +10,7 @@ const {
   isInformationOnlyAlert,
 } = require('./build/sms-parser');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, retainedCredits = 0;
 /**
  * `options` is the optional third argument to parseSms — today just
  * `{ sender }`. Every call that omits it exercises the no-sender path, which
@@ -19,8 +19,21 @@ let pass = 0, fail = 0;
 function t(name, msg, expect, options) {
   const p = parseSms(msg, undefined, options);
   const errs = [];
+  let retained = false;
   if (expect === null) {
     if (p !== null) errs.push(`expected SKIP, got ${JSON.stringify({m:p.merchant,a:p.amountFils,k:p.kind,t:p.type})}`);
+  } else if (expect.review || (!p && expect.type === 'income')) {
+    if (p !== null) errs.push('uncertain credit must not create a ledger candidate');
+    const { createLaunchAlertSession } = require('./build/launch-alert-parser');
+    const current = require('./build/markets').getActiveMarket();
+    const session = createLaunchAlertSession({ overrides: {}, activeMarket: current.id, pinnedCurrency: expect.currency ?? current.currency.code });
+    const held = require('./build/auto-import').inspectSourceFreeRefusedAlert({ source: msg, sender: options?.sender ?? '',
+      observedAt: Date.parse('2026-11-14T10:00:00Z'), channel: 'inbox', session });
+    const event = held.kind === 'review' && held.candidate.kind === 'universal' ? held.candidate.event : null;
+    if (event?.status !== 'informational' || event.amount.value?.minorUnits !== String(expect.amountFils) ||
+      (expect.currency && event.amount.value?.currency !== expect.currency)) errs.push('exact money must remain in informational Review');
+    retained = event?.status === 'informational' && errs.length === 0;
+    if (event && require('./build/alert-review-tray').isMoneyMovementReview({ kind: 'universal', event })) errs.push('informational credit cannot be confirmed into the ledger');
   } else {
     if (!p) errs.push('expected parse, got null');
     else {
@@ -66,7 +79,7 @@ function t(name, msg, expect, options) {
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
-  else { pass++; console.log(`✓ ${name}`); }
+  else { pass++; if (retained) retainedCredits++; console.log(`✓ ${name}${retained ? " [informational, not posted]" : ""}`); }
 }
 
 /** For the handful of claims that are about something other than one parse. */
@@ -1321,8 +1334,11 @@ t('parenthetical descriptor drops (noon Food)',
   'Purchase of AED 46.80 with Debit Card ending 4744 at noon Food(Noon ECommerce), 5558888. Avl Balance is AED 5,304.17.',
   { merchant: 'Noon Food', category: 'dining' });
 
-t('SEWA bill notice is a due reminder, not an expense',
+t('SEWA bill notice with a click instruction is not imported',
   'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Click here to view bill  https://sewapayment.tiny.us/359aezc3',
+  null);
+t('SEWA bill notice without a click instruction keeps its due reminder',
+  'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Bill reference: https://sewapayment.tiny.us/359aezc3',
   { kind: 'billDue', merchant: 'SEWA', category: 'utilities', date: '2022-01-22', dueDay: 22,
     billIdentity: 'account:7118' });
 
@@ -1341,10 +1357,15 @@ t('e& due-date notice is a reminder, not a charge',
 // genuinely split across subsystems and one biller can reach a ledger twice.
 // These five pin the behaviour as it ships; which name wins is a product
 // decision, not something to settle by editing a green test.
-t('Arabic e& monthly statement creates one telecom reminder',
+t('Arabic e& monthly statement with a click instruction is not imported',
   'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
   'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
   'اضغط هنا لدفع فاتورتك عبر تطبيق e& UAE\nhttps://www.eand.ae/smsebill',
+  null);
+t('Arabic e& monthly statement without a click instruction keeps its telecom reminder',
+  'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
+  'خدمة e& UAE\nhttps://www.eand.ae/smsebill',
   { kind: 'billDue', merchant: 'E&', amountFils: 45045, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'account:6789', deliberate: true });
 
@@ -2011,8 +2032,9 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
     'Mode of Payment : Credit/Debit Card\n' +
     'Transaction #: MOBILEAPP2470000000006212\n' +
     'Reference #: 300000000000';
-  const SMILES_TAIL =
-    "\n\nYou've earned Smiles points on this payment. Redeem them for savings on food, groceries, shopping, travel, e& add-ons, home services, and more. Check your balance and start redeeming: https://smilesuae.go.link/xxxx" +
+  const SMILES_REWARDS =
+    "\n\nYou've earned Smiles points on this payment. Redeem them for savings on food, groceries, shopping, travel, e& add-ons, home services, and more. Check your balance and start redeeming: https://smilesuae.go.link/xxxx";
+  const SMILES_TAIL = SMILES_REWARDS +
     '\n\nTo Know your Payment Status through WhatsApp Click on https://api.whatsapp.com/send?phone=971000000000';
   const EXPECT = {
     kind: 'transaction', type: 'expense', amountFils: 31395, currency: 'AED',
@@ -2020,19 +2042,30 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
     paymentFlowSide: 'receipt', billIdentity: 'account:0000',
     card: null, transfer: false, snapshotFils: null, snapshotKind: null, date: '2026-10-03',
   };
-  t('the real e& amount-first receipt is the biller-receipt family',
-    EAND_RECEIPT + SMILES_TAIL, EXPECT, { sender: 'eandINF' });
+  // The explicit no-click policy holds the entire source, even a genuine
+  // biller receipt. No-click controls retain all existing receipt assertions.
+  t('the e& receipt with a WhatsApp click instruction is not imported',
+    EAND_RECEIPT + SMILES_TAIL, null, { sender: 'eandINF' });
+  t('the e& receipt with only its rewards paragraph keeps the biller-receipt family',
+    EAND_RECEIPT + SMILES_REWARDS, EXPECT, { sender: 'eandINF' });
   t('...and so is the same receipt without its Smiles paragraph',
     EAND_RECEIPT, EXPECT, { sender: 'eandINF' });
-  t('...and with no sender at all, which is how the paste path reads it',
-    EAND_RECEIPT + SMILES_TAIL, EXPECT);
-  t('...and in the "Dear Customer, Your payment" voice the older family uses',
+  t('the click-instruction receipt is also held without a sender',
+    EAND_RECEIPT + SMILES_TAIL, null);
+  t('the no-click rewards receipt still works without a sender',
+    EAND_RECEIPT + SMILES_REWARDS, EXPECT);
+  t('the older processed voice also refuses the click instruction',
     EAND_RECEIPT.replace('Hello, your payment', 'Dear Customer, Your payment') + SMILES_TAIL,
+    null, { sender: 'eandINF' });
+  t('the older processed voice keeps the no-click rewards receipt',
+    EAND_RECEIPT.replace('Hello, your payment', 'Dear Customer, Your payment') + SMILES_REWARDS,
     EXPECT, { sender: 'eandINF' });
   // A capture that loses its blank lines still keeps the advert out of the
   // category: the Smiles lead-in ends the receipt block on its own.
-  t('...and with its paragraphs flattened',
-    (EAND_RECEIPT + SMILES_TAIL).replace(/\n\n/g, '\n'), EXPECT, { sender: 'eandINF' });
+  t('flattening paragraphs does not exempt a click instruction',
+    (EAND_RECEIPT + SMILES_TAIL).replace(/\n\n/g, '\n'), null, { sender: 'eandINF' });
+  t('flattening the no-click rewards receipt preserves its fields',
+    (EAND_RECEIPT + SMILES_REWARDS).replace(/\n\n/g, '\n'), EXPECT, { sender: 'eandINF' });
 
   // The amount-first opening alone is ordinary bank wording. Without a biller
   // in the channel line, or with card / minimum / outstanding vocabulary, it is
@@ -2080,7 +2113,7 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
   // The e& account number is the BILLER's. It must not become a card, a bank
   // account, a transfer party or a balance on anything the user owns.
   {
-    const row = parseSms(EAND_RECEIPT + SMILES_TAIL, undefined, { sender: 'eandINF' });
+    const row = parseSms(EAND_RECEIPT + SMILES_REWARDS, undefined, { sender: 'eandINF' });
     ok('the e& account number is not read as a transfer party',
       extractOutgoingTransferParties(EAND_RECEIPT + SMILES_TAIL) === null);
     const { buildImportPlan } = require('./build/import-plan');
@@ -2100,7 +2133,7 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
   // receipts have not been seen carrying the Smiles paragraph; the paragraph is
   // the real one above, appended to the real receipt pinned earlier in this file.
   t('a Smiles paragraph cannot re-file a processed-voice e& receipt either',
-    'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App' + SMILES_TAIL,
+    'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App' + SMILES_REWARDS,
     { merchant: 'Etisalat', category: 'telecom', paymentFlowSide: 'receipt', billIdentity: 'account:2543' });
 }
 
@@ -2431,9 +2464,8 @@ t('an automated savings rule is a transfer too',
   'AED 4,000.00 has been debited from your account no. 096XXX13XXX 0007 RULE TRANSFER TO EMERGENCY FUNDS WITH ONE-SHOT SAV. The available balance is AED 4,000.95.',
   { merchant: 'Savings transfer', amountFils: 400000, transfer: true });
 
-t('a refund says so',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { merchant: 'Refund', type: 'income', amountFils: 5889 });
+t('issuing a refund does not prove money reached the account',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 t("Etisalat's own app is telecom, not Other",
   'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
@@ -4425,9 +4457,8 @@ bank('(not a bank)', 'merchant and delivery senders',
   'The parser must read what a shop sends too, and must not mistake it for a\n   bank alert.');
 
 // REAL corpus #346 (seen 1x). Suffix currency, no card, no bank.
-fmt('REAL', 'merchant refund with a suffix currency and no card',
-  "We've issued your refund of 58.89 AED for your cancelled order.",
-  { type: 'income', amountFils: 5889, merchant: 'Refund', category: 'other', card: null });
+fmt('REAL', 'issued merchant refund does not prove a settled bank credit',
+  "We've issued your refund of 58.89 AED for your cancelled order.", null);
 
 // ─────────── Sender attribution and the no-sender guarantee ───────────
 bank('(sender plumbing)', 'all of the above', 'That the sender is read, and that omitting it changes nothing.');
@@ -5621,7 +5652,7 @@ t('a purchase that "has been refunded" reverses too',
   { type: 'income', amountFils: 30000 });
 t('the multi-line "Debit Card Refund" header is a refund',
   'Debit Card Refund\nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE\n19/02/26 15:45\nBalance AED 1780.67',
-  { type: 'income', amountFils: 5358 });
+  { review: true, amountFils: 5358 });
 // CONTROL: an ordinary debit-card purchase is still spending. The refund rule
 // may not claim a message just because it names a debit card.
 t('a plain debit-card purchase is untouched by the refund rule',
@@ -6212,11 +6243,12 @@ for (const [merchant, footer] of [
   setActiveMarket('AE');
   const overrides = { 'expense:starbucks': 'groceries', 'income:starbucks': 'other' };
   const expense = parseSms('Purchase of AED 45.00 with Credit Card ending 1234 at STARBUCKS.', overrides);
-  const income = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides);
+  ok('a bare refund heading cannot acquire posting authority from a category override', parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides) === null);
+  const income = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', overrides);
   ok('directional merchant rules give purchases and refunds independent defaults',
     expense.categoryGuess === 'groceries' && expense.categoryPinned === true &&
     income.categoryGuess === 'other' && income.categoryPinned === true);
-  const legacy = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
+  const legacy = parseSms('Refund of AED 45.00 has been credited to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
   ok('legacy expense Other does not silently become an income rule', legacy.categoryPinned !== true);
   ok('direction compatibility accepts Other both ways and rejects unknown IDs',
     overrideFitsDirection('other', 'income') && overrideFitsDirection('other', 'expense') &&
@@ -6545,9 +6577,9 @@ t('the single-movement twin of the two-movement Arabic alert still posts',
 t('the single-movement twin of the two-movement English alert still posts',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery.',
   { amountFils: 6200, type: 'expense', merchant: 'Harbor Lamp Bakery' });
-t('two separate movements in one alert are not posted as one',
+t('a completed debit remains its own expense beside a separate refund note',
   'Purchase posted: AED 62.00 at Harbor Lamp Bakery. A separate refund of AED 18.50 from Olive Crate Store was also credited today.',
-  null);
+  { type: 'expense', amountFils: 6200, merchant: 'Harbor Lamp Bakery' });
 t('two separate Arabic movements in one alert are not posted as one',
   'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٣٠٠.',
   null);
@@ -7411,5 +7443,5 @@ t('control: a payment credited to a named biller account stays an expense',
   ok('fold review control: the spaced four-digit ADCB tail is •6383', adcb?.card?.last4 === '6383', adcb?.card);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed; ${retainedCredits} incoming controls retained informationally`);
 process.exit(fail ? 1 : 0);

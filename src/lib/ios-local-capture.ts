@@ -11,13 +11,19 @@ import {
   emptyAlertReviewTray,
   isUniversalReviewAlert,
   partitionReviewsByCapacity,
+  requiresReviewRetention,
   reviewCaptureBacklog,
+  reviewReceiptSettled,
+  reviewSourceKeyOf,
+  settleReviewStage,
   type ReviewEntry,
+  type ReviewSourceReceipt,
+  type ReviewStageReceipt,
 } from '@/lib/alert-review-tray';
 import { mayBeSamePurchase } from '@/lib/apple-pay-card-links';
 import { isApplePayWalletRow } from '@/lib/dedupe';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
-import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
+import { settleWalletNearMatches } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import { carrierRedeliveryIndexesOf } from '@/lib/auto-import';
 import { bestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
@@ -54,7 +60,7 @@ const MAX_PAGES = 40;
 const MAX_EXCLUDED_RECORDS = 2000;
 const MAX_APPLE_PAY_PAGES = 4;
 
-export interface IosLocalCaptureOutcome {
+interface IosLocalCaptureOutcome {
   scanned: number;
   imported: number;
   reviews: number;
@@ -78,7 +84,7 @@ export interface IosLocalCaptureOutcome {
   currencyConflicts?: number;
 }
 
-export interface IosLocalCaptureCoordinator {
+interface IosLocalCaptureCoordinator {
   drain(): Promise<IosLocalCaptureOutcome>;
   retryRetirementIfNeeded(): Promise<'not-needed' | 'complete' | 'retry-needed'>;
 }
@@ -417,6 +423,35 @@ const earliestQualification = (
     .map((candidate) => candidate.observedAt);
   return timestamps.length > 0 ? Math.min(...timestamps) : null;
 };
+
+type ReviewRetentionMap = Map<string, ReviewSourceReceipt['outcome']>;
+const reviewRetentionKey = (item: ReviewEntry): string => reviewSourceKeyOf(item);
+interface ReviewStageRecord { items: readonly ReviewEntry[]; receipt: ReviewStageReceipt }
+/**
+ * Re-read every stage call's OWN receipt. Call this synchronously right before
+ * the acknowledgement decision: no await may sit between the read and the
+ * native ACK, so a later writer cannot slip in. A receipt without retention()
+ * defers; a kept outcome is never downgraded by another stage's entry.
+ */
+function currentReviewRetention(stages: readonly ReviewStageRecord[]): ReviewRetentionMap {
+  const target: ReviewRetentionMap = new Map();
+  for (const { items, receipt } of stages) {
+    const settled: readonly ReviewSourceReceipt[] = receipt.retention
+      ? receipt.retention()
+      : items.map(item => ({ sourceKey: reviewRetentionKey(item), outcome: 'deferred' as const }));
+    for (const entry of settled) {
+      const prior = target.get(entry.sourceKey);
+      if (reviewReceiptSettled(prior)) continue;
+      target.set(entry.sourceKey, entry.outcome);
+    }
+  }
+  return target;
+}
+/** Only the item's own settled receipt (pending, resolved or expired) releases it; evicted never does. */
+function reviewRetentionKept(map: ReviewRetentionMap, item: ReviewEntry): boolean {
+  const outcome = map.get(reviewRetentionKey(item));
+  return reviewReceiptSettled(outcome);
+}
 
 /** Drain the native queue through one serialized, durable acknowledgement path. */
 export function createIosLocalCaptureCoordinator(
@@ -878,6 +913,9 @@ export function createIosLocalCaptureCoordinator(
       uniqueQualificationCandidates(allReviewQualifications);
       uniqueQualificationCandidates(allDeclineQualifications);
 
+      // Each stage call's OWN settled receipt, read after its durable write.
+      // Acknowledgement never trusts a later live tray read.
+      const pageStages: ReviewStageRecord[] = [];
       let admittedReviews = 0;
       let admittedReviewIds: string[] = [];
       if (reviews.length > 0) {
@@ -885,10 +923,11 @@ export function createIosLocalCaptureCoordinator(
           throw sourceFreePageError('Local capture requires review staging');
         }
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-        const reviewReceipt = input.ledger.stageReviewAlerts(reviews, reviewQualifications);
-        await reviewReceipt.durable;
+        const reviewReceipt = input.ledger.stageReviewAlerts(reviews, reviewQualifications, undefined, 'hold-source');
+        await settleReviewStage(reviews, reviewReceipt);
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
+        pageStages.push({ items: reviews, receipt: reviewReceipt });
         if (!Number.isInteger(reviewReceipt.admitted) || reviewReceipt.admitted < 0 ||
           reviewReceipt.admitted > reviews.length) {
           throw sourceFreePageError('Local capture review receipt was refused');
@@ -906,10 +945,11 @@ export function createIosLocalCaptureCoordinator(
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         // Generic review can be useful without proving a known-bank automation.
         // It receives no qualification mapping and cannot set firstCapturedAt.
-        const receipt = input.ledger.stageReviewAlerts(unqualifiedReviews);
-        await receipt.durable;
+        const receipt = input.ledger.stageReviewAlerts(unqualifiedReviews, undefined, undefined, 'hold-source');
+        await settleReviewStage(unqualifiedReviews, receipt);
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
+        pageStages.push({ items: unqualifiedReviews, receipt });
         if (!Number.isInteger(receipt.admitted) || receipt.admitted < 0 ||
           receipt.admitted > unqualifiedReviews.length) throw sourceFreePageError('Local capture review receipt was refused');
         admittedReviews += receipt.admitted;
@@ -984,11 +1024,11 @@ export function createIosLocalCaptureCoordinator(
         return { id: page[index].preflight.id, review: match.review,
           deferred: nearMatchSettlement.deferred.includes(match) };
       });
-      let nearMatchReceipt: { admitted: number; durable: Promise<void> } | null = null;
+      let nearMatchReceipt: ReviewStageReceipt | null = null;
       if (nearMatchSettlement.reviews.length > 0) {
         if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Local capture requires review staging');
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews);
+        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews, undefined, undefined, 'hold-source');
       }
 
       let imported = 0;
@@ -1028,9 +1068,10 @@ export function createIosLocalCaptureCoordinator(
       }
 
       if (nearMatchReceipt) {
-        await nearMatchReceipt.durable;
+        await settleReviewStage(nearMatchSettlement.reviews, nearMatchReceipt);
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
+        pageStages.push({ items: nearMatchSettlement.reviews, receipt: nearMatchReceipt });
         if (!Number.isInteger(nearMatchReceipt.admitted) || nearMatchReceipt.admitted < 0 ||
           nearMatchReceipt.admitted > nearMatchSettlement.reviews.length) {
           throw sourceFreePageError('Local capture review receipt was refused');
@@ -1073,25 +1114,27 @@ export function createIosLocalCaptureCoordinator(
       // append that raced this page cannot be removed by its acknowledgement.
       requireLedgerGeneration(input.ledger, pageGeneration);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-      const reviewTray = input.ledger.getState().reviewTray;
+      // Read each receipt now: nothing awaits between this read and the ACK.
+      const pageRetention = currentReviewRetention(pageStages);
       const deferredReviewIds = new Set(outcomes.flatMap((outcome, index) => {
         if (outcome.kind === 'held') return [page[index].preflight.id];
         if (capacityDeferredIds.has(page[index].preflight.id)) return [page[index].preflight.id];
         if (outcome.kind !== 'review') return [];
-        // Notification reviews, currency-conflict money rows and possible
-        // Apple Pay repeats are ACKed only behind their retained Review item
-        // (pending or a live tombstone).
+        // Notification reviews, currency-conflict money rows, possible Apple
+        // Pay repeats and ANY review that carries recoverable money evidence
+        // are ACKed only behind their own settled receipt: pending, an explicit
+        // user resolution, or an expired source (a terminal, counted loss). An
+        // evicted tombstone, a later optimistic write or a missing receipt
+        // never qualifies.
+        const item = outcome.item;
         if (outcome.item.channel !== 'push' &&
           !currencyConflictReviewIds.has(page[index].preflight.id) &&
-          !walletRepeatReviewIds.has(page[index].preflight.id)) return [];
-        const item = outcome.item;
-        const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
-          reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
-        return retained ? [] : [page[index].preflight.id];
+          !walletRepeatReviewIds.has(page[index].preflight.id) &&
+          !requiresReviewRetention(item)) return [];
+        return reviewRetentionKept(pageRetention, item) ? [] : [page[index].preflight.id];
       }));
       for (const record of nearMatchRecords) {
-        if (record.deferred ||
-          !walletNearMatchesRetained(reviewTray, [record.review], now.getTime())) {
+        if (record.deferred || !reviewRetentionKept(pageRetention, record.review)) {
           deferredReviewIds.add(record.id);
           deferredReviewRecords.add(record.id);
         }
@@ -1169,6 +1212,7 @@ export function createIosLocalCaptureCoordinator(
         // store re-checks every guard against the authoritative ledger. Its
         // receipts are acknowledged behind the 'added' resolution it records.
         let posted = new Set<string>();
+        const applePayStages: ReviewStageRecord[] = [];
         const linkable = captured.filter(item => isUniversalReviewAlert(item) && item.walletCardOrPass !== undefined);
         if (input.postLinkedApplePay && linkable.length > 0) {
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
@@ -1188,13 +1232,14 @@ export function createIosLocalCaptureCoordinator(
         if (reviews.length > 0) {
           if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-          const receipt = input.ledger.stageReviewAlerts(reviews);
-          await receipt.durable;
+          const receipt = input.ledger.stageReviewAlerts(reviews, undefined, undefined, 'hold-source');
+          await settleReviewStage(reviews, receipt);
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
           requireLedgerGeneration(input.ledger, generation);
           if (!Number.isInteger(receipt.admitted) || receipt.admitted < 0 || receipt.admitted > reviews.length) {
             throw sourceFreePageError('Apple Pay review receipt was refused');
           }
+          applePayStages.push({ items: reviews, receipt });
           totals.reviews += receipt.admitted;
         }
         // Also protect duplicate/tombstoned receipts with a durable barrier.
@@ -1202,15 +1247,16 @@ export function createIosLocalCaptureCoordinator(
         await input.ledger.ensureDurable();
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, generation);
-        const state = input.ledger.getState();
+        // Read each receipt after the final barrier; no await before the ACK.
+        const applePayRetention = currentReviewRetention(applePayStages);
         const ack: string[] = [];
         for (const record of page) {
           if (!record.id) continue;
           const item = record.outcome.kind === 'review' ? record.outcome.item : null;
-          const retained = item && (
-            state.reviewTray?.pending.some(entry => entry.id === item.id && entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
-            state.reviewTray?.tombstones.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime())
-          );
+          // A linked-card posting is acknowledged behind the store's own
+          // durable posting receipt; everything else behind its own settled
+          // Review receipt (pending, an explicit resolution or an expired source).
+          const retained = item && (posted.has(item.id) || reviewRetentionKept(applePayRetention, item));
           if (retained) { ack.push(record.id); heldIds.delete(record.id); waitingReviewIds.delete(record.id); }
           else {
             heldIds.add(record.id);

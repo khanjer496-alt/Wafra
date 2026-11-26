@@ -69,8 +69,8 @@ public URLs after deployment. Independent counsel review is not recorded.
 
 Required launch assets are global/default assets, not Gulf-branded artwork:
 
-- App Store: eight English 6.9-inch portrait captures at 1320×2868 in the
-  repository's current target set.
+- App Store: eight en-US Dynamic Island medium portrait captures at 1206×2622,
+  from the final cleared candidate 195 on iPhone 16 Pro.
 - Google Play: eight global-English 1080×1920 phone captures plus a neutral
   1024×500 opaque feature graphic.
 

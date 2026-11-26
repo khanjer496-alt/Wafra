@@ -102,6 +102,8 @@ function add(options = {}) {
   const h = createWorkflowHarness({ language: options.language ?? 'en', state: {
     ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 }, reviewTray: { pending: [], tombstones: [], templateRules: [] },
     accounts: [{ id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#997349' }] } });
+  h.deps['react-native'].useWindowDimensions = () => ({width: options.width ?? 390,
+    height: options.height ?? 844, fontScale: options.fontScale ?? 1, scale: 1});
   h.deps['@/lib/review-promotion'] = { reviewTemplateRuleFor: () => null };
   h.deps['@/lib/universal-categorization'] = { suggestUniversalCategory: () => null };
   h.local('@/lib/review-alert-copy', 'src/lib/review-alert-copy.ts');
@@ -110,21 +112,38 @@ function add(options = {}) {
   return { ...h, tree, scaffold: walk(tree).find((node) => node.type === 'BandScaffold') };
 }
 
-test('Add: green band with Expense/Income, the amount, the merchant; keypad and Save on the sheet', () => {
-  const h = add();
+for (const language of ['en', 'ar']) for (const pinned of [false, true]) {
+test(`Add (${language}, ${pinned ? 'large text' : 'normal'}): band controls and one amount beside its keypad or Save`, () => {
+  const h = add({language, ...(pinned ? {width: 320, height: 568, fontScale: 3.1} : {})});
+  const t = h.deps['@/lib/i18n'].t;
   assert.equal(h.scaffold.props.band, 'flow');
   assert.equal(h.scaffold.props.keyboardAware, true);
   const band = h.scaffold.props.bandContent;
   const tabs = walk(band).filter((node) => node.props?.accessibilityRole === 'tab');
-  assert.deepEqual([...tabs.map((tab) => tab.props.accessibilityLabel)], ['Expense', 'Income']);
-  const display = walk(band).find((node) => node.type === 'KeypadAmountDisplay');
-  assert.equal(display.props.palette, h.deps['@/hooks/use-band'].useBand('flow'), 'the amount is the band\'s figure');
+  assert.deepEqual([...tabs.map((tab) => tab.props.accessibilityLabel)], [t('expenseLabel'), t('incomeLabel')]);
+  const entry = byId(h.scaffold.props.children, 'manual-amount-keypad');
+  const display = walk(pinned ? h.scaffold.props.footer : entry).find(node => node.type === 'KeypadAmountDisplay');
+  assert.ok(display, 'the amount stays with the keypad or its pinned Save action');
+  assert.equal(walk(band).some(node => node.type === 'KeypadAmountDisplay'), false);
+  assert.equal(walk(h.tree).filter(node => node.type === 'KeypadAmountDisplay').length, 1);
+  assert.equal(display.props.palette, undefined, 'the amount uses sheet theme colours');
+  assert.equal(display.props.currency, 'USD');
+  assert.equal(display.props.text, '0');
+  assert.equal(display.props.empty, true);
+  assert.ok(display.props.ref && display.props.spokenLabel, 'amount keeps focus and spoken value');
   assert.ok(byId(band, 'add-merchant-field'), 'the merchant is typed on the band');
   assert.ok(byId(band, 'amount-mode-toggle'), 'the system keyboard stays one tap away');
-  const keypad = walk(h.scaffold.props.children).find((node) => node.type === 'AmountKeypad');
+  const keypad = walk(entry).find((node) => node.type === 'AmountKeypad');
   assert.ok(keypad, 'the keypad is on the sheet');
   assert.equal(keypad.props.palette, h.deps['@/hooks/use-band'].useBand('flow'));
+  assert.equal(typeof keypad.props.onKey, 'function');
   assert.ok(byId(h.scaffold.props.children, 'add-detail-chips'));
-  assert.equal(byId(h.scaffold.props.footer, 'add-save').props.accessibilityLabel, 'Save transaction');
-  assert.match(text(band), /Amount/);
+  const save = byId(h.scaffold.props.footer, 'add-save');
+  assert.equal(save.props.accessibilityLabel, t('saveTransaction'));
+  assert.equal(typeof save.props.onPress, 'function');
+  if (!pinned) {
+    const words = h.local('@/lib/everyday-band-copy', 'src/lib/everyday-band-copy.ts').everydayBandCopy(language);
+    assert.ok(text(entry).includes(words.amountLabel), 'the sheet labels the amount');
+  }
 });
+}

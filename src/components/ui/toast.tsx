@@ -21,16 +21,16 @@ import { failed } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
-export interface ToastAction {
+interface ToastAction {
   label: string;
   onPress: () => void;
 }
 
-export type ToastTone = 'success' | 'info' | 'warning' | 'error';
+type ToastTone = 'success' | 'info' | 'warning' | 'error';
 
-export type ToastPlacement = 'top' | 'bottom';
+type ToastPlacement = 'top' | 'bottom';
 
-export interface ToastOptions {
+interface ToastOptions {
   actions?: ToastAction[];
   durationMs?: number;
   tone?: ToastTone;

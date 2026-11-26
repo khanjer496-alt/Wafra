@@ -54,7 +54,12 @@ const execute = (relative, dependencies = {}) => {
   )(
     (request) => dependencies[request] ??
       (request === 'expo-crypto' ? { randomUUID: () => 'ui-capture-attempt-1' } :
+        request === '@/lib/import-processing-disclosure'
+          ? execute('src/lib/import-processing-disclosure.ts') :
         request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+        // i18n.ts reads the shared import-processing disclosure (cedfc47); without the
+        // real module the empty stub made `IMPORT_PROCESSING_DISCLOSURE.en` throw.
+        request === '@/lib/import-processing-disclosure' ? execute('src/lib/import-processing-disclosure.ts') :
         request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
           ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,
@@ -2363,6 +2368,19 @@ async function messageOnboardingProgressTests() {
     },
   );
 }
+
+// iOS 15 cannot run App Intents: the setup screen and onboarding say so in
+// both languages and name the two ways in that still work.
+for (const lang of ['en', 'ar']) {
+  ok(`iOS 15 fallback copy is complete and distinct in ${lang}`,
+    ['iosLocalUnsupported', 'iosLocalUnsupportedBody', 'iosLocalUnsupportedStatement', 'iosLocalUnsupportedPaste',
+      'onboardLiveUnsupportedTitle', 'onboardLiveUnsupportedBody', 'onboardPasteMessagesBody', 'onboardManualIosUnsupportedBody']
+      .every((key) => typeof translated(key, lang) === 'string' && translated(key, lang).length > 0 &&
+        (lang === 'en' || translated(key, 'ar') !== translated(key, 'en'))) &&
+    /iOS 16/.test(translated('iosLocalUnsupported', lang)) && /iOS 16/.test(translated('onboardLiveUnsupportedBody', lang)));
+}
+eq('iOS 15 fallback: the setup title names the requirement, not just a bare sentence',
+  translated('iosLocalUnsupported', 'en'), 'Automatic capture needs iOS 16 or later');
 
 async function main() {
   await messageOnboardingProgressTests();

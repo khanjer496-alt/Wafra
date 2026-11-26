@@ -1,0 +1,382 @@
+{
+  "provenance": "All 44 synthetic Change Reviewer probe12 rows, original source bodies, sender and market unchanged. Literal recall-money expectations are hand checked.",
+  "sourceSha256": "dbe9ec5f514bf7cd8806664d5f55d0d2185702a868deeccc5cb918f09429b42e",
+  "cases": [
+    {
+      "id": "probe12-01",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "123456 is your verification code for card transaction of AED 37.00 at TALABAT"
+    },
+    {
+      "id": "probe12-02",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Enter 482913 to confirm your payment of AED 37.00 at NOON on card ending 2517."
+    },
+    {
+      "id": "probe12-03",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "OTP 482913 for txn of AED 500.00 at AMAZON on card ending 2517. Do not share."
+    },
+    {
+      "id": "probe12-04",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Authorise AED 500.00 purchase at AMAZON with code 482913"
+    },
+    {
+      "id": "probe12-05",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your one-time password 482913 to approve AED 500.00 payment to JOHN"
+    },
+    {
+      "id": "probe12-06",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "رمز التحقق 482913 لعملية شراء بمبلغ 500.00 ريال لدى AMAZON"
+    },
+    {
+      "id": "probe12-07",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "استخدم الرمز 482913 لإتمام عملية الشراء بمبلغ 500.00 ريال"
+    },
+    {
+      "id": "probe12-08",
+      "family": "otp",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "كلمة المرور المؤقتة 482913 لتأكيد حوالة بمبلغ 500.00 ريال"
+    },
+    {
+      "id": "probe12-09",
+      "family": "otp-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase of AED 37.00 with Debit Card ending 1234 at NOON.COM. Never share your OTP or PIN with anyone.",
+      "type": "expense",
+      "minorUnits": 3700,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-10",
+      "family": "otp-recall",
+      "expected": "post",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "شراء بمبلغ 37.00 ريال بالبطاقة المنتهية 1234 لدى NOON. لا تشارك رمز التحقق مع أحد",
+      "type": "expense",
+      "minorUnits": 3700,
+      "currency": "SAR"
+    },
+    {
+      "id": "probe12-11",
+      "family": "decline",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your card transaction of AED 37.00 at TALABAT on card ending 2517 was declined."
+    },
+    {
+      "id": "probe12-12",
+      "family": "decline",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Transaction of AED 37.00 at TALABAT failed due to insufficient funds."
+    },
+    {
+      "id": "probe12-13",
+      "family": "decline",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "تعذر إتمام عملية الشراء بمبلغ 37.00 ريال لدى STARBUCKS"
+    },
+    {
+      "id": "probe12-14",
+      "family": "decline",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "تم رفض العملية بمبلغ 37.00 ريال لدى STARBUCKS"
+    },
+    {
+      "id": "probe12-15",
+      "family": "decline",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "AED 37.00 purchase at TALABAT was not approved"
+    },
+    {
+      "id": "probe12-16",
+      "family": "refund-req",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "We have received your refund request of AED 50.00 for IKEA."
+    },
+    {
+      "id": "probe12-17",
+      "family": "refund-req",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Refund of AED 50.00 from IKEA has been initiated and will be credited in 5-7 working days."
+    },
+    {
+      "id": "probe12-18",
+      "family": "refund-req",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Your refund request for AED 50.00 is being processed"
+    },
+    {
+      "id": "probe12-19",
+      "family": "refund-req",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "تم استلام طلب استرداد بمبلغ 50.00 ريال من IKEA"
+    },
+    {
+      "id": "probe12-20",
+      "family": "refund-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "FAB",
+      "body": "Refund of AED 50.00 from IKEA has been credited to your card ending 1234.",
+      "type": "income",
+      "minorUnits": 5000,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-21",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "استمتع بخصم 20% عند الشراء بمبلغ 500.00 ريال من STARBUCKS"
+    },
+    {
+      "id": "probe12-22",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "احصل على استرداد نقدي 200.00 ريال عند الشراء من STARBUCKS"
+    },
+    {
+      "id": "probe12-23",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "عزيزي العميل، احصل على استرداد نقدي 200.00 ريال عند الشراء من STARBUCKS"
+    },
+    {
+      "id": "probe12-24",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "عميلنا العزيز احصل على استرداد نقدي 200.00 ريال عند الشراء من STARBUCKS"
+    },
+    {
+      "id": "probe12-25",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "عزيزي عميل البنك احصل على استرداد نقدي 200 ريال عند الشراء من STARBUCKS"
+    },
+    {
+      "id": "probe12-26",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "وفر 100.00 ريال عند التسوق من نون هذا الأسبوع"
+    },
+    {
+      "id": "probe12-27",
+      "family": "promo",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Get AED 200.00 cashback when you spend AED 1,000.00 at STARBUCKS this month"
+    },
+    {
+      "id": "probe12-28",
+      "family": "promo-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase AED 100 at NOON, احصل على استرداد نقدي 5%",
+      "type": "expense",
+      "minorUnits": 10000,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-29",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "",
+      "body": "Just paid AED 85 for lunch"
+    },
+    {
+      "id": "probe12-30",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "Wafra Automation",
+      "body": "lol paid AED 85 at the cafe"
+    },
+    {
+      "id": "probe12-31",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "Wafra Notification",
+      "body": "Spent AED 120 on groceries today"
+    },
+    {
+      "id": "probe12-32",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "",
+      "body": "Sent you AED 50 for the tickets"
+    },
+    {
+      "id": "probe12-33",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "Wafra Automation",
+      "body": "I owe you AED 200 for dinner"
+    },
+    {
+      "id": "probe12-34",
+      "family": "personal",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "",
+      "body": "Transferred AED 500 to you, check your account"
+    },
+    {
+      "id": "probe12-35",
+      "family": "personal-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "WIO",
+      "body": "Spent AED 85.00 at CARREFOUR. Thanks for banking with WIO",
+      "type": "expense",
+      "minorUnits": 8500,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-36",
+      "family": "personal-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ADCB",
+      "body": "Received AED 12,000.00 from ACME LLC. Thanks for banking with ADCB",
+      "type": "income",
+      "minorUnits": 1200000,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-37",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "AED 4,999.00 debited from your account ending 3183. If not you, click http://bit.ly/abc123 immediately."
+    },
+    {
+      "id": "probe12-38",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "AED 4,999.00 debited from your account ending 3183. Verify at www.enbd-secure.test now"
+    },
+    {
+      "id": "probe12-39",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "AED 4,999.00 debited from your account ending 3183. Call +971501230000 to cancel."
+    },
+    {
+      "id": "probe12-40",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "AED 4,999.00 debited from your card ending 3183. Reply YES to confirm or tap hxxp://enbd-verify.test"
+    },
+    {
+      "id": "probe12-41",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "SA",
+      "sender": "AlRajhiBank",
+      "body": "تم خصم 4,999.00 ريال من حسابك المنتهي 3183. اضغط على الرابط لإلغاء العملية http://bit.ly/abc123"
+    },
+    {
+      "id": "probe12-42",
+      "family": "phish",
+      "expected": "refuse",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Your account is suspended. AED 4,999.00 debited. Update details: enbd-secure.test/login"
+    },
+    {
+      "id": "probe12-43",
+      "family": "phish-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase of AED 37.00 with Debit Card ending 1234 at SAMPLE MARKET. Manage your card at https://www.emiratesnbd.com/app",
+      "type": "expense",
+      "minorUnits": 3700,
+      "currency": "AED"
+    },
+    {
+      "id": "probe12-44",
+      "family": "phish-recall",
+      "expected": "post",
+      "market": "AE",
+      "sender": "ENBD",
+      "body": "Purchase of AED 37.00 with Debit Card ending 1234 at SAMPLE MARKET. If not you, call 600540000",
+      "type": "expense",
+      "minorUnits": 3700,
+      "currency": "AED"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ import type { Transaction } from '@/lib/types';
 export type TrendDirection = 'up' | 'down' | 'same';
 
 /** This month's spending so far against the same days of the month before. */
-export interface SpendTrend {
+interface SpendTrend {
   /** Spending from the month's first day to today (or its last day, once it has ended); later-dated rows are left out. */
   currentFils: number;
   /** Spending over the same number of days from the start of the month before. */
@@ -119,7 +119,7 @@ export function projectHeroMonth(
   return { key, monthDays, cumulative, trend };
 }
 
-export interface SparkPoint { x: number; y: number }
+interface SparkPoint { x: number; y: number }
 
 /**
  * The month's cumulative spending as a line inside `width` × `height`: one
@@ -151,7 +151,7 @@ export function sparklinePath(points: readonly SparkPoint[]): string {
 /* ── Over last month's pace ───────────────────────────────────────────── */
 
 /** Spending so far above the same days of last month ('over'), or not ('within'). */
-export type PaceState = 'within' | 'over';
+type PaceState = 'within' | 'over';
 
 export function paceState(trend: SpendTrend | null): PaceState | null {
   if (!trend) return null;

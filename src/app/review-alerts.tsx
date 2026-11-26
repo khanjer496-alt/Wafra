@@ -425,7 +425,9 @@ export default function ReviewAlertsScreen() {
   // Durable, source-free counts of money reviews a full lane could not keep.
   const evicted = recentlyLostReviewCount(state.reviewTray, now, 'evicted');
   const currencyEvicted = recentlyLostReviewCount(state.reviewTray, now, 'currency-evicted');
-  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 ||
+  // Possible Apple Pay duplicates posted because even their own lane was full.
+  const duplicatesPosted = recentlyLostReviewCount(state.reviewTray, now, 'duplicate-posted');
+  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 || duplicatesPosted > 0 ||
     backlog.currencyConflicts > 0 || autoAdded > 0 ? (
     <View style={styles.notices} testID="review-alerts-notices" accessibilityLiveRegion="polite">
       {autoAdded > 0 ? <Pressable testID="review-alerts-auto-added" accessibilityRole="button"
@@ -447,6 +449,9 @@ export default function ReviewAlertsScreen() {
       </ThemedText> : null}
       {currencyEvicted > 0 ? <ThemedText testID="review-alerts-currency-evicted" type="small" style={{ color: band.textSecondary }}>
         {tf('reviewAlertsCurrencyEvictedCount', { count: currencyEvicted })}
+      </ThemedText> : null}
+      {duplicatesPosted > 0 ? <ThemedText testID="review-alerts-duplicate-posted" type="small" style={{ color: band.textSecondary }}>
+        {tf('reviewAlertsDuplicatePostedCount', { count: duplicatesPosted })}
       </ThemedText> : null}
       {backlog.currencyConflicts > 0 ? <ThemedText testID="review-alerts-currency" type="small" style={{ color: band.textSecondary }}>
         {tf('reviewAlertsCurrencySkipped', { count: backlog.currencyConflicts })}

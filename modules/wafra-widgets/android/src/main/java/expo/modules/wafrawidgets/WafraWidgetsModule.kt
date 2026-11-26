@@ -3,6 +3,10 @@ package expo.modules.wafrawidgets
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.os.Build
+import android.content.Context
+import android.view.WindowManager
+import org.json.JSONObject
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -12,14 +16,44 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * swallowed: widgets are presentation and must never affect the app.
  */
 class WafraWidgetsModule : Module() {
+  private fun privacyPrefs() = appContext.reactContext?.getSharedPreferences("wafra_app_privacy", Context.MODE_PRIVATE)
+
+  private fun applySecureWindow() {
+    val activity = appContext.currentActivity ?: return
+    val enabled = privacyPrefs()?.getBoolean("enabled", false) == true
+    activity.runOnUiThread {
+      if (enabled) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+  }
+
+  private fun acceptsSnapshot(json: String): Boolean {
+    val prefs = privacyPrefs() ?: return false
+    return !prefs.getBoolean("enabled", false) || !prefs.getBoolean("hideAmounts", true) ||
+      JSONObject(json).optBoolean("hidden", false)
+  }
+
   override fun definition() = ModuleDefinition {
     Name("WafraWidgets")
+
+    OnCreate { applySecureWindow() }
+    OnActivityEntersForeground { applySecureWindow() }
+
+    AsyncFunction("setAppPrivacy") { enabled: Boolean, hideAmounts: Boolean ->
+      privacyPrefs()?.edit()?.putBoolean("enabled", enabled)?.putBoolean("hideAmounts", hideAmounts)?.apply()
+      applySecureWindow()
+      if (enabled && hideAmounts) {
+        val context = appContext.reactContext
+        if (context != null) WafraWidgets.purgeUnredactedSnapshot(context)
+      }
+    }.runOnQueue(Queues.MAIN)
 
     Function("setSnapshot") { json: String ->
       val context = appContext.reactContext ?: return@Function false
       try {
-        WafraWidgets.store(context, json)
-        true
+        val accepted = acceptsSnapshot(json)
+        WafraWidgets.store(context, if (accepted) json else null)
+        accepted
       } catch (error: Exception) {
         false
       }

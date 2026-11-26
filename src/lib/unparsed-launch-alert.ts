@@ -3,6 +3,7 @@ import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammar
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import { MARKETS } from '@/lib/markets';
 import { isNonCashNotice, nonPostingReason, normalizeArabic } from '@/lib/sms-parser';
+import { completedArabicPrincipalReturnTarget, isIncompletePrincipal, selectedPrincipalClassificationSource } from '@/lib/principal-posting-guards';
 
 export const UNPARSED_LAUNCH_REVIEW_VERSION = 1;
 
@@ -127,7 +128,8 @@ const candidateContext = (text: string, start: number, end: number): string =>
 const primaryMoney = (
   source: string,
   market: 'AE' | 'SA',
-): UnparsedLaunchAlertReview['amount'] | null => {
+  expensePredicate = false,
+): { amount: UnparsedLaunchAlertReview['amount']; classificationSource: string; returnTarget: 'card' | 'account' | null } | null => {
   const localCurrency = market === 'AE' ? 'AED' : 'SAR';
   const aliases: CurrencyAliasMap = market === 'AE'
     ? { Dhs: ['AED'] as const, dirham: ['AED'] as const, dirhams: ['AED'] as const, 'درهم': ['AED'] as const, 'دراهم': ['AED'] as const }
@@ -155,11 +157,27 @@ const primaryMoney = (
   });
   if (eligible.length !== 1) return null;
   const candidate = eligible[0];
+  // Keep selection and ambiguity refusal unchanged. A legacy Review template
+  // cannot restore authority for this selected incomplete debit or substitute
+  // another amount after refusing it.
+  if (expensePredicate && isIncompletePrincipal(source, candidate.span, true)) return null;
   return {
-    currency: localCurrency,
-    minorUnits: candidate.minorUnits as string,
-    exponent: candidate.exponent as number,
+    returnTarget: draft.normalizedText.includes('استرداد') ? completedArabicPrincipalReturnTarget(draft.normalizedText, candidate.span) : null,
+    amount: {
+      currency: localCurrency,
+      minorUnits: candidate.minorUnits as string,
+      exponent: candidate.exponent as number,
+    },
+    classificationSource: expensePredicate
+      ? selectedPrincipalClassificationSource(draft.normalizedText, candidate.span)
+      : draft.normalizedText,
   };
+};
+
+/** Classification view for a proven selected debit; never changes source evidence. */
+export const launchPrincipalClassificationSource = (source: string, market: 'AE' | 'SA'): string => {
+  if (!/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/iu.test(source)) return source;
+  return primaryMoney(source, market, true)?.classificationSource ?? source;
 };
 
 const instrumentFrom = (source: string): ReviewAlert['instrument'] => {
@@ -222,17 +240,17 @@ export const inspectUnparsedLaunchSemantics = (
   const debit = forcedDebit || (!refundCredit &&
     (DEBIT.test(bounded) || COMPACT_LEDGER_DEBIT.test(bounded)));
   if (credit === debit) return { outcome: 'refuse', reason: 'unclear-direction' };
-  const amount = primaryMoney(bounded, market);
-  if (!amount) return { outcome: 'refuse', reason: 'unclear-amount' };
+  const selected = primaryMoney(bounded, market, debit);
+  if (!selected) return { outcome: 'refuse', reason: 'unclear-amount' };
   const direction = credit ? 'credit' as const : 'debit' as const;
   return {
     outcome: 'review',
     review: {
-      amount,
+      amount: selected.amount,
       direction,
-      family: familyFrom(bounded, direction),
+      family: familyFrom(selected.classificationSource, direction),
       rail: null,
-      instrument: instrumentFrom(bounded),
+      instrument: selected.returnTarget === 'account' ? null : instrumentFrom(selected.classificationSource),
     },
   };
 };

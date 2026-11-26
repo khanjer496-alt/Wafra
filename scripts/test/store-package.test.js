@@ -19,7 +19,9 @@ const ok = (name, condition, detail = '') => {
   const root = path.resolve(__dirname, '../..');
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-package-'));
   const malformedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-malformed-'));
+  const assetsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-assets-'));
   const { prepareStorePackage } = await import('../lib/store-package.mjs');
+  const { APPLE_SCREENSHOT_TARGET } = await import('../lib/apple-screenshot-target.mjs');
   const {
     ASC_METADATA_CONFIRMATION,
     ASC_SCREENSHOT_CONFIRMATION,
@@ -111,6 +113,47 @@ const ok = (name, condition, detail = '') => {
     }
     ok('store packaging rejects locale path traversal before writing', rejectedMalformedLocale);
 
+    // Real packaging behaviour, using disposable placeholder bytes (not images).
+    fs.mkdirSync(path.join(assetsRoot, 'docs'), { recursive: true });
+    for (const file of ['store-pricing.json', 'store-metadata.json']) {
+      fs.copyFileSync(path.join(root, 'docs', file), path.join(assetsRoot, 'docs', file));
+    }
+    fs.copyFileSync(path.join(root, 'app.json'), path.join(assetsRoot, 'app.json'));
+    const appleAssets = path.join(assetsRoot, 'docs/store-assets/appstore');
+    const playAssets = path.join(assetsRoot, 'docs/store-assets/play/global-en');
+    fs.mkdirSync(appleAssets, { recursive: true });
+    fs.mkdirSync(playAssets, { recursive: true });
+    const expectedNames = [];
+    for (let i = 1; i <= 8; i += 1) {
+      const name = `appstore-6.3-en-${String(i).padStart(2, '0')}.png`;
+      expectedNames.push(name);
+      fs.writeFileSync(path.join(appleAssets, name), `current candidate ${i}`);
+      fs.writeFileSync(path.join(appleAssets, `appstore-6.9-dark-en-${i}.png`), `obsolete ${i}`);
+      fs.writeFileSync(path.join(playAssets, `${i}.png`), `unchanged android ${i}`);
+    }
+    fs.writeFileSync(path.join(assetsRoot, 'docs/store-assets/play/global-en-feature-graphic.png'), 'android graphic');
+    const assetsOutput = path.join(assetsRoot, 'artifacts/store-package');
+    await prepareStorePackage({ root: assetsRoot, output: assetsOutput, includeAssets: true });
+    const packagedApple = path.join(assetsOutput, 'apple/screenshots/en-US');
+    ok('asset packaging copies only the eight new medium-display captures',
+      isDeepStrictEqual(fs.readdirSync(packagedApple).sort(), expectedNames) &&
+        fs.readFileSync(path.join(packagedApple, fs.readdirSync(packagedApple)[0]), 'utf8').startsWith('current candidate'));
+    for (const name of expectedNames) fs.unlinkSync(path.join(appleAssets, name));
+    let rejectedObsoleteAssets = false;
+    try {
+      await prepareStorePackage({ root: assetsRoot, output: assetsOutput, includeAssets: true });
+    } catch (error) {
+      rejectedObsoleteAssets = /Apple en-US requires 8 screenshots; found 0/.test(error.message);
+    }
+    ok('old screenshots cannot satisfy packaging when the new captures are absent', rejectedObsoleteAssets);
+
+    const screenshotMetadata = JSON.parse(fs.readFileSync(path.join(root, 'docs/store-metadata.json'), 'utf8')).screenshots.apple;
+    ok('metadata and capture geometry agree with the approved medium target',
+      screenshotMetadata.pixels === '1206x2622' &&
+      screenshotMetadata.pixels === `${APPLE_SCREENSHOT_TARGET.width}x${APPLE_SCREENSHOT_TARGET.height}` &&
+      APPLE_SCREENSHOT_TARGET.logicalWidth * APPLE_SCREENSHOT_TARGET.scale === 1206 &&
+      APPLE_SCREENSHOT_TARGET.logicalHeight * APPLE_SCREENSHOT_TARGET.scale === 2622);
+
     const ascContext = {
       appId: '6799171482',
       version: '1.0.0',
@@ -137,6 +180,11 @@ const ok = (name, condition, detail = '') => {
     ok('asc metadata workflows never delete remote locales',
       !metadataPreview.commands[0].args.includes('--allow-deletes') &&
       !metadataApply.commands[0].args.includes('--allow-deletes'));
+    ok('asc screenshot preview and apply both target the medium-display slot',
+      [screenshotPreview, screenshotApply].every((plan) => {
+        const args = plan.commands[0].args;
+        return args[args.indexOf('--device-type') + 1] === 'IPHONE_61' && !args.includes('IPHONE_69');
+      }));
     ok('asc screenshot preview is always a dry run',
       screenshotPreview.commands[0].args.includes('--dry-run'));
     ok('asc screenshot apply requires confirmation and preserves existing screenshots',
@@ -146,6 +194,7 @@ const ok = (name, condition, detail = '') => {
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
     fs.rmSync(malformedRoot, { recursive: true, force: true });
+    fs.rmSync(assetsRoot, { recursive: true, force: true });
   }
 
   console.log(`\nstore-package: ${pass} passed, ${fail} failed`);

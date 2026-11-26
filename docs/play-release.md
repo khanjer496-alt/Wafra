@@ -176,8 +176,38 @@ these three facts.
         update a side-loaded install and cannot be uploaded to Play.
       - The build fails early, with a message naming the secret at fault, if
         the keystore does not open or lacks the alias.
-- [x] Play **AAB** built by CI as the `wafra-aab` artifact on `main`, or from
-      a manual run with **Also build the Play Store bundle** enabled
+- [x] Play **AAB** built by a manual "Build Android APK" run with **Also build
+      the Play Store bundle** enabled. That run also checks the compiled
+      bundle and APK: it fails if the Founder Pro unlock, automatic tester Pro
+      or the SMS corpus exporter is compiled in (`scripts/android-build-flags.cjs`).
+- [x] **Artifacts are sealed.** The repository is public, so the workflow
+      never uploads a plaintext APK or AAB. It uploads one artifact,
+      `wafra-android-sealed-<run number>`, kept **1 day**:
+      - `wafra-aab.enc` and `wafra-apk.enc` (or `wafra-sms-corpus-apk.enc`),
+        encrypted to `.github/android-artifact-recipient.pem`;
+      - `verification.json`: source commit, run number (= versionCode), and
+        the plaintext SHA-256 and compiled build flags of each file.
+
+      The private key lives only on the release Mac, at
+      `~/.config/wafra-android-artifacts/recipient-key.pem` (mode 600). It is
+      never committed, pasted into chat or copied to shared folders. To open a
+      run within its day:
+
+      ```sh
+      gh run download <run id> -n wafra-android-sealed-<run number> -D /tmp/wafra-sealed
+      node scripts/android-artifact-seal.cjs open \
+        --key ~/.config/wafra-android-artifacts/recipient-key.pem \
+        --in /tmp/wafra-sealed --out <destination>
+      ```
+
+      `open` refuses any file whose SHA-256 differs from `verification.json`,
+      and any file name that isn't a plain name inside `--out`. It needs
+      OpenSSL 3 (`openssl cms`; Homebrew `openssl` on a Mac whose system
+      `openssl` is LibreSSL). CMS encryption doesn't prove who sealed a file,
+      since anyone can encrypt to a public certificate, so open only the
+      artifact of a "Build Android APK" run you dispatched, by its run id.
+      To rotate the key, generate a new pair, commit only the new certificate,
+      and keep the old key until its last artifact has expired.
 - [x] Privacy policy written (landing page section; host on real domain)
 - [x] i18n: English + Arabic UI with RTL; auto-detected, Settings override
 - [ ] Final app icon + adaptive icon + splash pass
@@ -192,7 +222,9 @@ these three facts.
 
 ## Monetization — Wafra Pro
 
-- Model: 3-day free trial, then subscription required for automatic capture.
+- Model: 3 days of free automatic capture, then subscription required for
+  automatic capture. Store listings use the term "free automatic capture",
+  never "free trial" or "free period".
   After the included period, SMS/notification importing pauses until
   subscribed. Viewing existing data, manual entry, pasted alerts, salary-day
   months, and backup/restore keep working without Pro.
@@ -211,6 +243,34 @@ these three facts.
   manage/cancel path and verify the current fee/program terms in Play Console.
 - Side-load builds are not valid billing evidence. A keyed build may initialize
   the SDK, but purchase availability depends on a Play-installed test build.
+
+### After launch: watch the first real Android purchase (owner: Android)
+
+The 1.0.0 Android release ships without a live on-device purchase by a
+license tester. The gate rests on the 6 Nov license-tester Play orders, the
+superwall-android 2.7.24 source trace (`:sw-none` → `pro`), Superwall app 55932's
+products, and the end-to-end purchase test in
+`scripts/test/repair/superwall-attribute-loop.test.cjs` (see
+`Shared/launch-review/android-purchase-evidence-2026-11-12.md`). So the first
+real purchase is checked by hand:
+
+1. From release, check Play Console → Order management hourly for the first 7
+   days after launch, then daily until the first real Android purchase is
+   confirmed: a non-test, Processed (charged) order for `wafra_pro_weekly` or
+   `wafra_pro_yearly`. A Pending or cancelled order doesn't count: keep
+   watching.
+2. Within minutes of that order, Superwall (app 55932) must show the same
+   transaction with entitlement `pro` active for that user.
+3. That user gets Pro within minutes: there's no "Pro unlock pending" or
+   support report, and Superwall shows `pro` active, not only a transaction.
+4. If a Processed order exists but `pro` isn't active within 15 minutes, treat
+   it as a launch incident. (A Pending order is not an incident: Wafra correctly
+   keeps Pro off until Play finishes the payment, so wait and recheck.) Ask the
+   CEO agent to stop paid promotion, and check the product's attachment to
+   `pro` and the Play Billing query before anything else. Never edit Superwall
+   products or Play prices without CEO approval.
+5. Record the order time, plan, Superwall time and Pro time (no order id or
+   user data) in the launch log, then close this step.
 
 ## Roadmap notes borrowed from FinArt parity
 

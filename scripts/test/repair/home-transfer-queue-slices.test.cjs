@@ -40,6 +40,8 @@ test('no candidate and no graph still publish an empty queue without a walk', ()
 
 test('Transactions waits for the sliced graph when it recomputes after the first frames', () => {
   const screen = fs.readFileSync(path.resolve(__dirname, '../../../src/app/transactions.tsx'), 'utf8');
-  assert.match(screen, /graph = transferReconciliationForStateInSlices\(input, \(reconciliation\) => \{\n\s+if \(!cancelled\) setSeparation\(separationFor\(input, reconciliation\)\);/);
+  // The separation is only published from inside the sliced graph's callback (and not once cancelled);
+  // an equal answer keeps the previous object (keepEqualSeparation).
+  assert.match(screen, /graph = transferReconciliationForStateInSlices\(input, \(reconciliation\) => \{\n\s+if \(cancelled\) return;\n\s+const next = separationFor\(input, reconciliation\);\n[\s\S]*?setSeparation\(\(previous\) => keepEqualSeparation\(previous, next\)\);/);
   assert.match(screen, /return \(\) => \{ cancelled = true; task\.cancel\(\); graph\?\.cancel\(\); \};/);
 });

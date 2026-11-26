@@ -16,9 +16,9 @@ import { deviceKeypair, encodeKey } from '@/lib/relay-crypto';
  * Silent by design: nothing here throws or logs. A failed pairing backs off 24h.
  */
 
-export interface SharingCredential { baseUrl: string; deviceId: string; syncToken: string }
+interface SharingCredential { baseUrl: string; deviceId: string; syncToken: string }
 
-export interface SharingIdentityDeps {
+interface SharingIdentityDeps {
   baseUrl: string | null;
   readSecret: (key: string) => Promise<string | null>;
   writeSecret: (key: string, value: string) => Promise<void>;

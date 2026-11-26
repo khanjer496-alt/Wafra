@@ -28,7 +28,7 @@ function setup({ platform = 'ios', theme = 'light', language = 'en', largeText =
   h.local('@/lib/limit-status', 'src/lib/limit-status.ts');
   h.local('@/lib/pattern', 'src/lib/pattern.ts');
   h.local('@/components/ui/band-scaffold');
-  for (const name of ['band-segmented', 'band-chip', 'share-bar', 'pin-timeline', 'dial-limit', 'glyph-tile', 'status-bar', 'e-button']) {
+  for (const name of ['band-segmented', 'band-chip', 'share-bar', 'dial-limit', 'glyph-tile', 'status-bar', 'e-button']) {
     h.local(`@/components/ui/band/${name}`);
   }
   h.local('@/components/ui/pattern-mosaic');
@@ -249,20 +249,6 @@ test('GlyphTile: one tone for every category', () => {
   assert.equal(flat(a.props.style).backgroundColor, flat(b.props.style).backgroundColor);
   assert.equal(flat(a.props.style).backgroundColor, palette.glyphGround);
   assert.equal(a.props.accessible, false);
-});
-
-test('PinTimeline: every payment spoken in date order; pins stay on the strip', () => {
-  const s = setup();
-  const { PinTimeline, pinPosition } = s.ui('@/components/ui/band/pin-timeline');
-  assert.equal(pinPosition(0, 30), 3);
-  assert.equal(pinPosition(30, 30), 97);
-  assert.equal(pinPosition(45, 30), 97);
-  const tree = PinTimeline({ palette: s.band('bills'), pins: [
-    { key: 'b', dayOffset: 3, title: 'ADCB', spokenAmount: 'AED 3,180' },
-    { key: 'a', dayOffset: 1, title: 'DEWA', spokenAmount: 'about AED 420' },
-    { key: 'z', dayOffset: 40, title: 'Later' },
-  ] });
-  assert.equal(tree.props.accessibilityLabel, 'Next 30 days: DEWA tomorrow about AED 420, ADCB in 3 days AED 3,180');
 });
 
 test('PatternMosaic: one image called "Your pattern", a 6 × 2 grid, still under Reduce Motion', () => {

@@ -12,7 +12,7 @@ import {
   type UniversalMoney,
 } from '@/lib/universal-types';
 
-export type IosApplePayRefusalReason =
+type IosApplePayRefusalReason =
   | 'invalid-payload'
   | 'invalid-identity'
   | 'invalid-observed-at'
@@ -25,7 +25,7 @@ export type IosApplePayRefusalReason =
   | 'review-unavailable';
 
 /** Refusals are explicit so the queue owner can retain an unhandled record. */
-export type IosApplePayRecordOutcome =
+type IosApplePayRecordOutcome =
   | { kind: 'review'; item: UniversalReviewAlert }
   | { kind: 'refused'; reason: IosApplePayRefusalReason };
 

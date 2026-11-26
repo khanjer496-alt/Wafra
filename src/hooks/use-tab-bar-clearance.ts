@@ -8,7 +8,7 @@ import { Spacing } from '@/constants/theme';
  * 64pt floating pill plus the gap under it. Only a first-frame fallback; the
  * bar measures itself.
  */
-export const TAB_BAR_HEIGHT = 72;
+const TAB_BAR_HEIGHT = 72;
 
 /**
  * Floor for the iOS system tab bar plus a home indicator (49pt + 34pt).

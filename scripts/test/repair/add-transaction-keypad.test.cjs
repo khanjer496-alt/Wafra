@@ -8,9 +8,10 @@ const byType = (tree, type) => walk(tree).find((node) => node.type === type);
 const amountField = (tree) => walk(tree).find((node) => node.props?.keyboardType === 'decimal-pad' &&
   typeof node.props.onChangeText === 'function');
 
-function harness({ ledgerMoney = { schemaVersion: 2, currency: 'USD', exponent: 2 }, language = 'en' } = {}) {
+function harness({ ledgerMoney = { schemaVersion: 2, currency: 'USD', exponent: 2 }, language = 'en', height = 844, fontScale = 1 } = {}) {
   const h = createWorkflowHarness({ language, state: { ledgerMoney, reviewTray: { pending: [], tombstones: [], templateRules: [] },
     accounts: [{ id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#997349' }] } });
+  h.deps['react-native'].useWindowDimensions = () => ({width: 320, height, fontScale, scale: 1});
   const states = [], refs = []; let stateIndex = 0, refIndex = 0;
   h.deps.react.useState = (initial) => {
     const index = stateIndex++;
@@ -66,6 +67,47 @@ test('the keypad writes exact minor units for a two-decimal ledger', () => {
   assert.equal(added[1].amountFils, 1850);
   assert.equal(added[1].source, 'manual');
   assert.equal(added[1].type, 'expense');
+});
+
+for (const language of ['en', 'ar']) test(`keypad entry keeps the live amount beside the keys in ${language}`, () => {
+  const h = harness({language});
+  h.press('3', '5', 'decimal', '5');
+  const tree = h.render();
+  const entry = byId(tree, 'manual-amount-keypad');
+  assert.ok(entry, 'amount and keypad share the final entry section');
+  const display = byType(entry, 'KeypadAmountDisplay');
+  assert.ok(display, 'the live amount is in the keypad section');
+  assert.equal(display.props.text, '35.5');
+  assert.ok(byType(entry, 'AmountKeypad'), 'the keys are beside their display');
+  assert.equal(walk(tree).filter(node => node.type === 'KeypadAmountDisplay').length, 1);
+  byType(entry, 'AmountKeypad').props.onKey('backspace');
+  assert.equal(byType(byId(h.render(), 'manual-amount-keypad'), 'KeypadAmountDisplay').props.text, '35.');
+});
+
+for (const language of ['en', 'ar']) test(`smallest screen at maximum text keeps one live amount in the Save footer in ${language}`, () => {
+  const h = harness({language, height: 568, fontScale: 3.1});
+  h.press('3', '5', 'decimal', '5', '0');
+  const tree = h.render();
+  const footer = byType(tree, 'BandScaffold').props.footer;
+  assert.equal(byType(footer, 'KeypadAmountDisplay')?.props.text, '35.50');
+  assert.equal(walk(tree).filter(node => node.type === 'KeypadAmountDisplay').length, 1);
+  assert.ok(byType(byId(tree, 'manual-amount-keypad'), 'AmountKeypad'));
+  byId(tree, 'amount-mode-toggle').props.onPress();
+  assert.equal(byType(byType(h.render(), 'BandScaffold').props.footer, 'KeypadAmountDisplay'), undefined);
+});
+
+for (const language of ['en', 'ar']) test(`pinned validation stays in the scrollable keypad section and clears after a digit in ${language}`, () => {
+  const h = harness({language, height: 568, fontScale: 3.1});
+  h.save();
+  const tree = h.render();
+  const footer = byType(tree, 'BandScaffold').props.footer;
+  assert.equal(byType(footer, 'KeypadAmountDisplay').props.errorText, undefined);
+  assert.equal(byType(footer, 'KeypadAmountDisplay').props.invalid, true);
+  assert.ok(byId(byId(tree, 'manual-amount-keypad'), 'keypad-amount-error'));
+  assert.equal(byId(footer, 'keypad-amount-error'), undefined);
+  const next = h.press('7');
+  assert.equal(byId(next, 'keypad-amount-error'), undefined);
+  assert.equal(byType(next, 'KeypadAmountDisplay').props.invalid, false);
 });
 
 test('a whole-unit ledger has no decimal key and saves whole units', () => {

@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createLoader } = require('./load-ts.cjs');
 const load = createLoader();
+const { assertCreditRetained } = require('./credit-retention.cjs');
 const { parseSms } = load('@/lib/sms-parser');
 const { setActiveMarket, setLedgerCurrency } = load('@/lib/markets');
 
@@ -175,9 +176,7 @@ test('a utility receipt funded by a credit card stays spending', () => {
   if (parsed) assert.equal(parsed.type, 'expense');
 });
 test('a card refund with headroom cannot settle a statement', () => {
-  const parsed = parse('Refund of AED 52.80 from Copper Finch on Card ending XX7642. Available limit AED 6,854.30.');
-  assert.equal(parsed.kind, 'transaction');
-  assert.equal(parsed.type, 'income');
-  assert.equal(parsed.amountFils, 5280);
-  assert.equal(parsed.snapshotKind, 'limit');
+  const body = 'Refund of AED 52.80 from Copper Finch on Card ending XX7642. Available limit AED 6,854.30.';
+  assert.equal(parse(body), null, 'a noun headline does not prove settlement');
+  assertCreditRetained(load, body, { minor: 5280, reviewOnly: true });
 });

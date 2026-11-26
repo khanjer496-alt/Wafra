@@ -3,7 +3,7 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 import { isIncome, isSpending } from '@/lib/ledger';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 
-export type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | 'as-needed';
+type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | 'as-needed';
 
 /**
  * subscription — cancellable online/lifestyle services (streaming, apps, gym);
@@ -11,7 +11,7 @@ export type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
  * commitment — anything else that recurs (suppliers, fees, transfers to people).
  * Kept separate so "subscriptions total" only counts what you could cancel.
  */
-export type RecurringGroup = 'subscription' | 'utility' | 'housing' | 'commitment';
+type RecurringGroup = 'subscription' | 'utility' | 'housing' | 'commitment';
 
 export interface Subscription {
   title: string;
@@ -411,9 +411,9 @@ type RecurringSchedule = Partial<Pick<Subscription, 'category' | 'cadence' | 'ne
 type BillSchedule = Partial<Pick<Bill, 'dueDay' | 'amountFils' | 'yearlyOnISO' | 'autoDetected'>>;
 
 /** How far apart (days of the month) a detected charge and a reminder may fall and still be one payment. */
-export const MANUAL_BILL_DAY_TOLERANCE = 3;
+const MANUAL_BILL_DAY_TOLERANCE = 3;
 /** How far apart (share of the reminder's amount) their amounts may be. */
-export const MANUAL_BILL_AMOUNT_TOLERANCE = 0.05;
+const MANUAL_BILL_AMOUNT_TOLERANCE = 0.05;
 /**
  * Categories in which a household keeps one such payment, so a shared
  * category is evidence on its own. Everywhere else (entertainment, software,
@@ -446,7 +446,7 @@ function namesOverlap(a: string, b: string): boolean {
  * the reminder's (counting across a month end); and the amounts differ by at
  * most 5% of the reminder's.
  */
-export function recurringMatchesManualBill(
+function recurringMatchesManualBill(
   sub: Pick<Subscription, 'title'> & RecurringSchedule,
   bill: Pick<Bill, 'title' | 'category' | 'importIdentity'> & BillSchedule,
 ): boolean {

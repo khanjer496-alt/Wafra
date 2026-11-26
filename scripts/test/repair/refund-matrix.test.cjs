@@ -1,0 +1,371 @@
+'use strict';
+// Generated refund matrix (CEO 58078e1d item 2; oracle v2 accepted by the CEO 711485d5 and Change Reviewer 810c20ec,
+// 583dcfd7), run as a RATCHET (CEO 080fa431). Every oracle row runs through parseSms, the launch session and the
+// native bundle. The target:
+//   - zero false income: no income where the oracle is not INCOME_*;
+//   - zero lost genuine refunds: an INCOME_* row posts income of exactly its figure on parseSms and the session;
+//   - native never books a debit on an INCOME_* row, never a credit on any other row, and never posts a REVIEW or
+//     NO_POST row. Native 'ignore' on an INCOME_* row is allowed (it posts only when its event reader agrees) but is
+//     counted against a ceiling, so a lost refund on native stays visible.
+// REVIEW and NO_POST both mean "never auto-posts" here.
+//
+// Today's gaps are listed, per row and per path, in refund-matrix-known-gaps.json. This suite fails on:
+//   - a NEW gap: a path that mismatches the oracle on a row the file does not list for that path;
+//   - a CHANGED gap: a listed path whose wrong outcome is now a different wrong outcome;
+//   - a STALE gap: a listed path that now matches the oracle (delete the entry: the file only shrinks);
+//   - any class count in the file above CEILING below, and native ignored income above its ceiling.
+// CEILING may only go DOWN. A change that raises any number in it, or adds an entry to the gap file, is a regression
+// and must be rejected in review. The store gate needs CEILING.falseIncome at zero on every path.
+// On a pull request, CI also runs refund-gaps-no-growth.cjs: the file may only lose entries and paths for rows the base
+// already had, so a fix to one row that breaks another in the same class cannot pass unseen.
+//
+// The oracle itself is pinned (ORACLE_PIN): an edit that adds, drops, relabels or rewrites rows fails until the pin is
+// updated in the same PR, deliberately and with the reason in review. Dropping rows, or making a hard row easy, would
+// silently cut coverage.
+//
+// Set REFUND_MATRIX_REPORT=<file> to write every gap with counts, and REFUND_MATRIX_WRITE_GAPS=<file> to write the
+// current gaps in the gap-file format after a fix (then lower CEILING to the new counts).
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const load = require('../../universal-test/load-ts.cjs').createLoader();
+const markets = load('@/lib/markets');
+const country = load('@/lib/country');
+const { parseSms } = load('@/lib/sms-parser');
+const { createLaunchAlertSession, inspectGenericBankEventForReview, inspectSupplementaryReversal } = load('@/lib/launch-alert-parser');
+const { isMoneyMovementReview } = load('@/lib/alert-review-tray');
+const { planConfirmedUniversalImport } = load('@/lib/universal-import');
+const { buildOracleRows } = require('./refund-matrix-oracle.cjs');
+
+// Frozen ratchet. Each number is today's count of gap-file entries in that class on that path; it may only go down.
+// Predicate PR 1 lowered every class but droppedDebit, which rose 207 -> 208 only by its own new control row CTL-05422
+// ("processed … will reflect" beside a debit, oracle v2.2; refund-gaps-no-growth.cjs lists it as a new row).
+// Predicate PR 2 (the Arabic table) brought false income to 0 on every path, in both languages: the store gate's number.
+const CEILING = {
+  falseIncome: { parseSms: 0, session: 0, native: 0 },
+  wrongDirection: { parseSms: 0, session: 0, native: 0 },
+  wrongAmount: { parseSms: 0, session: 0, native: 0 },
+  lostIncome: { parseSms: 0, session: 0, native: 0 },
+  droppedDebit: { parseSms: 37, session: 37, native: 0 },
+  postedNotReview: { parseSms: 12, session: 12, native: 10 },
+};
+const NATIVE_IGNORED_INCOME_CEILING = 38;
+// Control rows added after #217 that native ignores today, exactly as #217's own bundle does (oracle v2.1 C11, C12; v2.2
+// C16; the C20 "After cancellation …", "Once your order was cancelled …", telegraphic and dated refunds; the C22 Arabic
+// "عند إلغاء الطلب …", "عند إرجاع المنتج …" and "عند مراجعة طلبك …" refunds; the six C24 Arabic genuine refunds; the dated ALL-CAPS C23
+// refund and the C25 "أن" refund; from #242's review, seven of the eight C26 refunds, the C27 bare-alef "ان" refund and the
+// five C28 "أن/ان" refunds; from Android RC 396 F2, the two telegraphic/footer "Reversal of … credited" rows and the four
+// "completed beside pending" rows; from #242's follow-up, the ten C29 bare-alef "ان" refunds). They are pinned by id and
+// kept out of the count above, so that ceiling still covers #217's rows and a newly ignored row anywhere else fails.
+// Delete an id when native posts its row.
+const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-05404', 'CTL-05405', 'CTL-05406', 'CTL-05416', 'CTL-05427', 'CTL-05429', 'CTL-05444', 'CTL-05454', 'CTL-05463', 'CTL-05467', 'CTL-05468', 'CTL-05479', 'CTL-05480', 'CTL-05504', 'CTL-05508', 'CTL-05510', 'CTL-05511',
+  'CTL-05512', 'CTL-05513', 'CTL-05548', 'CTL-05558', 'CTL-05559', 'CTL-05560', 'CTL-05561', ]);
+// Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
+// body since #225's review, so a row's text cannot be edited unseen).
+const ORACLE_PIN = { rows: 5586, sha256: '8622534b13c09b1f57797ea07fea2c515bff75239745e21c402001b2a8e205c7' };
+
+const PATHS = ['parseSms', 'session', 'native'];
+// The synthetic completed receipts are dated Nov 12/13. Observe them after
+// those dates; a future-date preview refusal is a different, separately tested policy.
+const at = Date.parse('2026-11-14T10:00:00Z');
+const root = path.resolve(__dirname, '../../..');
+const resources = path.join(root, 'modules/wafra-live-capture/ios/Resources');
+const meta = JSON.parse(fs.readFileSync(path.join(resources, 'WafraBackgroundParser.meta.json')));
+const sandbox = vm.createContext({});
+vm.runInContext(fs.readFileSync(path.join(resources, 'WafraBackgroundParser.js'), 'utf8'), sandbox);
+const native = (body) => JSON.parse(sandbox.wafraNativeAlertParse(JSON.stringify({ v: 1, body, sender: 'ENBD', observedAt: at,
+  context: { v: 1, country: 'AE', parserMarket: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 }, sourceHash: meta.sourceHash } })));
+
+country.setActiveCountry('AE');
+markets.setActiveMarket('AE');
+markets.setLedgerCurrency('AED', 2);
+const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED',
+  bestEffort: { enabled: true, country: 'AE' } });
+
+const shape = (p) => (p ? `${p.kind === 'transaction' ? p.type : p.kind} ${p.amountFils}` : 'none');
+const nativeShape = (n) => (n.route === 'parsed' ? `${n.notification.direction} ${n.notification.amount?.minorUnits}` : n.route);
+const isIncomeRow = (expected) => expected === 'INCOME_REFUND' || expected === 'INCOME_DEBIT';
+const EXPLICIT_DEBIT_CONTROL_MINOR_UNITS = { 'CTL-05408': '25000', 'CTL-05390': '5000' };
+const EXPLICIT_NOTE_CONTROL_MINOR_UNITS = { 'CTL-05408': '10000', 'CTL-05390': null };
+
+// The class of a wrong outcome; null when the path agrees with the oracle.
+function gapClass(expected, pathName, got) {
+  const [kind, amount] = got.split(' ');
+  const credit = kind === 'income' || kind === 'credit';
+  const debit = kind === 'expense' || kind === 'debit';
+  const posted = pathName === 'native' ? kind === 'credit' || kind === 'debit' : got !== 'none';
+  if (isIncomeRow(expected)) {
+    if (credit) return amount === '25000' ? null : 'wrongAmount';
+    if (debit) return 'wrongDirection';
+    return pathName === 'native' ? null : 'lostIncome'; // native 'ignore' is counted separately
+  }
+  if (credit) return 'falseIncome';
+  if (expected === 'EXPENSE') {
+    if (pathName === 'native') return null; // native may leave a debit to the app; it must never credit it
+    if (debit) return amount === '25000' ? null : 'wrongAmount';
+    return 'droppedDebit';
+  }
+  return posted ? 'postedNotReview' : null;
+}
+
+const exactAed = (money, minor) => minor === null ? money === null :
+  money?.currency === 'AED' && money.exponent === 2 && money.minorUnits === minor;
+function informationalRefuses(event, marker) {
+  if (event?.decision !== 'review' || event.status !== 'informational' || !event.issues.includes(marker) ||
+    isMoneyMovementReview({ kind: 'universal', event })) return false;
+  return [event, { ...event, status: 'posted' }].every(candidate => {
+    const result = planConfirmedUniversalImport({ hydrated: true }, candidate,
+      { confirmed: true, postingStatus: 'posted', direction: 'credit', amount: { currency: 'AED', minorUnits: '25000' } });
+    return result.outcome === 'refused' && result.reason === 'not-posted';
+  });
+}
+function judge(row, evidence) {
+  const nativeResult = evidence ? evidence.nativeResult : native(row.body);
+  const got = evidence ? evidence.got : {
+    parseSms: shape(parseSms(row.body, {}, { sender: 'ENBD', observedAt: at })),
+    session: shape(session.parse(row.body, 'ENBD', session.inspect(row.body, 'ENBD'), undefined, at)),
+    native: nativeShape(nativeResult),
+  };
+  const gaps = {};
+  const event = evidence ? evidence.event : inspectGenericBankEventForReview(row.body, 'ENBD');
+  const heldCandidate = isIncomeRow(row.expected) && got.parseSms === 'none' && got.session === 'none' &&
+    got.native === 'review' && event?.decision === 'review' && event.status === 'informational';
+  const heldInformational = heldCandidate && event.direction === 'credit' && exactAed(event.amount.value, '25000') &&
+    informationalRefuses(event, 'unsettled-credit-not-posting') && nativeResult.route === 'review' &&
+    nativeResult.notification?.style === 'review' && nativeResult.notification.direction === 'credit' &&
+    exactAed(nativeResult.notification.amount, '25000');
+  if (heldCandidate && !heldInformational) return { got, gaps, nativeIgnoredIncome: false,
+    policyError: { id: row.id, body: row.body, reason: 'held credit money or refusal mismatch', event, nativeResult } };
+  // CEO 524bd56e: retain the independently stated completed debit instead of
+  // interpreting its reversal note as income. The original oracle is kept
+  // pinned; this explicit product-policy overlay does not rewrite its rows.
+  const c = row.case;
+  // CEO 3e710253: the definite Arabic amount is the same ownership class
+  // as This amount. Keep the pinned INCOME_DEBIT oracle and corpus intact.
+  const arabicOwnedReturn = row.lang === 'AR' && row.rule.startsWith('D8') && c?.debit &&
+    c.subject === 'impersonal' && c.verb === 'refunded' && c.aspect === 'has been' &&
+    c.leader === 'none' && c.amount === 'none' && c.trail === 'none' &&
+    ['your card', 'your account'].includes(c.dest);
+  if (arabicOwnedReturn && c.dest === 'your account') {
+    if (got.parseSms !== 'none' || got.session !== 'none' || !heldInformational ||
+      event.instrument.value !== null || event.instrument.evidence !== 'missing' ||
+      event.instrument.alternatives.length !== 0 || nativeResult.notification.instrument !== null) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'unresolved owned-return account contract mismatch', ...got, event, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'held-owned-account-return' };
+  }
+  // Reviewed semantic split; the frozen D8 generator and every body stay pinned.
+  // Same-money reference or returning the identified purchase binds its amount.
+  // A merchant crediting "your refund" or bare "The refund" leaves amount unknown.
+  const linkedSelectedReturn = arabicOwnedReturn || row.lang === 'EN' && row.rule.startsWith('D8') && c?.debit &&
+    (['it', 'this amount', 'a refund of the same'].includes(c.subject) ||
+      (c.subject === 'merchant' && !c.verb.startsWith('processed')));
+  if (linkedSelectedReturn) {
+    // Preserve the preexisting exact-money, marker-protected credit Review contract.
+    if (heldInformational && !arabicOwnedReturn) return { got, gaps, nativeIgnoredIncome: false, policy: 'held-informational' };
+    if (got.parseSms !== 'income 25000' || got.session !== 'income 25000' ||
+      nativeResult.route !== 'review' || nativeResult.notification?.style !== 'review' ||
+      nativeResult.notification.direction !== 'credit' || !exactAed(nativeResult.notification.amount, '25000')) {
+      return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, reason: 'owned-return contract mismatch', ...got, nativeResult } };
+    }
+    return { got, gaps, nativeIgnoredIncome: false, policy: 'owned-selected-return' };
+  }
+  const debitWithCreditNote = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ||
+    (c?.debit && (c.verb !== 'processed' || /refund/.test(c.subject) ||
+      (row.lang === 'EN' && c.subject === 'merchant') || c.trail === 'reversed'));
+  if (debitWithCreditNote) {
+    const note = evidence ? evidence.note : inspectSupplementaryReversal(row.body, 'ENBD');
+    const minor = EXPLICIT_DEBIT_CONTROL_MINOR_UNITS[row.id] ?? '25000';
+    // The frozen generator states AED100 only when the separate note has its
+    // own amount. Control C13 also explicitly names AED100; C6 names none.
+    const noteMinor = Object.hasOwn(EXPLICIT_NOTE_CONTROL_MINOR_UNITS, row.id) ? EXPLICIT_NOTE_CONTROL_MINOR_UNITS[row.id]
+      : c?.debit && c.amount !== 'none' ? '10000' : null;
+    if (got.parseSms !== `expense ${minor}` || got.session !== `expense ${minor}` || got.native !== `debit ${minor}` ||
+      !exactAed(nativeResult.notification?.amount, minor) || note?.direction !== 'none' ||
+      !exactAed(note?.amount.value, noteMinor) || !informationalRefuses(note, 'supplementary-reversal-info')) return { got, gaps, nativeIgnoredIncome: false,
+        policyError: { id: row.id, body: row.body, ...got, noteMinor, note: note ?? null } };
+  }
+  if (heldInformational || debitWithCreditNote) return { got, gaps, nativeIgnoredIncome: false,
+    policy: heldInformational ? 'held-informational' : 'debit-plus-note' };
+  for (const name of PATHS) if (gapClass(row.expected, name, got[name])) gaps[name] = got[name];
+  const nativeIgnoredIncome = isIncomeRow(row.expected) && !/^(credit|debit) /.test(got.native);
+  return { got, gaps, nativeIgnoredIncome };
+}
+
+const knownText = fs.readFileSync(path.join(__dirname, 'refund-matrix-known-gaps.json'), 'utf8');
+const knownFile = JSON.parse(knownText);
+const known = knownFile.gaps;
+const rows = buildOracleRows();
+const rowById = new Map(rows.map((row) => [row.id, row]));
+for (const [name, rowId, mutate] of [
+  ['card cannot substitute held source', 'AR-04449', e => { e.got.parseSms = e.got.session = 'none'; }],
+  ['account cannot post automatically', 'AR-04455', e => { e.got.parseSms = e.got.session = 'income 25000'; }],
+  ['account cannot inherit debited card', 'AR-04455', e => { e.nativeResult.notification.instrument = { kind: 'card', last4: '1234' }; }],
+  ['account cannot lose source money', 'AR-04455', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['account cannot lose refusal marker', 'AR-04455', e => { e.event.issues = []; }],
+]) test(`owned Arabic policy rejects ${name}`, () => {
+  const row = rowById.get(rowId);
+  const e = { got: rowId === 'AR-04449'
+    ? { parseSms: 'income 25000', session: 'income 25000', native: 'review' }
+    : { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.ok(judge(row, e).policyError);
+});
+// Mutation controls exercise the policy judge, not the parser oracle. The
+// unmodified payload comes from a real held-credit row; each mutation must
+// lose retention acceptance even when the route names remain unchanged.
+for (const [name, mutate] of [
+  ['generic wrong amount', e => { e.event.amount.value.minorUnits = '1'; }],
+  ['generic wrong currency', e => { e.event.amount.value.currency = 'USD'; }],
+  ['generic debit direction', e => { e.event.direction = 'debit'; }],
+  ['generic missing refusal marker', e => { e.event.issues = []; }],
+  ['native wrong amount', e => { e.nativeResult.notification.amount.minorUnits = '1'; }],
+  ['native wrong currency', e => { e.nativeResult.notification.amount.currency = 'USD'; }],
+  ['native debit direction', e => { e.nativeResult.notification.direction = 'debit'; }],
+  ['native movement style', e => { e.nativeResult.notification.style = 'movement'; }],
+]) test(`retention policy rejects ${name}`, () => {
+  const row = rowById.get('AR-04077');
+  const e = { got: { parseSms: 'none', session: 'none', native: 'review' },
+    event: structuredClone(inspectGenericBankEventForReview(row.body, 'ENBD')),
+    nativeResult: native(row.body) };
+  mutate(e);
+  assert.notEqual(judge(row, e).policy, 'held-informational');
+});
+for (const [name, mutate] of [
+  ['borrowed amount', n => { n.amount.value = { currency: 'AED', exponent: 2, minorUnits: '25000' }; }],
+  ['wrong currency', n => { n.amount.value = { currency: 'USD', exponent: 2, minorUnits: '10000' }; }],
+  ['credit direction', n => { n.direction = 'credit'; }],
+  ['missing refusal marker', n => { n.issues = []; }],
+]) test(`debit-note policy rejects ${name}`, () => {
+  const row = rows.find(r => r.case?.debit && r.case.amount === 'before' && judge(r).policy === 'debit-plus-note');
+  assert.ok(row, 'a frozen row with an independently stated AED100 note exists');
+  const note = structuredClone(inspectSupplementaryReversal(row.body, 'ENBD'));
+  mutate(note);
+  const e = { got: { parseSms: 'expense 25000', session: 'expense 25000', native: 'debit 25000' },
+    nativeResult: native(row.body), event: inspectGenericBankEventForReview(row.body, 'ENBD'), note };
+  assert.notEqual(judge(row, e).policy, 'debit-plus-note');
+});
+
+const groups = new Map();
+for (const row of rows) {
+  const key = `${row.lang} ${row.rule.split(' ')[0]} ${row.expected}`;
+  if (!groups.has(key)) groups.set(key, []);
+  groups.get(key).push(row);
+}
+
+const current = {};
+const report = { total: rows.length, gaps: [], policy: [], policyFailures: [], nativeIgnoredIncome: 0, nativeIgnoredPinned: 0, incomeRows: 0, counts: {},
+  falseIncomeByLang: {} };
+for (const [key, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+  test(`refund matrix ${key} (${list.length} cases)`, (t) => {
+    const failures = [];
+    let ignored = 0;
+    let pinned = 0;
+    for (const row of list) {
+      const verdict = judge(row);
+      if (verdict.policyError) {
+        report.policyFailures.push(verdict.policyError); failures.push(`${row.id} debit parity ${JSON.stringify(verdict.policyError)}`); continue;
+      }
+      if (verdict.policy) {
+        report.policy.push({ id: row.id, policy: verdict.policy, expected: row.expected, ...verdict.got });
+        continue;
+      }
+      if (NATIVE_IGNORED_CONTROL_ROWS.has(row.id)) {
+        if (verdict.nativeIgnoredIncome) pinned++;
+        else failures.push(`${row.id} STALE native ignore: native now ${verdict.got.native}; delete it from NATIVE_IGNORED_CONTROL_ROWS`);
+      } else if (verdict.nativeIgnoredIncome) ignored++;
+      const listed = known[row.id] || {};
+      if (listed.expected && listed.expected !== row.expected) failures.push(`${row.id} oracle now ${row.expected}, gap file says ${listed.expected}`);
+      for (const name of PATHS) {
+        const gotGap = verdict.gaps[name];
+        const listedGap = listed[name];
+        if (gotGap && !listedGap) failures.push(`${row.id} NEW ${name} ${gotGap} (${gapClass(row.expected, name, gotGap)}) | ${row.body}`);
+        else if (gotGap && listedGap !== gotGap) failures.push(`${row.id} CHANGED ${name} ${listedGap} -> ${gotGap} | ${row.body}`);
+        else if (!gotGap && listedGap) failures.push(`${row.id} STALE ${name} now ${verdict.got[name]}: delete it from the gap file`);
+      }
+      if (Object.keys(verdict.gaps).length) {
+        current[row.id] = { expected: row.expected, ...verdict.gaps };
+        report.gaps.push({ id: row.id, rule: row.rule, expected: row.expected, case: row.case, body: row.body, ...verdict.got });
+        for (const name of PATHS) {
+          if (!verdict.gaps[name] || gapClass(row.expected, name, verdict.gaps[name]) !== 'falseIncome') continue;
+          const lane = `${row.lang} ${name}`;
+          report.falseIncomeByLang[lane] = (report.falseIncomeByLang[lane] || 0) + 1;
+        }
+      }
+    }
+    if (isIncomeRow(list[0].expected)) {
+      report.incomeRows += list.length;
+      report.nativeIgnoredIncome += ignored;
+      report.nativeIgnoredPinned += pinned;
+      t.diagnostic(`native ignored ${ignored} of ${list.length} income rows${pinned ? ` (+${pinned} pinned control rows)` : ''}`);
+    }
+    assert.equal(failures.length, 0, `${failures.length} ratchet failures in ${list.length} rows:\n${failures.slice(0, 8).join('\n')}`);
+  });
+}
+
+function classCounts(gaps) {
+  const counts = Object.fromEntries(Object.keys(CEILING).map((cls) => [cls, { parseSms: 0, session: 0, native: 0 }]));
+  for (const entry of Object.values(gaps)) {
+    for (const name of PATHS) if (entry[name]) counts[gapClass(entry.expected, name, entry[name])][name]++;
+  }
+  return counts;
+}
+
+test('refund matrix gap file only lists oracle rows, in canonical form', () => {
+  for (const [id, entry] of Object.entries(known)) {
+    const row = rowById.get(id);
+    assert.ok(row, `${id} is not an oracle row`);
+    assert.equal(entry.expected, row.expected, `${id} expected`);
+    const paths = Object.keys(entry).filter((k) => k !== 'expected');
+    assert.ok(paths.length > 0 && paths.every((k) => PATHS.includes(k)), `${id} lists no path or an unknown one`);
+    for (const name of paths) assert.ok(gapClass(entry.expected, name, entry[name]), `${id} ${name} ${entry[name]} is not a gap`);
+  }
+  assert.equal(knownText, formatGapFile(knownFile.about, known), 'gap file is not sorted one entry per line (write it with REFUND_MATRIX_WRITE_GAPS)');
+  for (const id of NATIVE_IGNORED_CONTROL_ROWS) {
+    assert.ok(id.startsWith('CTL-') && isIncomeRow(rowById.get(id)?.expected), `${id} in NATIVE_IGNORED_CONTROL_ROWS is not an income control row`);
+  }
+});
+
+test('refund matrix ratchet: no class grows above its frozen ceiling', () => {
+  const counts = classCounts(known);
+  for (const [cls, byPath] of Object.entries(CEILING)) {
+    for (const name of PATHS) {
+      assert.ok(counts[cls][name] <= byPath[name], `${cls} on ${name}: ${counts[cls][name]} gap entries > ceiling ${byPath[name]}`);
+    }
+  }
+  // The count is filled by the group tests above; run alone (--test-name-pattern) it would pass with 0 (Change Reviewer).
+  assert.ok(report.incomeRows > 0, 'no income rows were judged: run the whole file, not this test alone');
+  assert.ok(report.nativeIgnoredIncome <= NATIVE_IGNORED_INCOME_CEILING,
+    `native ignored ${report.nativeIgnoredIncome} income rows > ceiling ${NATIVE_IGNORED_INCOME_CEILING}`);
+});
+
+test('refund matrix oracle is pinned: row count and id+expected+body hash', () => {
+  const sha256 = crypto.createHash('sha256').update(rows.map((row) => `${row.id}\t${row.expected}\t${row.body}`).join('\n')).digest('hex');
+  assert.equal(rows.length, ORACLE_PIN.rows, 'the oracle changed size: update ORACLE_PIN in the same PR and say why in review');
+  assert.equal(sha256, ORACLE_PIN.sha256, 'oracle ids, labels or bodies changed: update ORACLE_PIN in the same PR and say why in review');
+});
+
+test('refund matrix report', (t) => {
+  report.counts = classCounts(current);
+  const falseIncome = PATHS.map((name) => `${name} ${report.counts.falseIncome[name]}`).join(', ');
+  t.diagnostic(`false income (store gate needs 0 on every path): ${falseIncome}; by language ${JSON.stringify(report.falseIncomeByLang)}`);
+  t.diagnostic(`native ignored ${report.nativeIgnoredIncome} of ${report.incomeRows} income rows, plus ${report.nativeIgnoredPinned} pinned control rows`);
+  if (process.env.REFUND_MATRIX_REPORT) fs.writeFileSync(process.env.REFUND_MATRIX_REPORT, JSON.stringify(report, null, 1));
+  if (process.env.REFUND_MATRIX_WRITE_GAPS) fs.writeFileSync(process.env.REFUND_MATRIX_WRITE_GAPS, formatGapFile(knownFile.about, current));
+  assert.ok(report.total >= 500, 'at least 500 generated cases');
+});
+
+// One entry per line, sorted by id, so a fix shows up as deleted lines.
+function formatGapFile(about, gaps) {
+  const ids = Object.keys(gaps).sort();
+  const lines = ids.map((id, i) => `  ${JSON.stringify(id)}: ${JSON.stringify(gaps[id])}${i < ids.length - 1 ? ',' : ''}`);
+  return `{\n "about": ${JSON.stringify(about)},\n "gaps": {\n${lines.join('\n')}\n }\n}\n`;
+}
+module.exports = { formatGapFile };

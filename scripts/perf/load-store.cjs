@@ -59,7 +59,10 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     },
     '@/lib/shared-alert-format-submit': { eraseSharingCredential: async () => {} },
     '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
-    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
+    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {}, async setAppPrivacy() {} },
+    // Native/privacy presentation boundaries; monetary reducer modules remain real.
+    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {} },
+    '@/lib/widget-sync': { async invalidateWidgetSnapshotSync() {}, requestWidgetSnapshotSync: () => ({ done: Promise.resolve('unchanged') }) },
     '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
@@ -68,11 +71,22 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
-    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/android-live-background-api': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Dependency-free selector helpers, not part of the shared test build.
     '@/lib/store-selection': execute('src/lib/store-selection.ts', (id) => {
       throw new Error(`unexpected dependency ${id}`);
+    }),
+    // The pause-boundary factory and pass-through rule: store.tsx builds
+    // StorePauseBoundary from them at load. A .tsx, so never in the shared
+    // build; the real module, which never renders in this harness.
+    '@/lib/store-pause': execute('src/lib/store-pause.tsx', (id) => {
+      if (id === 'react') return { useContext: () => null, useLayoutEffect() {}, useRef: (value) => ({ current: value }) };
+      if (id === 'react/jsx-runtime') return { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') };
+      if (id === '@/lib/store-selection') {
+        return execute('src/lib/store-selection.ts', (dep) => { throw new Error(`unexpected dependency ${dep}`); });
+      }
+      throw new Error(`unexpected store-pause dependency ${id}`);
     }),
     './balances': {},
     // Pure Accounts/Bills helpers (applyBillEdit); not part of the shared build.

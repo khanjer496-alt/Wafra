@@ -78,7 +78,7 @@ export const everydayBandCopyTables = {
   },
 };
 
-export type EverydayBandCopy = (typeof everydayBandCopyTables)['en'];
+type EverydayBandCopy = (typeof everydayBandCopyTables)['en'];
 
 export function everydayBandCopy(language: string): EverydayBandCopy {
   return language === 'ar' ? everydayBandCopyTables.ar : everydayBandCopyTables.en;

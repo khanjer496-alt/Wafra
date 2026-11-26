@@ -25,6 +25,10 @@ jobs:
         run: test "$GITHUB_RUN_ATTEMPT" = 1
       - run: npm ci
       - run: npm --prefix server ci
+      # Read-only: the signed store artifact ships the committed, reviewed parser
+      # bundle or the build fails; nothing here regenerates it.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
       - name: Check existing feature-beta configuration
         run: node scripts/check-release-config.mjs --intent build --platform ios --profile history-beta --submit true
       - name: Typecheck current application and server

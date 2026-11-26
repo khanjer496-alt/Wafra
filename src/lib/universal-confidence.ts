@@ -1,6 +1,6 @@
 import type { UniversalBankEvent, UniversalField } from '@/lib/universal-types';
 
-export interface UniversalFieldConfidence {
+interface UniversalFieldConfidence {
   amount: number;
   statementTotal: number;
   minimumDue: number;
@@ -13,7 +13,7 @@ export interface UniversalFieldConfidence {
   instrument: number;
 }
 
-export interface UniversalEventConfidence {
+interface UniversalEventConfidence {
   status: number;
   family: number;
   direction: number;

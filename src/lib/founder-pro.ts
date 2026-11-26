@@ -1,10 +1,24 @@
 export const FOUNDER_TAPS_REQUIRED = 5;
 export const FOUNDER_TAP_WINDOW_MS = 4_000;
 
-const FOUNDER_UNLOCK_ENABLED =
-  process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
-const AUTOMATIC_FOUNDER_PRO_ENABLED =
-  process.env.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO === '1';
+/**
+ * Build markers. Expo inlines the EXPO_PUBLIC_* value and Metro's release
+ * constant folding keeps exactly one of the two strings, so the compiled
+ * bundle says which way it was built. build-apk.yml reads them back from the
+ * packaged Play bundle and fails on "=on" (scripts/android-build-flags.cjs).
+ * The gates below are derived from the markers so they cannot disagree.
+ */
+export const FOUNDER_UNLOCK_BUILD_FLAG =
+  process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1'
+    ? 'wafra-build-flag:founder-unlock=on'
+    : 'wafra-build-flag:founder-unlock=off';
+export const AUTO_FOUNDER_PRO_BUILD_FLAG =
+  process.env.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO === '1'
+    ? 'wafra-build-flag:auto-founder-pro=on'
+    : 'wafra-build-flag:auto-founder-pro=off';
+
+const FOUNDER_UNLOCK_ENABLED = FOUNDER_UNLOCK_BUILD_FLAG.endsWith('=on');
+const AUTOMATIC_FOUNDER_PRO_ENABLED = AUTO_FOUNDER_PRO_BUILD_FLAG.endsWith('=on');
 
 export interface FounderTapSequence {
   count: number;

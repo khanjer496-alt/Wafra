@@ -22,7 +22,7 @@ export class StatementFilingError extends Error {
   }
 }
 
-export interface StatementDrainResult {
+interface StatementDrainResult {
   imported: number;
   review: number;
   /** New dues and bills filed alongside the transactions (see alreadyInWafra). */

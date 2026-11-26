@@ -537,7 +537,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
-    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/android-live-background-api': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     '@/lib/trusted-bank-notification-packages': {
       bankNotificationAdmissionExpiresAt: () => Date.now() + 86_400_000,
     },
@@ -565,9 +565,19 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // Provider plumbing only: the locale key for memoised money text.
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Native widget bridge: clearAll only asks it to drop the widget summary.
-    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {} },
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {}, setAppPrivacy: async () => {} },
+    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {} },
+    '@/lib/widget-sync': { invalidateWidgetSnapshotSync: async () => {}, requestWidgetSnapshotSync: () => ({ done: Promise.resolve('unchanged') }) },
     // The real selector helpers (dependency-free).
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
+    // The real pause-boundary factory and rule (store.tsx builds StorePauseBoundary
+    // from them at load). The boundary never renders in this harness.
+    '@/lib/store-pause': execute('src/lib/store-pause.tsx', (id) => {
+      if (id === 'react') return react;
+      if (id === 'react/jsx-runtime') return { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') };
+      if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); });
+      throw new Error(`unexpected store-pause dependency ${id}`);
+    }),
     // The real one-time BNPL category repair (it reads the real parser).
     '@/lib/bnpl-category-repair': require('./build/bnpl-category-repair'),
     '@/lib/subscriptions': require('./build/subscriptions'),
@@ -2863,6 +2873,113 @@ if (!workflow) {
   ok('a hand-typed name competing for the same canonical key blocks the move too',
     contested.merchantOverrides.claude === undefined,
     JSON.stringify(contested.merchantOverrides));
+
+  /* ── launch cost: one title index instead of rules x rows scans ───────────
+   *
+   * The re-key step used to scan the whole ledger (and lowercase every title)
+   * once per merchant rule at every launch. It now answers from one
+   * lowercased-title index. `reference` below is the previous algorithm,
+   * verbatim, run on the same input; the two must agree on every rule, on a
+   * ledger with scoped and unscoped keys, rules with no rows left, hand-typed
+   * rows, competing categories under one canonical name, and raw-link evidence.
+   */
+  const { scopedMerchantOverrideKey } = require('./build/categories');
+  const referenceRekey = (overrides, rows) => {
+    const titleOf = (t) => t.title.trim().toLowerCase();
+    const parserOwned = (t) => t.source === 'sms' && !t.userEdited && !t.titleEdited;
+    const claims = new Map();
+    for (const [key, category] of Object.entries(overrides)) {
+      const scope = key.match(/^(income|expense):/)?.[1];
+      const merchantKey = scope ? key.slice(scope.length + 1) : key;
+      const canonical = normalizeServiceName(merchantKey);
+      if (!canonical) continue;
+      const canonicalMerchant = canonical.trim().toLowerCase();
+      const canonicalKey = scope ? scopedMerchantOverrideKey(canonicalMerchant, scope) : canonicalMerchant;
+      if (canonicalKey === key) continue;
+      if (overrides[canonicalKey] !== undefined) continue;
+      const under = rows.filter((t) => titleOf(t) === merchantKey && (!scope || t.type === scope));
+      const evidenced =
+        !under.some((t) => !parserOwned(t)) &&
+        (under.length > 0 ||
+          rows.some((t) => parserOwned(t) &&
+            titleOf(t) === canonicalMerchant && (!scope || t.type === scope) &&
+            typeof t.raw === 'string' && t.raw.toLowerCase().includes(merchantKey)));
+      const claim = claims.get(canonicalKey);
+      if (claim) { claim.categories.add(category); claim.evidenced ||= evidenced; }
+      else claims.set(canonicalKey, { categories: new Set([category]), evidenced });
+    }
+    const settled = [...claims].filter(([, c]) => c.evidenced && c.categories.size === 1);
+    if (!settled.length) return { ...overrides };
+    const rekeyed = { ...overrides };
+    for (const [canonicalKey, c] of settled) rekeyed[canonicalKey] = [...c.categories][0];
+    return rekeyed;
+  };
+
+  // A deterministic ledger: ~30,000 rows over ~2,000 merchant rules.
+  let seed = 20261111;
+  const rand = (n) => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed % n; };
+  const services = ['netflix.com', 'amazon.ae order', 'spotify ab', 'adobe *creative', 'www.shein.com',
+    'apple.com/bill', 'openai *chatgpt subscr', 'claudes diner', 'google *youtube', 'noon.com', 'carrefour'];
+  const categoriesPool = ['shopping', 'dining', 'groceries', 'software', 'entertainment'];
+  const overrides = {};
+  const rows = [];
+  // Services 0-4 and 8: every spelling agrees on one category, so the group moves onto
+  // the canonical name. Services 5-6: spellings disagree, so nothing moves. Service 7:
+  // the user already set the canonical name themselves, which outranks any re-key.
+  overrides.claude = 'other';
+  for (let i = 0; i < 2000; i += 1) {
+    const s = i % services.length;
+    const base = `${services[s]} ${i}`;
+    const scope = i % 3 === 0 ? 'income:' : i % 3 === 1 ? 'expense:' : '';
+    overrides[`${scope}${base}`] = s === 5 || s === 6
+      ? categoriesPool[rand(categoriesPool.length)]
+      : categoriesPool[s % categoriesPool.length];
+  }
+  const keys = Object.keys(overrides);
+  for (let i = 0; i < 30000; i += 1) {
+    const key = keys[rand(keys.length)];
+    const scope = key.match(/^(income|expense):/)?.[1];
+    const merchant = scope ? key.slice(scope.length + 1) : key;
+    const kind = rand(10);
+    const canonicalTitle = normalizeServiceName(merchant) ?? 'Other';
+    rows.push({
+      id: `r${i}`, type: scope ?? (rand(2) ? 'expense' : 'income'), amountFils: 100 + rand(5000),
+      category: 'other', accountId: 'main', date: '2026-07-01',
+      // 60% still carry the old spelling as their title (tier 1 evidence), 25% are
+      // already renamed and keep the old spelling only in `raw` (tier 2), the rest unrelated.
+      title: kind < 6 ? merchant.toUpperCase() : kind < 8.5 ? canonicalTitle : `Unrelated ${rand(500)}`,
+      source: rand(9) === 0 ? 'manual' : 'sms',
+      ...(rand(11) === 0 ? { userEdited: true } : {}),
+      ...(rand(13) === 0 ? { titleEdited: true } : {}),
+      ...(kind >= 6 && kind < 8.5 ? { raw: `Purchase at ${merchant.toUpperCase()} on 01/07` } : {}),
+    });
+  }
+  const input = () => ({ marketId: 'AE', merchantOverrides: { ...overrides }, transactions: rows.map((t) => ({ ...t })) });
+  const expected = referenceRekey(overrides, rows);
+  const rekeyedCount = Object.keys(expected).length - Object.keys(overrides).length;
+  ok('the large fixture really exercises the re-key (not a vacuous comparison)',
+    rekeyedCount >= 3 && Object.keys(overrides).length >= 1500,
+    `${rekeyedCount} re-keyed, ${Object.keys(overrides).length} rules`);
+  // Count string lowercasing during the migration: a per-rule ledger scan does one
+  // per row per rule (tens of millions here), the index does a few per row.
+  const nativeLower = String.prototype.toLowerCase;
+  let lowercased = 0;
+  String.prototype.toLowerCase = function countedLowerCase() { lowercased += 1; return nativeLower.call(this); };
+  let migrated;
+  const LOWERCASE_BUDGET = 500_000;
+  const t0 = Date.now();
+  try { migrated = real.migratePersistedState(input()); } finally { String.prototype.toLowerCase = nativeLower; }
+  const elapsed = Date.now() - t0;
+  ok('the indexed migration re-keys exactly what the full-ledger scans did (2,000 rules x 30,000 rows)',
+    JSON.stringify(Object.entries(migrated.merchantOverrides).sort()) ===
+      JSON.stringify(Object.entries(expected).sort()),
+    `${Object.keys(migrated.merchantOverrides).length} vs ${Object.keys(expected).length} keys`);
+  console.log(`  (indexed re-key: ${lowercased} lowercasings, ${elapsed} ms)`);
+  ok(`and it no longer lowercases every title once per rule (${lowercased} lowercasings)`,
+    lowercased < LOWERCASE_BUDGET, `${lowercased} >= ${LOWERCASE_BUDGET}`);
+  ok(`and the whole hydration migration of that ledger stays fast (${elapsed} ms)`, elapsed < 4000, `${elapsed} ms`);
+  ok('every row survives the migration', migrated.transactions.length === rows.length, String(migrated.transactions.length));
+
 }
 
 /* ── an income pin is not an answer about an expense row ───────────────────
@@ -3173,12 +3290,65 @@ asyncSuites.push((async () => {
     id: `history_review_id_${String(index).padStart(8, '0')}`,
     sourceKey: `history_review_source_${String(index).padStart(8, '0')}`,
     observedAt: start + index, channel: 'inbox', event });
+  // History and relay keep their source (held cursor / withheld ACK), so they
+  // stage with strict 'hold-source' admission (ReviewAdmissionMode).
+  const HOLD = [undefined, undefined, 'hold-source'];
+  await ledger.stageReviewAlerts(Array.from({ length: 50 }, (_, index) => review(index)), ...HOLD).durable;
+  const receipt = ledger.stageReviewAlerts([review(50)], ...HOLD);
+  await receipt.durable;
+  const persisted = saved.at(-1).reviewTray;
+  // Strict retention: acknowledged money evidence is never evicted to make room.
+  // The 51st money review is deferred, its source stays held (no ACK, no cursor
+  // advance), and nothing is lost, so no eviction tombstone is written.
+  const receipts = receipt.retention();
+  ok('history/relay staging over a full Message lane defers the new money review instead of evicting kept evidence',
+    receipt.admitted === 0 && persisted.pending.length === 50 &&
+      persisted.pending.some((item) => item.id === review(0).id) &&
+      !persisted.pending.some((item) => item.id === review(50).id) &&
+      !persisted.tombstones.some((item) => item.outcome === 'evicted') &&
+      receipts.length === 1 && receipts[0].outcome === 'deferred',
+    JSON.stringify({ tombstones: persisted.tombstones, receipts }));
+  const reloaded = trayModule.normalizeAlertReviewTray(persisted, Date.now());
+  ok('a deferred money review leaves no loss count after hydration',
+    reloaded.pending.length === 50 && trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'evicted') === 0);
+  const again = ledger.stageReviewAlerts([review(0)], ...HOLD);
+  await again.durable;
+  ok('a re-read of a kept alert into the full lane is a duplicate, not a loss',
+    again.admitted === 0 && again.retention()[0].outcome === 'pending' &&
+      ledger.getStateSnapshot().reviewTray.pending.length === 50 &&
+      trayModule.recentlyLostReviewCount(ledger.getStateSnapshot().reviewTray, Date.now(), 'evicted') === 0);
+})().catch((error) => ok('history staging eviction integration completes', false, String(error))));
+
+// Bounded default (CEO 4a8b6cee): a caller that does not keep its source (paste)
+// stages without a mode, so the Message lane still trims at fifty. A trimmed money
+// review must leave a durable, countable tombstone through the real StoreProvider.
+asyncSuites.push((async () => {
+  const saved = [];
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null,
+        save: async (snapshot) => { saved.push(JSON.parse(JSON.stringify(snapshot))); return true; },
+        block() {}, reset: async () => {}, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1,
+    data: { transactions: [], ledgerMoney: { schemaVersion: 2, currency: 'CAD', exponent: 2 } } }));
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const trayModule = require('./build/alert-review-tray.js');
+  const event = inspectUniversalBankEvent('Card purchase CAD 25.00 at MAPLE SHOP on 2026-09-05.');
+  const start = Date.now() - 60_000;
+  const review = (index) => trayModule.prepareUniversalReviewAlert({
+    id: `history_review_id_${String(index).padStart(8, '0')}`,
+    sourceKey: `history_review_source_${String(index).padStart(8, '0')}`,
+    observedAt: start + index, channel: 'inbox', event });
   await ledger.stageReviewAlerts(Array.from({ length: 50 }, (_, index) => review(index))).durable;
   const receipt = ledger.stageReviewAlerts([review(50)]);
   await receipt.durable;
   const persisted = saved.at(-1).reviewTray;
   const evicted = persisted.tombstones.filter((item) => item.outcome === 'evicted');
-  ok('history/relay staging over a full Message lane persists an evicted tombstone for the lost money review',
+  ok('default bounded staging over a full Message lane persists an evicted tombstone for the lost money review',
     receipt.admitted === 1 && persisted.pending.length === 50 &&
       !persisted.pending.some((item) => item.id === review(0).id) &&
       evicted.length === 1 && evicted[0].sourceKey === review(0).sourceKey,
@@ -3193,7 +3363,7 @@ asyncSuites.push((async () => {
   ok('a re-read of the evicted alert into a still-full lane is not a second loss',
     ledger.getStateSnapshot().reviewTray.pending.length === 50 &&
       trayModule.recentlyLostReviewCount(ledger.getStateSnapshot().reviewTray, Date.now(), 'evicted') === 1);
-})().catch((error) => ok('history staging eviction integration completes', false, String(error))));
+})().catch((error) => ok('bounded staging eviction integration completes', false, String(error))));
 
 // Replacing the ledger invalidates the real session-only AI cache, including
 // work queued before React can rerender the Review screen.
@@ -3522,6 +3692,41 @@ asyncSuites.push((async () => {
 // The erase-race contract in 2c is behavioural, so it settles after this file
 // finishes executing. Counting before it lands would report a green run that
 // never ran it.
+// Erase all data (TestFlight 192, CEO 61e916a4): the native widget copy is
+// cleared before any erase step that can throw, so a failure or crash part-way
+// can never leave the Home widget showing erased money.
+const eraseHarness = (overrides = {}) => {
+  const events = [];
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null, save: async () => true, block() {},
+        reset: async () => { events.push('reset'); }, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => { events.push('widget-clear'); }, setWidgetSnapshot: () => true },
+    // The real seed: clearAll keeps its Cash account (SEED_ACCOUNTS[2]).
+    '@/lib/seed': require('./build/seed'),
+    // Node has no secure store; the format key erase is a native boundary here.
+    '@/lib/private-alert-format-runtime': { ...require('./build/private-alert-format-runtime'),
+      erasePrivateAlertFormatKey: async () => { events.push('format-key-erase'); } },
+    ...overrides,
+  }, true);
+  return { events, runtime, ledger: runtime.StoreProvider({ children: null }) };
+};
+asyncSuites.push((async () => {
+  const failing = eraseHarness({
+    '@/lib/shared-alert-format-submit': { submitShapeAnonymously: async () => false,
+      eraseSharingCredential: async () => { throw new Error('credential store unavailable'); } },
+  });
+  failing.ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1, data: { transactions: [] } }));
+  const failure = await failing.ledger.clearAll().then(() => null, (error) => error);
+  ok('E1: erase clears the native widget before the ledger reset, even when a later cleanup step throws',
+    failure !== null && failing.events.includes('widget-clear') &&
+      failing.events.indexOf('widget-clear') < failing.events.indexOf('reset'),
+    JSON.stringify({ events: failing.events, failure: failure && failure.name }));
+
+})().catch((error) => ok('erase widget integration completes', false, String(error && error.stack || error))));
+
 Promise.all(asyncSuites).then(() => {
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
