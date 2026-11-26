@@ -58,6 +58,8 @@ export function setDateTimeLocale(input: DateTimeLocale | null): void {
 type DateField = 'year' | 'month' | 'day';
 interface DateProfile {
   uiLocale: string;
+  /** Month names where uiLocale cannot follow the regional order: the world (-001) form when listed. */
+  namedLocale: string;
   regionalOrder: DateField[];
   compatibleOrders: Partial<Record<NonNullable<Intl.DateTimeFormatOptions['month']>, boolean>>;
   clock24: boolean;
@@ -152,7 +154,25 @@ function profile(language: string): DateProfile {
   // over a translation's language-region. Never use the bank parser market.
   const uiParts = uiTag.split('-');
   const script = uiParts.slice(1).find(part => /^[A-Z][a-z]{3}$/.test(part));
-  const uiLocale = [uiParts[0], script, region].filter(Boolean).join('-');
+  const languageLocale = [uiParts[0], script].filter(Boolean).join('-');
+  const regionLocale = [uiParts[0], script, region].filter(Boolean).join('-');
+  // The world form is the language's own international pattern ("13 Nov
+  // 2026", "13 نوفمبر 2026"), where a region can inherit the language's
+  // US-ordered root pattern (en-CA, en-JP: "Nov 13, 2026").
+  const worldLocale = [uiParts[0], script, '001'].filter(Boolean).join('-');
+  // Hermes on Android resolves a language-region pair that the platform does
+  // not list to the PHONE's default locale, not to the language: Android ICU
+  // reports ar_US -> ar as a fallback match, which Hermes rejects. CLDR has no
+  // ar-US, ar-GB or en-SA, so Arabic in the app on an English phone printed
+  // "November" and "PM", and English on a Saudi phone Arabic names. Use the
+  // pair only when it is listed, else the world form, else the language
+  // itself (canonicalTag proved it is available).
+  const listed = (tag: string): boolean => {
+    try { return Intl.DateTimeFormat.supportedLocalesOf([tag]).length > 0; } catch { return false; }
+  };
+  const worldListed = worldLocale !== regionLocale && listed(worldLocale);
+  const uiLocale = listed(regionLocale) ? regionLocale : worldListed ? worldLocale : languageLocale;
+  const namedLocale = worldListed ? worldLocale : uiLocale;
   // Intl.Locale and maximize/minimize are absent in supported Hermes builds.
   // The small pinned CLDR language lookup keeps native region conventions
   // without adding a polyfill or relying on those optional APIs.
@@ -170,7 +190,7 @@ function profile(language: string): DateProfile {
     try { clock24 = !formatter(regionalSupported ? regionalLocale : deviceTag, { hour: 'numeric' }).resolvedOptions().hour12; }
     catch { clock24 = true; }
   }
-  const value: DateProfile = { uiLocale, regionalOrder, compatibleOrders: {}, clock24 };
+  const value: DateProfile = { uiLocale, namedLocale, regionalOrder, compatibleOrders: {}, clock24 };
   if (profiles.size >= 16) profiles.delete(profiles.keys().next().value!);
   profiles.set(language, value);
   return value;
@@ -215,9 +235,16 @@ export function regionalCivilDate(
       selected.compatibleOrders[monthStyle] = selected.regionalOrder.join() === dateOrder(selected.uiLocale, monthStyle).join();
     }
     if (selected.compatibleOrders[monthStyle]) return formatter(selected.uiLocale, fields).format(date);
-    // e.g. en-JP's CLDR English pattern is month-first, while Japan's regional
-    // pattern is year-first. Numeric Gregorian YMD avoids putting Japanese
-    // suffixes around English words or silently reverting to US ordering.
+    if (monthStyle !== 'numeric' && monthStyle !== '2-digit') {
+      // e.g. en-CA and en-JP: the English pattern is month-first while the
+      // regional order is year-first; Arabic on a US phone is day-first. A
+      // named month cannot be misread in any order, so it stays a name in the
+      // UI language ("13 Nov 2026", "نوفمبر 2026"), never "2026-11" or "11/2026",
+      // and never with Japanese suffixes around English words.
+      try { return formatter(selected.namedLocale, fields).format(date); }
+      catch { return formatter(selected.uiLocale, fields).format(date); }
+    }
+    // A numeric month can be misread, so it keeps the regional field order.
     const value = numericDate(date, fields, selected.regionalOrder);
     return fields.weekday
       ? `${formatter(selected.uiLocale, { weekday: fields.weekday }).format(date)}, ${value}`
