@@ -67,7 +67,7 @@ test('web-picked statement uploads its actual browser File without native filesy
  }
 
 });
-function finishHarness(results) {
+function finishHarness(results, { fromSetup = false } = {}) {
  const ts = require('typescript'), vm = require('node:vm');
  const source = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
  const body = source.slice(source.indexOf('  const finishQueuedImport = useCallback('), source.indexOf('\n  useEffect(() => {', source.indexOf('  const finishQueuedImport = useCallback(')));
@@ -81,6 +81,8 @@ function finishHarness(results) {
   ensureDurable:async()=>events.push(['durable']),batchSummary:ctx=> {events.push(['batch',ctx]);return 'complete';},
   committed:()=>events.push(['committed']),failed:()=>events.push(['failed']),syncFailureReason:()=> 'failed',
   alreadyInWafra: load(path.join(root, 'src/lib/statement-batch.ts')).alreadyInWafra,
+  // The OS rating prompt's "this import added rows" mark (store-review.test.cjs).
+  fromSetup, importAddedRowsRef: { current: false },
  };
  vm.runInNewContext(ts.transpileModule(body+'\nglobalThis.finish = finishQueuedImport;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText, context);
  return {context,events,get summary(){return summary},finish:context.finish,replace(){generation++}};
@@ -95,6 +97,20 @@ test('component completion records ranges only after a completed queue and durab
  assert.equal(h.summary.added,3);assert.equal(h.summary.skipped,1);
  assert.equal(h.events.find(e=>e[0]==='batch')[1].rejected,1);
  assert.deepEqual(h.events.filter(e=>['coverage','durable','committed'].includes(e[0])).map(e=>e[0]),['coverage','durable','committed']);
+});
+test('only a completed import that added rows, outside first-run setup, marks a rating moment', async () => {
+ const added=finishHarness([{complete:true,imported:2,review:0}]);
+ assert.equal(await added.finish(1,2,0,1,0,[coverage],1),true);
+ assert.equal(added.context.importAddedRowsRef.current,true);
+ const pending=finishHarness([{complete:false,reason:'review',imported:2,review:0}]);
+ assert.equal(await pending.finish(1,2,0,1,0,[coverage],1),false);
+ assert.equal(pending.context.importAddedRowsRef.current,false,'filing not finished, an error is showing');
+ const nothing=finishHarness([{complete:true,imported:0,review:2}]);
+ assert.equal(await nothing.finish(1,2,0,1,0,[coverage],1),true);
+ assert.equal(nothing.context.importAddedRowsRef.current,false,'nothing added (all to Review)');
+ const setup=finishHarness([{complete:true,imported:2,review:0}],{fromSetup:true});
+ assert.equal(await setup.finish(1,2,0,1,0,[coverage],1),true);
+ assert.equal(setup.context.importAddedRowsRef.current,false,'first-run setup');
 });
 test('component completion never attaches old coverage after ledger replacement', async () => {
  const h=finishHarness([{complete:true,imported:2,review:0}]);h.replace();

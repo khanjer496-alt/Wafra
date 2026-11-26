@@ -38,6 +38,7 @@ import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
 import { getLocalSemanticEncoder, purgeLocalSemanticArtifacts } from '@/lib/local-semantic-runtime';
 import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
+import { startStoreReviewUseDays } from '@/lib/store-review';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
@@ -196,6 +197,9 @@ export default function RootLayout() {
   // screen-reader one arrives — so resolving it before any screen mounts is
   // the difference between Home appearing and Home appearing after a beat.
   useEffect(() => startMotionPreference(), []);
+
+  // Days of use, for the OS rating prompt's "used on three separate days" rule.
+  useEffect(() => startStoreReviewUseDays(), []);
 
   useEffect(() => {
     if (!ready) return;

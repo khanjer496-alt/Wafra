@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 
+import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { RecapStory } from '@/components/recap/recap-story';
 import { ThemedText } from '@/components/themed-text';
 import { BandScaffold } from '@/components/ui/band-scaffold';
@@ -9,12 +10,14 @@ import { EButton } from '@/components/ui/band/e-button';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { recapWords } from '@/lib/recap-copy';
+import { toISODate } from '@/lib/format';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { hasRecapActivity, primaryRecapDescriptor, projectRecap, recapDescriptor, type RecapKind } from '@/lib/recap';
 import { markRecapViewed } from '@/lib/recap-view-state';
 import { useStore } from '@/lib/store';
+import { recapWentWell, requestStoreReviewIfDue } from '@/lib/store-review';
 
 export default function RecapScreen() {
   const router = useRouter();
@@ -39,6 +42,14 @@ export default function RecapScreen() {
   useEffect(() => {
     void markRecapViewed(descriptor.id);
   }, [descriptor.id]);
+  const privacyGateCleared = usePrivacyGateCleared();
+  // Watched to the end, for a closed period that cost less than the one
+  // before: a good moment for the OS rating prompt, over Home.
+  const finished = () => {
+    router.back();
+    if (!recapWentWell(snapshot, toISODate(new Date()))) return;
+    void requestStoreReviewIfDue({ onboarded: state.onboarded, ledgerRows: state.transactions.length, privacyGateCleared });
+  };
 
   if (!active) return <BandScaffold band="home" testID="recap-empty" nav={{ close: () => router.back(), title: words.recap }}
     bandContent={<ThemedText type="title" accessibilityRole="header" style={{ color: band.onBand }}>
@@ -47,5 +58,5 @@ export default function RecapScreen() {
     <EButton palette={band} label={words.done} onPress={() => router.back()} />
   </BandScaffold>;
 
-  return <RecapStory snapshot={snapshot} moneySpec={moneySpec} name={name} onClose={() => router.back()} />;
+  return <RecapStory snapshot={snapshot} moneySpec={moneySpec} name={name} onClose={() => router.back()} onDone={finished} />;
 }

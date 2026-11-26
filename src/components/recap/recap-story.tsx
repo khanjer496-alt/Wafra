@@ -490,12 +490,14 @@ function FinaleScene({ snapshot, moneySpec, palette, w, onDone }: SceneProps & {
   </View>;
 }
 
-export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
+export function RecapStory({ snapshot, moneySpec, name = null, onClose, onDone = onClose }: {
   snapshot: RecapSnapshot;
   moneySpec: LedgerMoneySpec;
   /** The person's own name for the cover; null when the ledger has none. */
   name?: string | null;
   onClose: () => void;
+  /** Done on the last card: the story was watched to its end. Closes like `onClose` unless given. */
+  onDone?: () => void;
 }) {
   const language = useLanguage();
   const w = recapWords(language);
@@ -554,7 +556,7 @@ export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
         : current === 'account' ? <AccountScene {...props} />
           : current === 'rhythm' ? <RhythmScene {...props} />
             : current === 'highlight' ? <HighlightScene {...props} />
-              : <FinaleScene {...props} onDone={onClose} />;
+              : <FinaleScene {...props} onDone={onDone} />;
 
   return <Animated.View testID="recap-story" style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }, bandStyle]}>
     <StatusBar style={palette.statusBar} />

@@ -211,6 +211,16 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           measureRuntimeOperationAsync: async (_tag, work) => work(),
         };
       }
+      // The OS rating prompt is a native boundary. Screen harnesses that load
+      // statement import, Recap or the root never ask the OS; the module's own
+      // rules and call sites are covered from source in store-review.test.cjs.
+      if (name === '@/lib/store-review') {
+        return {
+          requestStoreReviewIfDue: async () => false,
+          startStoreReviewUseDays: () => () => {},
+          recapWentWell: () => false,
+        };
+      }
       // Recap discovery is a Home presentation enhancement. Unless a recap
       // test supplies the real module, unrelated repair harnesses keep it
       // dormant so they can continue isolating their own screen behavior.
