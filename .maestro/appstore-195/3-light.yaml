@@ -1,0 +1,17 @@
+appId: app.wafra.ios
+---
+- tapOn: "With limits"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,600", end: "200,140", duration: 1500}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: 07-budgets-light
+- tapOn: "Home"
+- tapOn: "Settings"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: 08-privacy-light

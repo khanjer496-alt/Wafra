@@ -1,0 +1,60 @@
+# Capture-only tour for the App Store 1.0 set (build 195, Release, simulator).
+appId: app.wafra.ios
+---
+- launchApp
+- extendedWaitUntil: {visible: "Restore from a backup", timeout: 180000}
+- takeScreenshot: 00-welcome
+- tapOn: "Restore from a backup"
+- waitForAnimationToEnd: {timeout: 5000}
+- tapOn: {text: "Try Again", optional: true}
+- tapOn: {text: "Browse", optional: true}
+- tapOn: {text: "On My iPhone", optional: true}
+- extendedWaitUntil: {visible: "wafra-sample-backup-usd.json", timeout: 30000}
+- takeScreenshot: 00-picker
+- tapOn: {text: "wafra-sample-backup-usd\\.json, json.*", optional: true}
+- extendedWaitUntil: {visible: "Restore backup\\?", timeout: 10000, optional: true}
+- runFlow:
+    when: {notVisible: "Restore backup\\?"}
+    commands:
+      - tapOn: {point: "71,250"}
+- extendedWaitUntil: {visible: "Restore backup\\?", timeout: 20000}
+- tapOn: {point: "295,800"}
+- extendedWaitUntil: {visible: "Good (morning|afternoon|evening)", timeout: 60000}
+- tapOn: {text: "Dismiss", optional: true}
+- waitForAnimationToEnd: {timeout: 5000}
+- takeScreenshot: 01-home-light
+- tapOn: "Add"
+- extendedWaitUntil: {visible: "New transaction", timeout: 20000}
+- tapOn: "Description, optional"
+- inputText: "Harvest Grocer"
+- hideKeyboard
+- tapOn: "Groceries"
+- swipe: {start: "200,700", end: "200,450", duration: 600}
+- waitForAnimationToEnd: {timeout: 3000}
+- tapOn: "4"
+- tapOn: "2"
+- tapOn: "Decimal point"
+- tapOn: "8"
+- tapOn: "0"
+- swipe: {start: "200,350", end: "200,750", duration: 600}
+- waitForAnimationToEnd: {timeout: 3000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: 02-add-light
+- tapOn: "Close"
+- waitForAnimationToEnd: {timeout: 3000}
+- openLink: "wafra://statement-import"
+- tapOn: {text: "Open", optional: true}
+- extendedWaitUntil: {visible: "Add bank statements", timeout: 20000}
+- waitForAnimationToEnd: {timeout: 3000}
+- takeScreenshot: 03-statement-light
+- tapOn: "Back"
+- tapOn: "Bills"
+- waitForAnimationToEnd: {timeout: 5000}
+- takeScreenshot: 04-bills-light
+- tapOn: "All"
+- tapOn: "Card payments"
+- waitForAnimationToEnd: {timeout: 5000}
+- takeScreenshot: 05-card-dues-light
+- tapOn: "Accounts"
+- waitForAnimationToEnd: {timeout: 5000}
+- takeScreenshot: alt-05-accounts-light
