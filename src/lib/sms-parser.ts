@@ -10134,6 +10134,29 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
   return splitDebitBesideCredit(message, clause => prove(clause, true));
 }
 
+/**
+ * Review only, never a posting (#238). Beside a separate debit sentence, a credit note with a figure of its own (oracle D1)
+ * keeps the alert off the ledger. When completedDebitBesideCredit cannot prove that debit either (a nominal "Debit Card
+ * Purchase of …", "تمت عملية شراء …"), the purchase would reach neither the ledger nor Review. Returns the expense parseSms
+ * reads from that one debit sentence alone, so its Review item carries the purchase's figure and direction and the note
+ * stays context. Only when every other sentence is such a note with its own, different figure (or a balance line): a status
+ * sentence ("Transaction declined.", "تم رفض العملية."), a figure-less note or a recap of this purchase keeps it out.
+ */
+export function debitBesideRefusedCreditNote(message: string, options?: ParseOptions): ParsedSms | null {
+  if (completedDebitBesideCredit(message, options)) return null;
+  const sentences = settlementSentences(message);
+  if (besideDebit(message, sentences).kind !== 'refuse') return null;
+  const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0);
+  if (debits.length !== 1 || /\b(?:due|minimum|statement|outstanding)\b|مستحق|الحد\s+الادني|كشف/iu.test(debits[0].text)) return null;
+  const debitAmounts = creditAmounts(debits[0].text);
+  const notes = sentences.filter((s) => s !== debits[0] && s.text.replace(BALANCE_SEGMENT_RE, ' ').replace(/[^\p{L}]/gu, '') !== '');
+  // Every note names its own, different figure: a figure-less "This transaction has been reversed." is about the purchase.
+  if (notes.length === 0 || notes.some((s) => s.clauses.length === 0 || noteAmounts(s.text).length === 0 ||
+    creditAmounts(s.text).some((amount) => debitAmounts.includes(amount)))) return null;
+  const parsed = parseSms(debits[0].raw.trim(), undefined, options);
+  return parsed?.kind === 'transaction' && parsed.type === 'expense' ? parsed : null;
+}
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,

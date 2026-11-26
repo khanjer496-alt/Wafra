@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 354ea7aaf9bff74ebf174c2cf8b41deddfc1add74e489ee6698104c5ebccb949
+// Generated from normal shipping TypeScript. Source SHA-256: 56bdc1a4f458827a78de9c98a264ba392f8a784e5e80782042c5dae8dfc25b98
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4110,8 +4110,8 @@ exports.isRefundRequest = isRefundRequest;
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
 const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
-const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will|conditional(?:ly)?(?!\s+(?:cashback|offers?|rewards?|discounts?))|provisional(?:ly)?|(?:cheque|check|amount|credit|deposit|funds?)\s+(?:is|are)\s+under\s+(?:clearing|collection|reali[sz]ation))\b/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن|(?:خاضع(?:ه)?|يخضع|تخضع)(?=(?:\s+[ء-ي]+){0,3}?\s+(?:(?:لل|ل|ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?عمليه\s+(?:ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?(?:موافقه|مراجعه)\s+(?:ال)?(?:تاجر|بنك))(?![ء-ي]))|مشروط(?:ه)?|مبديي(?:ه)?|تحت\s+(?:ال)?تحصيل|غير\s+متاح(?:ه)?\s+(?:حتي|لحين|الي\s+حين|بعد))|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 const hasUnsettledCreditToken = (source) => {
     const original = normalizeCreditText(source);
     const futureArabic = /(?<![ء-ي])[وف]?س[يتنا][ء-ي]{2,}(?![ء-ي])/u.test(original);
@@ -11437,6 +11437,7 @@ exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
 exports.hasUnsettledPrincipal = hasUnsettledPrincipal;
 exports.completedDebitBesideCredit = completedDebitBesideCredit;
+exports.debitBesideRefusedCreditNote = debitBesideRefusedCreditNote;
 exports.parseSms = parseSms;
 exports.parseSmsBatch = parseSmsBatch;
 const credit_settlement_guards_1 = require("@/lib/credit-settlement-guards");
@@ -15791,6 +15792,23 @@ function completedDebitBesideCredit(message, options) {
     if (legacy && prove(legacy.debit, false))
         return legacy;
     return (0, credit_settlement_guards_1.completedDebitBesideCredit)(message, clause => prove(clause, true));
+}
+function debitBesideRefusedCreditNote(message, options) {
+    if (completedDebitBesideCredit(message, options))
+        return null;
+    const sentences = settlementSentences(message);
+    if (besideDebit(message, sentences).kind !== 'refuse')
+        return null;
+    const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0);
+    if (debits.length !== 1 || /\b(?:due|minimum|statement|outstanding)\b|مستحق|الحد\s+الادني|كشف/iu.test(debits[0].text))
+        return null;
+    const debitAmounts = creditAmounts(debits[0].text);
+    const notes = sentences.filter((s) => s !== debits[0] && s.text.replace(BALANCE_SEGMENT_RE, ' ').replace(/[^\p{L}]/gu, '') !== '');
+    if (notes.length === 0 || notes.some((s) => s.clauses.length === 0 || noteAmounts(s.text).length === 0 ||
+        creditAmounts(s.text).some((amount) => debitAmounts.includes(amount))))
+        return null;
+    const parsed = parseSms(debits[0].raw.trim(), undefined, options);
+    return parsed?.kind === 'transaction' && parsed.type === 'expense' ? parsed : null;
 }
 function parseSms(message, overrides, options) {
     if ((0, principal_posting_guards_1.hasSelectedPendingTransaction)(message))

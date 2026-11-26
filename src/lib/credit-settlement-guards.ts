@@ -29,8 +29,13 @@ const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|cha
 const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
 // This is deliberately conservative. Always inspect the normalized ORIGINAL,
 // never a merchant-masked, clause-selected or request-note-stripped derivative.
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
-const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+// #244: "subject to clearance" has Arabic forms (خاضع/يخضع "subject to" collection or verification, or to the merchant's or
+// bank's approval, never to "terms", fees or a review of the message; مشروط "conditional"; مبدئي "provisional"; "under
+// collection"; "not available until …"), and a credit can be called conditional, provisional or "the cheque is under
+// clearing" in its next sentence. Footers ("some cheques are under clearing", "conditional cashback offers", "بطلب من",
+// "لتسوية", "الخدمة غير متاحة حاليا") are not conditions on this credit.
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will|conditional(?:ly)?(?!\s+(?:cashback|offers?|rewards?|discounts?))|provisional(?:ly)?|(?:cheque|check|amount|credit|deposit|funds?)\s+(?:is|are)\s+under\s+(?:clearing|collection|reali[sz]ation))\b/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن|(?:خاضع(?:ه)?|يخضع|تخضع)(?=(?:\s+[ء-ي]+){0,3}?\s+(?:(?:لل|ل|ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?عمليه\s+(?:ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?(?:موافقه|مراجعه)\s+(?:ال)?(?:تاجر|بنك))(?![ء-ي]))|مشروط(?:ه)?|مبديي(?:ه)?|تحت\s+(?:ال)?تحصيل|غير\s+متاح(?:ه)?\s+(?:حتي|لحين|الي\s+حين|بعد))|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 export const hasUnsettledCreditToken = (source: string): boolean => {
   const original = normalizeCreditText(source);
   // Productive سـ + present-tense prefix, including conjunctions and folded
