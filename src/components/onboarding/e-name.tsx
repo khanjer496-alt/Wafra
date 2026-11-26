@@ -9,7 +9,8 @@
  * separate controls: the country decides how alert and statement dates are
  * read, the currency is the ledger's unit and is needed before the Watch step
  * can write a limit. Each "Change" opens the existing sheet (the same country
- * picker and ledger-currency sheet Settings uses).
+ * picker and ledger-currency sheet Settings uses). Until a currency is chosen
+ * the currency row suggests the chosen country's currency (the gate decides).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
@@ -121,7 +122,7 @@ export function NameStep({ nameDraft, onChangeName, onContinue, onSkip, onBack, 
   country: string | null;
   suggestedCountry: string | null;
   onCountry: (code: string) => void;
-  /** The ledger currency, or the region's suggestion until one is chosen. */
+  /** The ledger currency, or until one is chosen the chosen country's (else the region's) suggestion. */
   currency: string | null;
   onCurrency: (code: string) => void;
 }) {

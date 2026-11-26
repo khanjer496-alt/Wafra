@@ -6,17 +6,36 @@ import { Icon } from '@/components/ui/icon';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t, type StringKey } from '@/lib/i18n';
+import { formatMinorUnits, LEDGER_MONEY_SCHEMA_VERSION, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { UniversalBankEvent, UniversalField, UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 
 const moneyChoiceKey = (money: UniversalMoney): string =>
   money.currency + ':' + money.exponent + ':' + money.minorUnits;
 
-/** Decimal strings keep every minor unit, including zero/three-decimal currencies. */
+/**
+ * Decimal strings keep every minor unit, including zero/three-decimal currencies.
+ * The figure goes through the ledger rows' formatter, so it carries the same
+ * device digit grouping ("AED 12,345.67"). The alert's own currency and
+ * exponent are kept, never converted; a value that formatter cannot hold
+ * exactly (beyond a safe integer) keeps its plain digits.
+ */
 export function universalMoneyLabel(money: UniversalMoney): string {
   const negative = money.minorUnits.startsWith('-');
-  const digits = (negative ? money.minorUnits.slice(1) : money.minorUnits).padStart(money.exponent + 1, '0');
-  const number = money.exponent === 0 ? digits
-    : digits.slice(0, -money.exponent) + '.' + digits.slice(-money.exponent);
+  const unsigned = negative ? money.minorUnits.slice(1) : money.minorUnits;
+  const minor = /^\d+$/.test(unsigned) ? Number(unsigned) : NaN;
+  const exponent = money.exponent;
+  let number: string;
+  if (Number.isSafeInteger(minor) && (exponent === 0 || exponent === 2 || exponent === 3)) {
+    const spec: LedgerMoneySpec = {
+      schemaVersion: LEDGER_MONEY_SCHEMA_VERSION,
+      currency: money.currency as LedgerMoneySpec['currency'],
+      exponent,
+    };
+    number = formatMinorUnits(minor, spec, { decimals: true });
+  } else {
+    const digits = unsigned.padStart(exponent + 1, '0');
+    number = exponent === 0 ? digits : digits.slice(0, -exponent) + '.' + digits.slice(-exponent);
+  }
   return money.currency + ' ' + (negative ? '−' : '') + number;
 }
 

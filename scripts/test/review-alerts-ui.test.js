@@ -52,9 +52,15 @@ ok('review candidates infer safe defaults and still expose genuinely ambiguous a
     /!reviewItem \? <View[\s\S]{0,200}categoryRef/.test(add));
 ok('a review-only cash event defaults to the cash-withdrawal category',
   /reviewFamily === 'cash-withdrawal'[\s\S]{0,80}\? 'cash-withdrawal'/.test(add));
+// Review rows share the ledger rows' grouping (#263) through one label: an
+// integer reaches the formatter only when it is a safe integer; anything
+// larger keeps the exact digit string.
 ok('review amounts stay exact instead of crossing floating point',
-  /minorUnits\.padStart/.test(route) &&
-    !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route));
+  /return universalMoneyLabel\(item\.amount\);/.test(route) &&
+    !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route) &&
+    /Number\.isSafeInteger\(minor\)/.test(reviewFields) && /formatMinorUnits\(minor, spec/.test(reviewFields) &&
+    /unsigned\.padStart/.test(reviewFields) &&
+    !/parseFloat|parseInt/.test(reviewFields));
 // Design language E: the green band scaffold owns the safe areas; the full
 // list is still one virtualized FlatList that clears the home indicator.
 ok('review list follows the band safe-area and scalable-list conventions',

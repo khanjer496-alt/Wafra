@@ -57,12 +57,9 @@ function institutionLabel(value: string): string {
     .join(' ');
 }
 
+/** The alert's own currency and minor units, grouped like the ledger rows ("AED 12,345.67"). */
 function amountLabel(item: ReviewAlert): string {
-  const { currency, minorUnits, exponent } = item.amount;
-  if (exponent === 0) return `${currency} ${minorUnits}`;
-  const padded = minorUnits.padStart(exponent + 1, '0');
-  const split = padded.length - exponent;
-  return `${currency} ${padded.slice(0, split)}.${padded.slice(split)}`;
+  return universalMoneyLabel(item.amount);
 }
 
 function instrumentLabel(instrument: { kind: 'card' | 'account' | 'wallet'; last4: string | null } | null | undefined): string | null {

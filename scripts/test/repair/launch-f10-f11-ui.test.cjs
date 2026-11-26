@@ -80,3 +80,16 @@ test('F11 alert-review category wording remains unchanged', () => {
   assert.equal(t('reviewAlertChooseCategory', 'en'), 'Choose the category before adding this alert.');
   assert.equal(t('reviewAlertChooseCategory', 'ar'), 'اختر التصنيف قبل إضافة هذا التنبيه.');
 });
+
+test('F11 manual account copy is the manual table; the Review account field keeps its alert wording', () => {
+  const source = fs.readFileSync(path.join(root, 'src/app/add-transaction.tsx'), 'utf8');
+  assert.match(source, /const chooseAccount = chip \? copy\.manualEntryChooseAccount : tUi\('reviewAlertChooseAccount'\);/);
+  const manual = source.slice(source.indexOf('{!reviewItem ? <View testID="add-detail-chips"'));
+  assert.match(manual.slice(manual.indexOf('{accountInvalid &&')), /^\{accountInvalid && \([\s\S]{0,240}\{copy\.manualEntryChooseAccount\}/);
+  const i18n = load(path.join(root, 'src/lib/i18n.ts'));
+  const { motionAndroidCopy } = load(path.join(root, 'src/lib/motion-android-copy.ts'), { '@/lib/i18n': i18n });
+  assert.equal(motionAndroidCopy('en').manualEntryChooseAccount, 'Choose the account this transaction belongs to.');
+  assert.equal(motionAndroidCopy('ar').manualEntryChooseAccount, 'اختر الحساب الذي تنتمي إليه هذه المعاملة.');
+  assert.equal(i18n.t('reviewAlertChooseAccount', 'en'), 'Choose the account this alert belongs to.');
+  assert.equal(i18n.t('reviewAlertChooseAccount', 'ar'), 'اختر الحساب الذي ينتمي إليه هذا التنبيه.');
+});

@@ -77,6 +77,7 @@ import { iosSupportsLiveCapture } from '@/lib/ios-setup-availability';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { ledgerCurrencyForCountry } from '@/lib/country-currency';
 import { onboardingCopy } from '@/lib/onboarding-copy';
 import {
   alertsAnswerForCaptureChoice,
@@ -580,14 +581,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const ledgerCountry = state.country && state.country !== ONBOARDING_REGION_ELSEWHERE
     ? normalizeOnboardingCountry(state.country)
     : null;
-  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country) ?? ledgerCountry;
+  /** A country the person chose here (or before, in setup or Settings); the device's guess is not one. */
+  const pickedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country);
+  const selectedCountry = pickedCountry ?? ledgerCountry;
   // Reading the device Region is a native call; once per mount is enough.
   const deviceRegion = useMemo(deviceCountry, []);
   const shownCountry = selectedCountry ?? deviceRegion;
-  // The ledger's currency once it has one; until then the region's suggestion,
-  // which becomes the ledger's only when a limit is saved or it is chosen.
+  // The ledger's currency once it has one (an explicit choice, or the one a
+  // saved limit pinned); until then the currency of the country the person
+  // chose, else the region's suggestion. Neither suggestion becomes the
+  // ledger's until a limit is saved or a currency is chosen.
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
-  const shownCurrency = (previewMode ? currencyDraft : null) ?? state.ledgerMoney?.currency ?? suggestedCurrency;
+  const currencyFor = (picked: string | null): string | null =>
+    (previewMode ? currencyDraft : null) ?? state.ledgerMoney?.currency ??
+    (picked ? ledgerCurrencyForCountry(picked) : null) ?? suggestedCurrency;
+  const shownCurrency = currencyFor(pickedCountry);
   const watchMoney = state.ledgerMoney ?? (shownCurrency ? ledgerMoneySpec(shownCurrency) : null);
   /** What the person confirmed, for the example alerts (Welcome, the SMS explainer); undefined lets them use the phone's guess. */
   const confirmedCurrency = (previewMode ? currencyDraft : null) ?? state.ledgerMoney?.currency ?? undefined;
@@ -723,6 +731,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       });
     }
     if (!previewMode) setLedgerCountry(next);
+    // An unchosen currency follows the country; unsaved limits were dialled
+    // in the old currency's minor units, exactly as chooseCurrency resets them.
+    if (currencyFor(next) !== shownCurrency) {
+      setWatchDraft((draft) => draft.map((item) => ({ ...item, limitMinor: 0 })));
+    }
   };
 
   /** The ledger currency: an explicit choice, written like Settings writes it. */

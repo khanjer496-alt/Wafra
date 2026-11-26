@@ -412,13 +412,15 @@ export default function AddTransactionScreen() {
     const selected = state.accounts.find((a) => a.id === accountId) ?? null;
     const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
     const chip = variant === 'chip';
+    // The chip is a hand-entered transaction's; only a review is an alert.
+    const chooseAccount = chip ? copy.manualEntryChooseAccount : tUi('reviewAlertChooseAccount');
     return (
       <View
         ref={accountRef}
         collapsable={false}
         accessibilityLabel={tUi('account')}
         accessibilityLabelledBy={accountLabelId}
-        accessibilityHint={tUi('reviewAlertChooseAccount')}
+        accessibilityHint={chooseAccount}
         {...(Platform.OS === 'web' ? accountWebAriaProps : {})}
         style={chip ? styles.chipGroup : styles.fieldBlock}>
         <ThemedText type={chip ? 'meta' : 'small'} themeColor="textSecondary" nativeID={accountLabelId}>
@@ -430,8 +432,8 @@ export default function AddTransactionScreen() {
             accessibilityRole="button"
             accessibilityLabel={selected
               ? chip ? copy.accountChipSpoken(accountDisplayName(selected)) : `${tUi('account')}: ${accountDisplayName(selected)}`
-              : tUi('reviewAlertChooseAccount')}
-            accessibilityHint={tUi('reviewAlertChooseAccount')}
+              : chooseAccount}
+            accessibilityHint={chooseAccount}
             onPress={() => setAccountPickerOpen(true)}
             style={({ pressed }) => [
               chip ? styles.chip : styles.accountTrigger,
@@ -448,7 +450,7 @@ export default function AddTransactionScreen() {
                 {accountDisplayName(selected)}
               </ThemedText>
             </> : <ThemedText type="small" themeColor="textSecondary" style={chip ? styles.chipText : styles.accountTriggerName}>
-              {chip ? copy.accountChoose : tUi('reviewAlertChooseAccount')}
+              {chip ? copy.accountChoose : chooseAccount}
             </ThemedText>}
             <Icon name="chevron-down" size={16} color={theme.textSecondary} />
           </Pressable>
@@ -1236,7 +1238,7 @@ export default function AddTransactionScreen() {
             nativeID={accountErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-            {tUi('reviewAlertChooseAccount')}
+            {copy.manualEntryChooseAccount}
           </ThemedText>
         )}
         {state.accounts.length === 0 && (

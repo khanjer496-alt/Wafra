@@ -251,6 +251,13 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/country') {
         return require('../build/country.js');
       }
+      // Onboarding's country-to-currency suggestion is pure data checked
+      // against the shipping ISO metadata, so harnesses run the real table.
+      if (name === '@/lib/country-currency') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/country-currency.ts'), {
+          '@/lib/ledger-money': require('../build/ledger-money.js'),
+        });
+      }
       // BNPL provider identity is a pure sender/package registry consulted by
       // the parser, the launch session and the capture scanner. Harnesses that
       // stub the parser still get the real registry, never a drifting copy.

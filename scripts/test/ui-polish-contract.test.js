@@ -547,7 +547,10 @@ assert.match(task8Review, /const listBottom = useBandBottomInset\(\)/);
 assert.match(task8Review, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?scroll=\{stepMode\}[\s\S]*?nav=\{\{ back: true,/);
 assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}[\s\S]*?scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
 assert.match(task8Review, /item\.expiresAt > now/);
-assert.match(task8Review, /minorUnits\.padStart\(exponent \+ 1, '0'\)/);
+// Exact minor units, grouped like the ledger rows (#263): the row delegates to
+// the one Review label, which keeps the exact digit string beyond a safe integer.
+assert.match(task8Review, /return universalMoneyLabel\(item\.amount\);/);
+assert.match(read('src/components/universal-review-fields.tsx'), /unsigned\.padStart\(exponent \+ 1, '0'\)/);
 assert.match(task8Review, /pathname: '\/add-transaction', params: \{ reviewId: item\.id \}/);
 assert.match(task8Review, /dismissReviewAlert\(item\.id, 'dismissed'\)/);
 assert.match(task8Review, /<ConfirmSheet[\s\S]*?destructive/);
