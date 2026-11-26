@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 354ea7aaf9bff74ebf174c2cf8b41deddfc1add74e489ee6698104c5ebccb949
+// Generated from normal shipping TypeScript. Source SHA-256: 7132e38b3fba0f382829f2d0c3403656c2b8337686ff8c5df51e7b0c76ecd743
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6258,6 +6258,7 @@ const S = {
     noScreenLockBody: { en: 'Set up a fingerprint, face unlock, or PIN in your phone settings first.', ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN في إعدادات هاتفك أولاً.' },
     noScreenLockBodyIos: { en: 'Turn on a passcode in Settings first. Then Wafra can use Face ID, Touch ID, or the passcode.', ar: 'شغّل رمز الدخول في الإعدادات أولاً، ثم يمكن لوفرة استخدام Face ID أو Touch ID أو رمز الدخول.' },
     confirmAppLock: { en: 'Confirm to enable app lock', ar: 'أكّد لتفعيل قفل التطبيق' },
+    confirmDisableAppLock: { en: 'Confirm to turn off app lock', ar: 'أكّد لإيقاف قفل التطبيق' },
     smsRevokeHint: { en: 'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.', ar: 'يُلغى هذا الإذن من إعدادات أندرويد فقط: الإعدادات ← التطبيقات ← وفرة ← الأذونات ← الرسائل.' },
     notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
     notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },

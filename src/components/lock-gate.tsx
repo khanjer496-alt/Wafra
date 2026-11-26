@@ -163,6 +163,10 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     }
     const sub = AppState.addEventListener('change', (next) => {
       if (authenticatingRef.current) return;
+      // Settings' own owner prompt (turning App Lock off) is the owner
+      // answering under the sheet, not leaving. Leaving the app ('background')
+      // during it still counts.
+      if (next === 'inactive' && appLockSession.prompting()) return;
       if (next === 'background' || next === 'inactive') {
         appLockSession.setLeftAt(appLockSession.leftAt() || Date.now());
         return;
