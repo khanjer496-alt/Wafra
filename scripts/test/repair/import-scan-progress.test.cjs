@@ -54,7 +54,7 @@ reactNative.Platform.OS = 'android';
 const markets = require(path.join(build, 'markets.js'));
 markets.setLedgerCurrency(null);
 markets.setActiveMarket('AE');
-const { scanInbox, countInboxMessages } = require(path.join(build, 'auto-import.js'));
+const { scanInbox, countInboxMessages, requestSmsPermission } = require(path.join(build, 'auto-import.js'));
 
 test('a watched scan reports promotions skipped, the oldest page date and the rows just found', async () => {
   const progress = [];
@@ -82,7 +82,14 @@ test('counting promotions changes nothing that is imported or reviewed', async (
   assert.equal(result.declined.length, 0);
 });
 
-test('the native inbox count is used only when it is a real answer', async () => {
+test('the native inbox count is used only when consented and it is a real answer', async () => {
+  reactNative.PermissionsAndroid.check = async () => true;
+  const before = countCalls.length;
+  assert.equal(await countInboxMessages(0), null, 'old OS grant is not disclosure consent');
+  assert.equal(countCalls.length, before);
+  const stop = require(path.join(build, 'consent-prompt.js')).registerConsentPresenter(async () => true);
+  assert.equal(await requestSmsPermission(), true);
+  stop();
   countAnswer = () => 4;
   assert.equal(await countInboxMessages(0), 4);
   assert.deepEqual(countCalls.at(-1), [0, 0]);

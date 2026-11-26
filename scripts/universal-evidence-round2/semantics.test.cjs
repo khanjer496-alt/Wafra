@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const load = require('../universal-test/load-ts.cjs').createLoader();
+const { assertCreditRetained } = require('../universal-test/credit-retention.cjs');
 const inspect = load('@/lib/universal-parser').inspectUniversalBankEvent;
 const categorize = load('@/lib/universal-categorization').categorizeMerchant;
 const corpus = require('../universal-evidence/independent-cases.json');
@@ -64,8 +65,11 @@ for (const body of [
   'Purchase USD 12.50 at TRANSFER REQUEST RECEIVED CAFE.',
   'Paiement effectué EUR 12,50 chez PAYMENT REQUEST ACCEPTED CAFE.',
   'Refund received USD 12.50 from PAYMENT REQUEST APPROVED SHOP.',
-]) test('request wording within a seller does not veto a posting: ' + body, () => {
-  assert.equal(inspect(body).status, 'posted');
+]) test('seller request wording preserves a debit or retains a credit for Review: ' + body, () => {
+  if (body.startsWith('Refund')) {
+    assert.equal(inspect(body).status, 'informational', 'original request token also governs company fields');
+    assertCreditRetained(load, body, { minor: 1250, currency: 'USD', country: 'US', sender: 'Chase', reviewOnly: true });
+  } else assert.equal(inspect(body).status, 'posted');
 });
 for (const body of [
   'Remboursement reçu de CAFE : EUR 12,50, débité sur votre carte.',

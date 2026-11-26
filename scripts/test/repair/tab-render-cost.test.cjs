@@ -182,24 +182,31 @@ test('Android freezes inactive tab rendering while capture remains outside the n
   const calls = [];
   const Component = load(path.join(root, 'src/components/app-tabs-layout.tsx'), {
     react: {}, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'expo-router': { Tabs },
+    '@react-navigation/native': { useIsFocused: () => true, useNavigation: () => ({ addListener: () => () => {} }) },
+    '@/components/freeze-when-covered': { FreezeWhenCovered: 'FreezeWhenCovered' },
+    '@/lib/covered-screen-freeze': require('./load-typescript.cjs')(path.join(root, 'src/lib/covered-screen-freeze.ts'), {}),
     'react-native': { Platform: { get OS() { return platform; } } },
     '@/components/tab-bar': { WafraTabBar: 'TabBar' },
     '@/components/ui/tab-bar-metrics': { TabBarMetricsProvider: 'Metrics' },
     '@/hooks/use-auto-import': { useAutoImport: (...args) => calls.push(['auto', ...args]) },
     '@/hooks/use-history-import': { useHistoryImport: () => calls.push(['history']) },
     '@/hooks/use-shared-alert-formats': { useSharedAlertFormats: () => calls.push(['shared-formats']) },
+    '@/hooks/use-widget-snapshot-sync': { useWidgetSnapshotSync: () => calls.push(['widgets']) },
   }).default;
   const tree = Component();
-  const [owner, navigator] = tree.props.children;
+  // The navigator now sits inside FreezeWhenCovered (covered-screen-freeze.test.cjs pins that);
+  // CaptureOwner stays its sibling, outside it.
+  const [owner, freeze] = tree.props.children;
+  const navigator = freeze.props.children;
   assert.equal(navigator.type, Tabs);
   assert.equal(navigator.props.screenOptions.freezeOnBlur, true);
   assert.notEqual(navigator.props.screenOptions.lazy, false);
   assert.equal(navigator.props.detachInactiveScreens, undefined);
   assert.equal(navigator.props.children.length, 4);
   owner.type();
-  assert.deepEqual(calls, [['history'], ['auto', true, false], ['shared-formats']], 'capture must not be inside the frozen tab');
+  assert.deepEqual(calls, [['history'], ['auto', true, false], ['shared-formats'], ['widgets']], 'capture and widgets must not be inside the frozen tab');
   platform = 'ios';
-  assert.notEqual(Component().props.children[1].props.screenOptions.freezeOnBlur, true);
+  assert.notEqual(Component().props.children[1].props.children.props.screenOptions.freezeOnBlur, true);
   platform = 'web';
-  assert.notEqual(Component().props.children[1].props.screenOptions.freezeOnBlur, true);
+  assert.notEqual(Component().props.children[1].props.children.props.screenOptions.freezeOnBlur, true);
 });

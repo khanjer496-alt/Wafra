@@ -28,7 +28,7 @@ import { buildWidgetSnapshot, WIDGET_UPCOMING_DAYS, type WidgetSnapshot, type Wi
  * Today, the week and budget pace for the live month, whatever period Home is
  * showing: widgets always describe the current month.
  */
-export function widgetMonthToday(input: {
+function widgetMonthToday(input: {
   transactions: readonly Transaction[];
   budgets: readonly Budget[];
   now: Date;
@@ -59,7 +59,7 @@ export function widgetMonthToday(input: {
  * with each category named in the widget's language. Limits are left out:
  * the widget draws shares of what was spent.
  */
-export function widgetMonthSpending(input: {
+function widgetMonthSpending(input: {
   state: Pick<AppState, 'transactions' | 'budgets' | 'customCategories'>;
   now: Date;
   liveAccounts: ReadonlySet<string>;
@@ -154,7 +154,7 @@ export function widgetSnapshotForLedger(input: WidgetLedgerInput, detectedSubscr
   return buildWidgetSnapshot({
     today, currency: input.moneySpec.currency, exponent: input.moneySpec.exponent, now,
     upcoming: widgetUpcomingForLedger(state, now, detectedSubscriptions),
-    hideAmounts: false, language: input.language,
+    hideAmounts: state.appLock === true && state.hideWidgetAmountsWhenLocked !== false, language: input.language,
     spending: widgetMonthSpending({ state, now, liveAccounts, internalIds, language: input.language }),
   });
 }

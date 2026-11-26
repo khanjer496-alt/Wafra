@@ -232,10 +232,9 @@ curl --fail --show-error https://<production-relay>/v1/health
   copyright, primary/secondary category, age rating, review contact, review
   notes, and version release notes. `docs/store-listing.md` is not yet a full
   App Store metadata set.
-- [ ] Capture English and Arabic iPhone screenshots at an Apple-accepted
-  device size. The existing 1080×2160 files are not accepted iPhone screenshot
-  dimensions. Apple currently accepts, among other 6.9-inch sizes,
-  1260×2736, 1290×2796, or 1320×2868 portrait images. Recheck the
+- [ ] Capture the approved eight en-US iPhone screenshots from cleared candidate
+  195 at 1206×2622 on iPhone 16 Pro (Dynamic Island medium). Additional
+  localizations are optional for this launch. Recheck the
   [current screenshot specification](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/)
   at upload time and ensure images have no alpha channel.
 - [ ] Reconcile every listing claim against physical proof. In particular,

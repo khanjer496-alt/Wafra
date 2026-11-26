@@ -15,13 +15,13 @@ export const canEnrichPrivateFormatReview = (event: UniversalBankEvent): boolean
   !['failed', 'future', 'informational'].includes(event.status) &&
   (event.direction === 'unknown' || event.merchant.evidence === 'missing' || event.transactionDate.evidence === 'missing');
 
-export interface PrivateAlertReviewMatch {
+interface PrivateAlertReviewMatch {
   kind: 'prefill';
   fields: LearnedFields;
   /** Opaque matching metadata remains ephemeral; never put it in a Review event. */
   templateId: string;
 }
-export interface PrivateAlertReviewContext {
+interface PrivateAlertReviewContext {
   country?: string | null;
   dateOrder?: UniversalParseContext['dateOrder'];
   routedMarket?: string | null;

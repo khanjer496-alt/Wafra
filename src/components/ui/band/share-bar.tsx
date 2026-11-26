@@ -10,7 +10,7 @@ import { bandCopy } from '@/lib/band-copy';
 import { tapped } from '@/lib/haptics';
 import { blendHex } from '@/lib/spending-calendar-tiles';
 
-export interface ShareSegment {
+interface ShareSegment {
   key: string;
   label: string;
   /** Any non-negative magnitude (minor units are fine). */
@@ -66,7 +66,7 @@ export function sharePercents(values: readonly number[]): number[] {
 }
 
 /** A coin without its own colour: the band's text colour laid over the band at its rank's strength. */
-export function coinFill(palette: BandPalette, index: number): string {
+function coinFill(palette: BandPalette, index: number): string {
   return blendHex(palette.onBand, palette.band, RANK_OPACITY[index] ?? REST_OPACITY);
 }
 

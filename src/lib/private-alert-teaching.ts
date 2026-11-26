@@ -26,7 +26,7 @@ export function privateAlertSourceDateContext(source: string, sender: string | n
   return { country, dateOrder: fallback.dateOrder !== undefined ? fallback.dateOrder : dateOrderForCountry(country), issuerConflict: false };
 }
 
-export interface PrivateTeachingChoice {
+interface PrivateTeachingChoice {
   id: string;
   role: UniversalMoneyRole;
   money: UniversalMoney | null;

@@ -16,7 +16,7 @@ export interface CoinCue {
 }
 
 /** Only the first rows on screen travel when the list appears, not every row of a long history. */
-export const INTRO_ROWS = 3;
+const INTRO_ROWS = 3;
 /** The first coin waits for the screen's own slide-in to finish before it sets off. */
 export const INTRO_START = 360;
 /** The first rows set off this far apart. */
@@ -25,7 +25,7 @@ export const INTRO_ROW_GAP = 120;
 export const CUE_FRESH_MS = 1200;
 
 /** The ledger rows behind one route: both legs of a linked pair, else the one row. */
-export function routeLegIds(item: Pick<TransferListItem, 'key' | 'transactionId' | 'linked'>): string[] {
+function routeLegIds(item: Pick<TransferListItem, 'key' | 'transactionId' | 'linked'>): string[] {
   return item.linked ? item.key.split('|') : [item.transactionId];
 }
 

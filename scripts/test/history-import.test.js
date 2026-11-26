@@ -17,7 +17,6 @@ const builtPath = path.join(__dirname, 'build/history-import.js');
 const history = fs.existsSync(builtPath) ? require(builtPath) : {};
 const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
 const autoImportSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-auto-import.ts'), 'utf8');
-const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8');
 const tabBarSource = fs.readFileSync(path.join(__dirname, '../../src/components/tab-bar.tsx'), 'utf8');
@@ -58,12 +57,38 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       autoImportSource,
     ),
   );
+  // Exercise the actual Home surface and retry action. A local variable rename
+  // (history -> importHistory) must not substitute for behavioural evidence.
+  const { harness, walk, text } = require('./repair/journal-harness.cjs');
+  const missingHistoryCases = [];
+  for (const androidCaptureSources of [undefined, { sms: true, notifications: true }]) {
+    for (const status of ['running', 'paused', 'failed']) {
+      const now = Date.now();
+      const h = harness({
+        androidCaptureSources,
+        trialStartTs: now - 8 * 24 * 60 * 60 * 1000,
+        history: { status, scanned: 1234, found: 57, cursor: null, startedAt: now, updatedAt: now, error: null },
+      });
+      const card = walk(h.tree).find(node => node.props?.testID === 'history-reading-status');
+      const cardText = text(card);
+      const buttons = walk(card).filter(node => node.props?.accessibilityRole === 'button');
+      let valid = !!card && cardText.includes((1234).toLocaleString()) && cardText.includes('57');
+      if (status === 'running') {
+        valid &&= buttons.length === 0 && walk(card).some(node => node.type === 'ActivityIndicator');
+      } else {
+        valid &&= buttons.length === 1 && typeof buttons[0].props.onPress === 'function';
+        if (valid) {
+          await buttons[0].props.onPress();
+          valid &&= h.events.filter(event => event[0] === 'resume').length === 1;
+        }
+      }
+      if (!valid) missingHistoryCases.push(`${androidCaptureSources ? 'SMS enabled' : 'legacy'}:${status}`);
+    }
+  }
   ok(
     'Home exposes live, saved, and failed history progress with retry',
-    /HistoryImportNotice/.test(homeSource) &&
-      /state\.historyImport/.test(homeSource) &&
-      /beginHistoryImport/.test(homeSource) &&
-      /accessibilityRole="progressbar"/.test(homeSource),
+    missingHistoryCases.length === 0,
+    missingHistoryCases.join(', '),
   );
   ok(
     'Settings exposes the same durable history state and retry control',

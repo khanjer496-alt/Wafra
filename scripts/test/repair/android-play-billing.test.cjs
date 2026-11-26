@@ -56,3 +56,74 @@ test('pending checkout remains distinguishable from owned access on a successful
     status: 'inactive', activeProductIds: [], pendingProductIds: ['wafra_pro_yearly'], responseCode: 0,
   }) })(), { status: 'inactive', activeProductIds: [], pendingProductIds: ['wafra_pro_yearly'], responseCode: 0 });
 });
+
+
+test('ack recovery retries billing errors with bounded backoff and fresh native queries', async () => {
+  const waits = []; let calls = 0;
+  const billing = load(path.join(root, 'src/lib/android-play-billing.ts'), {
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      querySubscriptions: async () => unknown,
+      acknowledgeSubscriptions: async () => {
+        calls++;
+        if (calls === 1) throw Error('synthetic billing unavailable');
+        return calls === 2 ? unknown : { status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0 };
+      },
+    }) }, '@/lib/purchases': products,
+  }, { setTimeout: (callback, delay) => { waits.push(delay); callback(); } });
+  await billing.recoverAndroidPlayAcknowledgements(() => true);
+  assert.equal(calls, 3); assert.deepEqual(waits, [1000, 2000]);
+});
+
+test('ack recovery is bounded, single flight, optional on old binaries and stops after local revocation', async () => {
+  let calls = 0; let allowed = true; const waits = [];
+  const billing = load(path.join(root, 'src/lib/android-play-billing.ts'), {
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      querySubscriptions: async () => unknown,
+      acknowledgeSubscriptions: async () => { calls++; return unknown; },
+    }) }, '@/lib/purchases': products,
+  }, { setTimeout: (callback, delay) => { waits.push(delay); allowed = false; callback(); } });
+  await Promise.all([billing.recoverAndroidPlayAcknowledgements(() => allowed), billing.recoverAndroidPlayAcknowledgements(() => allowed)]);
+  assert.equal(calls, 1); assert.deepEqual(waits, [1000]);
+  const old = load(path.join(root, 'src/lib/android-play-billing.ts'), {
+    'expo-modules-core': { requireOptionalNativeModule: () => ({ querySubscriptions: async () => unknown }) }, '@/lib/purchases': products,
+  });
+  await old.recoverAndroidPlayAcknowledgements(() => true);
+});
+
+test('persistent ACK errors stop after three attempts; successful no-op never retries', async () => {
+  for (const success of [false, true]) {
+    let calls = 0; const waits = [];
+    const billing = load(path.join(root, 'src/lib/android-play-billing.ts'), {
+      'expo-modules-core': { requireOptionalNativeModule: () => ({
+        querySubscriptions: async () => unknown,
+        acknowledgeSubscriptions: async () => { calls++; return success ? { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 } : unknown; },
+      }) }, '@/lib/purchases': products,
+    }, { setTimeout: (callback, delay) => { waits.push(delay); callback(); } });
+    await billing.recoverAndroidPlayAcknowledgements(() => true);
+    assert.equal(calls, success ? 1 : 3); assert.deepEqual(waits, success ? [] : [1000, 2000]);
+  }
+});
+
+
+test('query carries only a safe acknowledgement-needed boolean when native provides it', async () => {
+  const result = await reader({ querySubscriptions: async () => ({
+    status: 'active', activeProductIds: ['wafra_pro_weekly'], pendingProductIds: [], responseCode: 0,
+    needsAcknowledgement: false,
+  }) })();
+  assert.equal(result.needsAcknowledgement, false);
+});
+
+test('a new billing session starts its own recovery instead of inheriting a stale backoff', async () => {
+  let allowedA = true; let releaseDelay; let calls = 0;
+  const billing = load(path.join(root, 'src/lib/android-play-billing.ts'), {
+    'expo-modules-core': { requireOptionalNativeModule: () => ({
+      querySubscriptions: async () => unknown,
+      acknowledgeSubscriptions: async () => { calls++; return calls === 1 ? unknown : { status: 'inactive', activeProductIds: [], pendingProductIds: [], responseCode: 0 }; },
+    }) }, '@/lib/purchases': products,
+  }, { setTimeout: callback => { releaseDelay = callback; } });
+  const a = billing.recoverAndroidPlayAcknowledgements(() => allowedA, {});
+  await Promise.resolve(); await Promise.resolve();
+  allowedA = false;
+  await billing.recoverAndroidPlayAcknowledgements(() => true, {});
+  assert.equal(calls, 2); releaseDelay(); await a;
+});

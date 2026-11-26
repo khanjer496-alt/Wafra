@@ -40,7 +40,8 @@ import { homeCopy } from '@/lib/home-copy';
 import type { HeroMonthSeries } from '@/lib/home-hero';
 import { isRTL } from '@/lib/i18n';
 import type { MonthSummary } from '@/lib/insights';
-import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { spendingCategoryRows, spendingShare, spendingShareLabel } from '@/lib/reference-presentation';
 import type { Budget } from '@/lib/types';
 
@@ -380,7 +381,7 @@ function HeroCategories({ summary, budgets, band, moneySpec, label, empty }: {
   }
   return <ShareBar testID="home-hero-share-bar" palette={band} label={label}
     formatShare={(value) => spendingShareLabel(spendingShare(value, summary.expenseFils), language)}
-    formatValue={(fils) => `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}`}
+    formatValue={(fils) => formatMoneyText(Math.round(fils), moneySpec)}
     restColor={CATEGORY_REST} segments={rows.map((row) => ({
       key: row.category, label: categoryLabel(row.category, language), value: row.spentFils, color: colors.get(row.category),
     }))} />;

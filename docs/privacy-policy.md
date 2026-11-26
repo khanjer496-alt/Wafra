@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 7 November 2026_
+_Last updated: 26 November 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasida Apps LLC** ("Wafra", "we", "us").
@@ -16,13 +16,13 @@ Wafra ("the app") is a personal money manager for Android and iOS published by
   queue holds each one only until Wafra can run the same financial parser used
   by the Android app. Wafra keeps only structured results from supported bank
   alerts and discards everything else on the iPhone; processed raw text and
-  sender are deleted after durable local processing. Pending records expire
-  after 30 days. This local path uploads no Message content. Optional bank-app
+  sender are deleted after durable local processing. Pending records become eligible for deletion
+  after 30 days and are removed the next time the capture bridge runs. This local path uploads no Message content. Optional bank-app
   notification (iOS 27) and Apple Pay automations use the same protected queue.
 - **Privacy is built in:** local capture and encrypted native ledger storage
   do not require a separate mode. A local-only preference saved in an older
   version remains in effect until explicitly reviewed in Settings → Privacy
-  and data; it pauses cloud imports, reference FX and online logos and removes
+  and data; it pauses cloud imports and reference FX and removes
   retained diagnostic message text. Local capture and history import still work.
 - **iPhone history import:** on iOS 26 or later, a user-run Apple Shortcut can
   check up to 1,500 newest and 1,500 oldest retained Messages. It continues only
@@ -32,14 +32,17 @@ Wafra ("the app") is a personal money manager for Android and iOS published by
   also has a 24 MiB safety limit. Nothing from this history import is sent to
   Wafra's relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
-  app storage on the device. Wafra has no ads. When enabled, Superwall processes
-  paywall and onboarding events. Google's ML Kit SDK can collect diagnostic and
-  usage data. See the SDK disclosures below.
+  app storage on the device. Wafra has no ads and does not track you. Superwall
+  provides purchase and entitlement services; optional in-app event collection
+  is disabled, but Superwall still receives device details, usage counts and
+  purchase history. Expo Updates delivers app updates and receives a random
+  install ID and, after a crash, the crash message. Google's ML Kit SDK can
+  collect diagnostic and usage data. See the SDK disclosures below.
 - **Manual entry is always available:** turn off Android SMS tracking and
   bank-app notification access, or leave iPhone automatic capture unconfigured.
 - Wafra cannot sign in to a bank, reply to a message, approve a transaction or
   move money. Automatic capture may hold raw Message content in the protected
-  local queue described below until it is processed (at most 30 days); only
+  local queue described below until processing or expiry cleanup; only
   supported structured financial activity can enter the ledger, and this local capture path does not upload raw message bodies. Separate optional
   reporting and bank-format sharing are described below.
 
@@ -244,6 +247,11 @@ wall-clock time. Messages already deleted by the user, removed by Messages
 retention settings or unavailable to Apple's search cannot be recovered or
 imported.
 
+Native capture expiry is checked when the capture bridge stages, reads or
+reports queue status. An expired record is removed on that access; iOS does
+not guarantee deletion exactly at the expiry time. A phone that does not run
+the bridge can retain expired protected files until its next access.
+
 ## What is stored on the device
 
 Transactions, accounts, cards, budgets, bills, goals and settings are stored in
@@ -265,24 +273,24 @@ the enrolled face, fingerprint or device credential. The operating system
 performs that check and returns success or failure. Wafra does not receive or
 store biometric templates.
 
+With App Lock on, Wafra covers app content in the iOS app switcher. On Android,
+it protects recent-apps previews and also blocks screenshots and screen recordings.
+Home Screen widget amounts are hidden by default while App Lock is on, even
+when Wafra is unlocked; you can change this in Settings. Names, counts and dates
+can remain visible. The operating system controls when an existing widget image
+refreshes.
+
 ## Other network activity
 
-- **Android logo artwork:** On Android, Wafra displays merchant and bank artwork using bundled images or local fallback icons and initials. The updated Android release does not send merchant names, bank names, or their domains to Brandfetch for logo lookups or artwork downloads. Older test builds and other platforms can use the existing logo service described in the policy.
-
-- **Automatic logos:** 112 merchant logos are bundled with the app and supported
-  launch-market banks are matched locally to fixed bank domains. For other
-  merchant or bank identities, when online features are enabled, Wafra may use
-  Brandfetch's Brand Search API. Merchant lookup first removes payment prefixes,
-  amounts, account/card tails, URLs and common terminal/location suffixes. Bank
-  lookup uses the institution name and rejects labels containing account/card
-  tails. Wafra accepts only a high-confidence name match and then loads artwork
-  from Brandfetch's image CDN. Brandfetch therefore receives the cleaned merchant
-  or institution name for those searches, the requested brand domain and the
-  device's network address. Wafra does not send the transaction amount,
-  account/card number or bank Message text as part of logo lookup. Searches and
-  misses are cached to reduce repeated requests. Older local-only opt-outs block
-  both name searches and image requests. Logo caches are removed by Erase all
-  data; image bitmap caching remains managed by the platform image library.
+- **Merchant and bank logos:** this version ships no third-party merchant or
+  bank artwork and makes no online logo requests on iPhone, Android or the
+  widgets. Transactions and accounts show a letter or a generic icon drawn on
+  the device, so no merchant or bank name is sent anywhere to find a logo.
+  Earlier builds could look up logos online through Brandfetch after an
+  opt-in; this version has no such setting, and a saved opt-in from an earlier
+  build cannot turn lookups back on. **Erase all data** removes any logo cache
+  an earlier build left. Restoring a backup keeps this device's widget-amount
+  privacy choice; the file cannot change it.
 
 - **Exchange rates for foreign-currency spending:** when a purchase is in a
   currency other than the ledger's (travel, online shopping) and the bank alert
@@ -314,11 +322,16 @@ store biometric templates.
   Wafra refuses layouts with digits, addresses, links or unusual words that may
   identify someone. This screening cannot recognize every possible name.
   The relay only publishes a layout after at least three different paired
-  vaults send an identical shape. Unpublished wording expires after 30 days.
-  An iPhone can use its existing capture pairing. Other phones create an
-  anonymous pairing when they first share. The relay sees the network address
-  and counts one vote per vault. **Erase all data** deletes the pairing.
-  Wording already sent cannot be withdrawn individually. Public layouts may
+  vaults send an identical shape. Shared wording and pseudonymous votes are
+  retained until removed. Pending items older than 30 days are currently
+  removed only when a later submission triggers cleanup; there is no scheduled
+  purge or guaranteed 30-day deletion. Published and blocked wording and their
+  votes have no automatic expiry.
+  An iPhone can use its existing capture pairing. Other phones create a
+  pseudonymous pairing when they first share. The relay sees the network address
+  and counts one vote per vault. **Erase all data** deletes the pairing, not
+  wording or votes already contributed. Wording already sent cannot be
+  withdrawn individually. Public layouts may
   be downloaded at most once a day, independently of the sharing preference,
   and can be cleared in Settings. Matching runs on the phone and can suggest
   fields for you to confirm in Review. Private Mode prevents both contributions
@@ -355,29 +368,58 @@ store biometric templates.
 
 - **Complimentary access codes:** When you enter a complimentary access code, Wafra sends the code over HTTPS to its dedicated access service on Cloudflare to verify access to Pro. The app stores the code in Android secure storage and checks it again on app use while enrolled. The service stores a hash of the publisher-issued code and returns a short-lived entitlement. It receives no ledger, SMS, transaction, account, or device identifiers from the app. Cloudflare handles the connection, including the network address, to deliver the service. Private Mode pauses verification. Removing the code or erasing the app’s data clears the local credential. No account or purchase is created.
 
-- **Purchases and paywalls:** when store billing is configured, Apple or Google
-  processes payment and Superwall provides paywall/onboarding presentation,
-  subscription entitlement state and related product-flow analytics. Wafra may
-  send language, market and non-financial onboarding choices for targeting, but
-  does not send bank messages, ledger transactions, balances, bank-transaction
-  amounts, account/card identifiers or the locally stored first name to
-  Superwall. When the saved local-only preference is active, Wafra disables
-  optional Superwall event tracking and withholds those targeting attributes.
-  For Wafra Pro, the configured Google Play integration supplies purchase,
-  renewal, cancellation and refund information to Superwall to maintain
-  subscription entitlement records and billing analytics. This store reporting
-  continues independently of optional in-app Superwall event tracking.
-- **Forwarded bank email:** if the user creates a private forwarding address,
-  the relay parses the forwarded MIME, text, HTML and supported PDF, CSV, or TSV attachments
-  in memory. Raw email and attachments are not stored. Only structured rows,
-  sealed independently to the user's devices, can enter the delivery queue.
-- **PDF statement import:** a user-selected PDF of up to 5 MiB and 100 pages is
-  sent to the relay. PDF bytes and extracted text are discarded after parsing;
-  only conservative, structured debit or credit rows are sealed and queued.
-- **CSV or TSV statement import:** a user-selected UTF-8 export of up to 1 MiB
-  and 200 rows is sent to the relay. The bytes are discarded after parsing;
-  only rows with supported named fields and explicit debit or credit direction
-  are sealed and queued. Rejected-row counts contain no statement text.
+- **Purchases and paywalls (Superwall):** on iPhone and Android, Apple or
+  Google processes payment and Superwall provides products, checkout, restore
+  and subscription entitlement state. Wafra configures Superwall once when the
+  app starts, with optional SDK event collection and external data collection
+  off and a locale made of the app's display language (English or Arabic) and,
+  when the device reports one, its region, so Superwall content uses the right
+  language and region. Wafra sets no user attributes and does not send
+  market, onboarding, capture-choice or free-capture day-count targeting
+  attributes. Turning events off does not stop the SDK's own requests.
+  Superwall receives SDK-generated user and device identifiers, including an
+  install-persistent alias ID and the vendor identifier (IDFV on iPhone);
+  purchase history, meaning store transactions, Apple's app transaction ID and
+  active entitlements; device context such as device model, operating-system
+  version, network type, low-power mode, light or dark appearance, SDK version
+  and locale; usage counters such as the install date, days since install,
+  paywall views and whether this is the first app open; and the network
+  address, from which its service can derive an approximate location (country,
+  region, city and time zone). Wafra uses this for subscriptions and
+  entitlements (App Functionality), and Superwall uses it for analytics. It is
+  not used for tracking or advertising: Wafra has no ads, no advertising
+  identifier and no App Tracking Transparency prompt. Wafra sends no bank
+  messages, ledger rows, balances, bank-transaction amounts, account/card
+  identifiers or locally stored first name to Superwall. Store purchase,
+  renewal, cancellation and refund reporting can continue independently of
+  optional in-app event collection so entitlements remain accurate.
+- **App updates (Expo Updates):** when the app starts, it checks Expo's update
+  service for a newer version of Wafra's app code and downloads it if one is
+  available. Each check carries a random ID created for this installation
+  (`EAS-Client-ID`) and the app's platform and version details. If the app
+  stopped because of a fatal error, the next check also sends that error
+  message (up to 1,024 characters). This is used only to deliver working app
+  updates (App Functionality). It carries no ledger, bank-message, account or
+  purchase data. Wafra has no separate crash-reporting SDK.
+- **Relay wake-ups (iPhone):** on an iPhone paired with Wafra's relay (for
+  example by statement import, trusted devices or format sharing) that allows
+  notifications, Wafra obtains a push token from Expo's push service and
+  registers it with the relay. The relay stores it encrypted and sends pushes
+  through Expo's push service, for example to wake the app when sealed rows
+  are waiting. A registration the app does not refresh expires after 180 days.
+- **Forwarded bank email:** not available in this version; the app does not
+  create a forwarding address, so no bank email is forwarded to or processed by the relay.
+- **Statement import:** a statement file you pick is sent to the relay to be
+  read: PDF (up to 5 MiB and 100 pages), CSV or TSV (UTF-8, up to 1 MiB),
+  Excel XLSX, OFX or QFX, QIF, ISO 20022 camt XML or MT940 (each up to 2 MiB).
+  At most 200 transaction rows are accepted from one file. The file's bytes
+  and any extracted text are discarded after parsing; only conservative,
+  structured debit or credit rows with an explicit direction are sealed and
+  queued. Rejected-row counts contain no statement text. If a PDF is password
+  protected and you type its password, the password is sent with that one
+  upload only so the relay can open the file. The app does not save it, and
+  the relay uses it only to open that file and does not store it. Statement
+  import is user-initiated and paused by a saved local-only preference.
 - **Trusted devices and family:** an owner may invite up to eight devices to
   receive future captures. Each device has its own public key and credentials;
   the relay stores device labels and roles but cannot decrypt sealed rows.
@@ -387,21 +429,21 @@ store biometric templates.
   to send it. The resulting file is controlled by the user.
 - **Feedback and parser research:** if the user deliberately sends an ordinary
   report in Wafra, the exact redacted report is shown before confirmation. It
-  is stored in Cloudflare D1 for at most 14 days and can be read by Wafra
-  maintainers; ordinary feedback is not sent to third-party AI. Internal test
+  is stored in Cloudflare D1 with a 14-day expiry and can be read by Wafra
+  maintainers; expired reports are removed by the next scheduled cleanup; ordinary feedback is not sent to third-party AI. Internal test
   builds also offer a separate parser-research tool. It keeps only likely
   financial-alert templates, masks every digit, removes timestamps, masks
   recipient and merchant spans, replaces words outside a strict financial
   grammar, and aliases unknown senders. It shows the complete result before a
   second confirmation that explicitly permits GitHub Actions and Anthropic
-  Claude to process it. Wafra deletes its Cloudflare D1 copy within 14 days;
+  Claude to process it. Wafra gives its Cloudflare D1 copy a 14-day expiry and removes it during scheduled cleanup;
   GitHub and Anthropic apply their own retention policies. Code and synthetic
   tests may be published in a public draft pull request, but the workflow is
   required not to copy the report itself into that pull request and never
   merges a change automatically. Raw message bodies are not uploaded. Reports
   contain no device, advertising, installation or push identifier.
 
-Wafra does not use financial records for advertising. Superwall and ML Kit
+Wafra does not use financial records for advertising. Superwall, Expo and ML Kit
 processing is described above.
 
 ## Website
@@ -471,9 +513,19 @@ The user can:
 - erase the iPhone relay device and queue through **Erase all data** while
   online.
 
-Acknowledged relay rows are deleted immediately. Unacknowledged structured rows
-expire within 30 days. A disconnected device registration is deleted
-immediately; an abandoned one expires after one year.
+Acknowledged relay rows are deleted by the acknowledgement operation.
+Unacknowledged structured rows become eligible for deletion after 30 days; the
+relay's half-hour cleanup job removes expired rows. Feedback has a 14-day expiry
+and is removed by the same scheduled cleanup. A failed or delayed cleanup can
+postpone physical deletion. A disconnected device registration is deleted by
+the revoke/erase operation; an inactive registration is eligible after one year
+only when it has no queued rows, and empty vaults are then removed.
+
+Shared-format wording and pseudonymous votes follow the separate retention
+rules above. Deleting a device or vault does not withdraw already shared
+wording or votes. Provider backups and copies deliberately sent to external
+research services have their own retention rules; deleting a live D1 row does
+not establish that every provider-held copy has been erased.
 
 Exported files remain wherever the user saved or shared them and must be
 deleted there separately.

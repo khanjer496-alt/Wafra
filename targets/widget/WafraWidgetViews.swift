@@ -693,23 +693,11 @@ struct WafraMerchantTile: View {
   var size: CGFloat = 28
 
   var body: some View {
-    let logo = size * 22 / 28
     ZStack {
       RoundedRectangle(cornerRadius: size * 8 / 28, style: .continuous)
         .fill(band.tile)
         .widgetAccentable()
-      if let id = WafraLogo.validated(logoId) {
-        if WafraLogo.monochrome.contains(id) {
-          Image("wafra_logo_" + id)
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .frame(width: logo, height: logo)
-            .foregroundColor(band.onBand)
-        } else {
-          WafraFullColorLogo(name: "wafra_logo_" + id, size: logo)
-        }
-      } else if let initial = WafraInitial.of(title) {
+      if let initial = WafraInitial.of(title) {
         Text(initial)
           .font(.system(size: size / 2, weight: .bold))
           .foregroundColor(band.onBand)
@@ -722,30 +710,6 @@ struct WafraMerchantTile: View {
     }
     .frame(width: size, height: size)
     .accessibilityHidden(true)
-  }
-}
-
-/// A brand's own pixels. Accented rendering (iOS 18 tinted Home Screen)
-/// would otherwise draw the whole image as one flat tint.
-private struct WafraFullColorLogo: View {
-  let name: String
-  var size: CGFloat = 22
-
-  var body: some View {
-    if #available(iOS 18.0, *) {
-      Image(name)
-        .renderingMode(.original)
-        .resizable()
-        .widgetAccentedRenderingMode(.accentedDesaturated)
-        .scaledToFit()
-        .frame(width: size, height: size)
-    } else {
-      Image(name)
-        .renderingMode(.original)
-        .resizable()
-        .scaledToFit()
-        .frame(width: size, height: size)
-    }
   }
 }
 

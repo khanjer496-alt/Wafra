@@ -1,3 +1,4 @@
+import { formatMoneyText } from '@/lib/ui-money-text';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -8,7 +9,6 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import type { DailySpend } from '@/lib/analytics';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
-import { formatMinorUnits } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
 import { calendarTileColors, minTileAlpha } from '@/lib/spending-calendar-tiles';
 
@@ -27,7 +27,7 @@ type Props = {
 };
 
 /** A day's short spoken date ("10 Sept"). */
-export function calendarDayLabel(iso: string, language: string): string {
+function calendarDayLabel(iso: string, language: string): string {
   return new Date(`${iso}T12:00:00Z`)
     .toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
@@ -45,7 +45,7 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect, palette, 
   const w = spendingTrendsCopy[lang === 'ar' ? 'ar' : 'en'];
   const words = everydayBandCopy(lang);
   const moneySpec = useLedgerMoney();
-  const moneyLabel = (fils: number) => moneySpec ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+  const moneyLabel = (fils: number) => moneySpec ? formatMoneyText(Math.round(fils), moneySpec) : formatAED(fils);
   const minAlpha = useMemo(() => minTileAlpha(palette), [palette]);
   if (days.length === 0) return null;
 

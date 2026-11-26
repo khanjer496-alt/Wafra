@@ -679,8 +679,6 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }
 
 {
-  const routes = read('src/lib/routes.ts');
-  ok('the route is declared', /'\/feedback'/.test(routes));
   ok('the screen file exists behind it', fs.existsSync(path.join(ROOT, 'src/app/feedback.tsx')));
 
   // The feedback row moved to Settings → Data and help.

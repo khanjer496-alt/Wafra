@@ -4,6 +4,24 @@ const assert = require('node:assert/strict');
 const { createWorkflowHarness, walk, text } = require('../workflows/workflow-harness.cjs');
 
 for (const platform of ['ios', 'android']) for (const language of ['en', 'ar']) {
+  test(`${platform}/${language}: logo sharing starts off and locked-widget privacy starts on`, () => {
+    const h = createWorkflowHarness({ platform, language });
+    const changes = [];
+    h.deps['@/lib/store'].useStore().setPrivacyPreferences = async patch => changes.push(JSON.parse(JSON.stringify(patch)));
+    const tree = h.renderScreen('settings');
+    const row = id => walk(tree).find(node => node.props?.testID === id);
+    const logo = row('settings-online-logos');
+    const widgets = row('settings-hide-widget-amounts');
+    const widgetSwitch = walk(widgets).find(node => node.props?.accessibilityRole === 'switch');
+    assert.equal(widgetSwitch.props.accessibilityState.checked, true);
+    assert.equal(logo, undefined, 'store builds offer no online-logo switch on either platform');
+    assert.deepEqual(changes, [], 'reading Settings changes no privacy setting');
+    widgetSwitch.props.onPress();
+    assert.deepEqual(changes, [{ hideWidgetAmountsWhenLocked: false }]);
+  });
+}
+
+for (const platform of ['ios', 'android']) for (const language of ['en', 'ar']) {
   test(`${platform}/${language}: privacy is built in, with no Private Mode toggle`, () => {
     const h = createWorkflowHarness({ platform, language, state: { privateMode: false } });
     const tree = h.renderScreen('settings');

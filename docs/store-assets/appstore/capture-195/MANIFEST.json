@@ -1,0 +1,222 @@
+{
+  "kind": "App Store en-US screenshot set for approval (not uploaded)",
+  "created": "2026-11-26",
+  "app": {
+    "name": "Wafra",
+    "version": "1.0.0",
+    "buildNumber": "195",
+    "bundleId": "app.wafra.ios",
+    "sourceCommit": "a2ee7ce0e2c7ded6dc434a17ba1c400ef05d74fc",
+    "sourceBranch": "release/1.0.0-rc1-reconciled",
+    "appStoreIpaSha256": "80f2fba929e181d780564cfd520fd0fbee2332ba2cd32b2feba3e7688454425f",
+    "appStoreBuildRun": 45796466137
+  },
+  "capturedBinary": {
+    "description": "Release configuration built for the iOS Simulator from the same source commit with the eas.json production profile environment; ad-hoc simulator signature. Not the signed App Store IPA.",
+    "buildConfiguration": "Release",
+    "sdk": "iphonesimulator",
+    "arch": "arm64",
+    "profileEnvironment": "production",
+    "otaUpdates": "EXUpdatesCheckOnLaunch=NEVER (embedded bundle of this commit only)",
+    "buildWorkflow": ".github/workflows/appstore-shots-sim-build.yml on branch capture/appstore-sim-build-195",
+    "buildRun": 45806130728,
+    "xcode": "Xcode 26.6 (17F113)",
+    "runnerImage": "macos26 20261117.0516.1",
+    "appZipSha256": "3c52e25fa8dde4d40bced72d1981667678d20a4c2071ce8601e7074546fe4765",
+    "mainJsbundleSha256": "cc2da48ef52414417d107dcce57e413c663be41eb2ba444736d3c5ccda6d1bda"
+  },
+  "capture": {
+    "route": "GitHub Actions macos-26 runner: iOS Simulator, Release build (appstore-shots-sim-capture.yml, branch capture/appstore-sim-build-195)",
+    "device": "iPhone 16 Pro (simulator)",
+    "deviceModel": "iPhone 16 Pro (Dynamic Island medium, 402x874 pt @3x)",
+    "os": "iOS 26.5 (com.apple.CoreSimulator.SimRuntime.iOS-26-5), Xcode 26.6 (17F113), runner image macos26 20261123.0526.1",
+    "language": "en-US (AppleLanguages en-US, AppleLocale en_US)",
+    "region": "United States",
+    "captureTool": "Maestro 2.12.1 takeScreenshot (full-resolution XCTest screenshots)",
+    "run": "45830840036",
+    "statusBar": "cropped from every frame; the caption band replaces it",
+    "sampleData": {
+      "synthetic": true,
+      "currency": "USD",
+      "file": "capture-195/sample-ledger/wafra-sample-backup-usd.json",
+      "sha256": "369ec45e47b1a19a604e08021dbc6b7c0231ce0ae8d3e430391d846b6cf833bc",
+      "generator": "capture-195/sample-ledger/generate-sample-backup.mjs",
+      "loadedVia": "the app's own Welcome > Restore from a backup flow (Files picker); no app code changed",
+      "merchants": "all fictional; no third-party logos (build 195 shows letter monograms only)"
+    },
+    "captureBranch": "capture/appstore-sim-build-195",
+    "captureBranchCommit": "7738c52b0d02dea8675ed36d7ea5ec80a842a925",
+    "tour": ".maestro/appstore-195/{1-light,2-dark,3-light}.yaml at that commit; appearance set with simctl ui between passes",
+    "simulatorTimeZone": "UTC (runner default); ledger dates generated for 2026-11-26"
+  },
+  "presentation": {
+    "method": "capture-195/presentation/index.html + frames.json rendered by headless Chrome at exactly 1206x2622, then re-encoded as opaque RGB PNG (scripts/e2e/png-rgb.mjs stripAlpha). Native pixels are scaled uniformly; nothing redrawn.",
+    "footer": "Actual app screens \u00b7 Sample data"
+  },
+  "frames": [
+    {
+      "file": "appstore-6.3-en-01.png",
+      "id": "01-home",
+      "surface": "Home tab",
+      "appearance": "light",
+      "headline": "Money, in clear view.",
+      "sub": "Spending, income and net for the month.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "2a60fb84a4de6ee4cdb879cd2e2a995d1239c189fa7ffb854232da88db867956",
+      "raw": {
+        "file": "capture-195/raw/01-home-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "4a8b7a77ae3d4c05e5d06238975df8a21c2f4ca71a334a90d5d7420e8631de4c",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-02.png",
+      "id": "02-add-entry",
+      "surface": "New transaction sheet (Home + button), manual entry filled in",
+      "appearance": "light",
+      "headline": "Add an entry in seconds.",
+      "sub": "Type it by hand, or paste a bank alert you choose.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "ee41494cb9e29561b945ff0d6b9da4bcf3f98909f4cdb7ce84fcfd79c71a9d7c",
+      "raw": {
+        "file": "capture-195/raw/02-add-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "56a66f8b95863ff29309aedc00652a63bc13bd20534b1a02926f8fc9d7b1b882",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-03.png",
+      "id": "03-statement-import",
+      "surface": "Add bank statements (statement import) screen",
+      "appearance": "light",
+      "headline": "Bring in past months.",
+      "sub": "Add PDF, CSV or TSV statements. No bank login.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "22d5fbe58477f332917003d0dc1061bcf930a12f13301ba575e8438601251fef",
+      "raw": {
+        "file": "capture-195/raw/03-statement-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "e8ef1035da65f6728ac08872b4ba14d6e11617dbd24fb220c86651a21bab0a5e",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-04.png",
+      "id": "04-bills-subscriptions",
+      "surface": "Bills tab, Next 30 days, subscriptions with a detected price rise",
+      "appearance": "light",
+      "headline": "Know what's due next.",
+      "sub": "Bills and subscriptions together, with price changes.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "7f9acce152dbcb96b2b7d87dc35f4a7eb306dd36c9ede298bc001e4e77f10f34",
+      "raw": {
+        "file": "capture-195/raw/04-bills-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "bec0a8caa25c179a03cc5ef3927ff7ee6fb8d8ab37d9c4eef817e17785537c26",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-05.png",
+      "id": "05-card-dues",
+      "surface": "Bills tab, All, Card payments filter (open and paid card statements)",
+      "appearance": "light",
+      "headline": "Card dues, without surprises.",
+      "sub": "What's left on each statement, and when it's due.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "c0f60f9b799486759951d3ed2c70932a3bcade8b8e0be581b6e5ef1060c80705",
+      "raw": {
+        "file": "capture-195/raw/05-card-dues-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "5fba5c535feb2dcd1324aa4867fc6e10890a8a0a4fa7eeb06ee9e7a9a711164b",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-06.png",
+      "id": "06-spending",
+      "surface": "Spending tab, Categories",
+      "appearance": "dark",
+      "headline": "See where your money goes.",
+      "sub": "Category totals, with the detail behind them.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "5234b9adb51d68f6e4275a94f8272c347aa8fdde9451957239df64a4a90b7e1a",
+      "raw": {
+        "file": "capture-195/raw/06-spending-dark.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "87318a46ea0327aa6f3c7bedd713baa0c9356abde2dc3bd31d9dea7b2f1de719",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-07.png",
+      "id": "07-savings",
+      "appearance": "light",
+      "headline": "Save toward what matters.",
+      "sub": "Set a goal and see what's left to save.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "73bb712efb8765feb6bd65daed8a3101c827af3692a2f662ed3facbff23f2c9c",
+      "raw": {
+        "file": "capture-195/raw/07-savings-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "29241b8bc854b42fc673be5fcab6373a65215a6f381b12dbb4c48868120c4728",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "appstore-6.3-en-08.png",
+      "id": "08-privacy",
+      "surface": "Settings, Privacy and security section and Data and help entry",
+      "appearance": "light",
+      "headline": "Privacy, you control.",
+      "sub": "No bank login. Optional App Lock. Backups you keep.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "f59874edcb3c9686ba6d1f7af448505fa609751b579305ec7cde5e6144d19f74",
+      "raw": {
+        "file": "capture-195/raw/08-privacy-light.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "f8f238af8b427edd8fae6a1ee2c46139d4ebd17d47b270f3c312943ea1759d9c",
+        "statusBarCropPx": 200
+      }
+    }
+  ],
+  "notes": [
+    "Simulator capture, not the paired iPhone 16 Pro named in appstore-recapture.md; the simulator route was chosen by the capture brief and confirmed by the owner on 26 Nov 2026 (no phone was used).",
+    "Frame 5 uses Bills > Card payments rather than the Accounts tab, and frame 7 uses a savings goal rather than category budgets, because build 195 wraps the $ sign above the amount in account and budget rows (raw/alt-05-accounts-light.png, raw/alt-07-budgets-light.png).",
+    "Frame 7 is savings, not automatic import: no #271 device proof is part of this set."
+  ]
+}

@@ -12,9 +12,9 @@
  * the next one, if any, takes its place. Pure: the screen supplies the facts.
  */
 
-export type TrackingNeed = 'paused' | 'stopped' | 'off';
+type TrackingNeed = 'paused' | 'stopped' | 'off';
 
-export interface NeedsYouFacts {
+interface NeedsYouFacts {
   /** Tracking that needs the person, or null when it is running (or deliberately switched off). */
   tracking: TrackingNeed | null;
   /** The earliest overdue card payment, if any. */
@@ -79,9 +79,9 @@ export function subscribeDismissedNeeds(listener: () => void): () => void {
 }
 
 /** Below this window height (pt) the pill goes inline: a floating one would sit on the first rows. */
-export const NEEDS_YOU_SHORT_WINDOW = 700;
+const NEEDS_YOU_SHORT_WINDOW = 700;
 /** From this text scale the pill goes inline, for the same reason. */
-export const NEEDS_YOU_INLINE_FONT_SCALE = 1.2;
+const NEEDS_YOU_INLINE_FONT_SCALE = 1.2;
 
 /**
  * Whether the Needs you pill sits inline at the top of Home's sheet rather

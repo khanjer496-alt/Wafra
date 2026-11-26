@@ -69,13 +69,11 @@ test('Goals: loose on-band tray, no card, green shapes take on-band tones', () =
   assert.match(goals, /testID="onboarding-goals-pattern" accessible accessibilityRole="image"/);
 });
 
-test('Data and help: Erase and diagnosis are ordinary rows; the dark dialog is lifted', () => {
+test('Data and help: Erase is an ordinary row; the dark dialog is lifted', () => {
   const data = read('src/app/settings-data.tsx');
   assert.match(data, /<SettingsLinkRow\s+title=\{t\('eraseAll'\)\}\s+icon="trash"\s+tone="danger"/);
   assert.doesNotMatch(data, /paddingTop: Spacing\.five/);
   assert.match(data, /palette\.scheme === 'dark'[\s\S]{0,200}backgroundColor: palette\.tile, borderColor: palette\.bandRule/);
-  const diag = read('src/components/diagnostic-export-control.tsx');
-  assert.match(diag, /<SettingsLinkRow title=\{w\.title\} subtitle=\{w\.intro\} icon="tools"/);
 });
 
 test('account manage sheet: Delete is destructive and rules are straight hairlines', () => {

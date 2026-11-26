@@ -8,7 +8,7 @@
  * of one fixed noun after every number.
  */
 
-export interface ArabicForms {
+interface ArabicForms {
   /** The whole phrase for exactly one, e.g. "دفعة واحدة". */
   one: string;
   /** The whole phrase for exactly two (dual), e.g. "دفعتان". */
@@ -56,7 +56,7 @@ const AR_ANSWERS: ArabicForms = { one: 'إجابة واحدة', two: 'إجابت
 const AR_CURRENCIES: ArabicForms = { one: 'عملة واحدة', two: 'عملتان', few: 'عملات', many: 'عملة' };
 
 /** How each converted payment got its ledger amount (the shape `summarizeForeignActivity` returns). */
-export type FxQualityCounts = { bankQuotedCount: number; referenceCount: number; estimatedCount: number };
+type FxQualityCounts = { bankQuotedCount: number; referenceCount: number; estimatedCount: number };
 
 const en = {
   payments: (n: number) => enCount(n, 'payment', 'payments'),

@@ -1,3 +1,4 @@
+import { canReviewCreditRefusal, hasUnsettledCreditToken, mentionsCredit } from '@/lib/credit-settlement-guards';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import { normalizeCountryCode, setActiveCountry } from '@/lib/country';
 import { detectLaunchMarketFromSender, setActiveMarket, setLedgerCurrency } from '@/lib/markets';
@@ -5,8 +6,9 @@ import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars'
 import { createLaunchAlertSession, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { hasNonCompletedWording, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { originalMoneyOf } from '@/lib/fx';
-import { PARSER_VERSION, nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
-import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
+import { withoutUnrelatedPendingTransactionStatus, isCompletedExpensePrincipal } from '@/lib/principal-posting-guards';
+import { PARSER_VERSION, completedDebitBesideCredit, nonPostingReason, hasOnlyUnsettledCredit, type ParsedSms } from '@/lib/sms-parser';
+import type { UniversalBankEvent, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
 export type NativeParserExponent = 0 | 2 | 3;
 export interface NativeParserContext {
@@ -233,11 +235,18 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const sender = /^(?:wafra(?:\s+(?:automation|shortcut))?|shortcut|automation|unknown|none|null)$/i.test(input.sender.trim())
       ? '' : input.sender.trim();
     const source = input.body;
+    const holdCredit = hasUnsettledCreditToken(source);
     setActiveCountry(context.country);
     setActiveMarket(context.parserMarket);
     setLedgerCurrency(context.ledgerMoney.currency, context.ledgerMoney.exponent);
-    if (NON_RECEIPT_PREFIX_RE.test(source) || nonPostingReason(source) || isNotAutoPostableMoney(source) ||
-      hasNonCompletedWording(source, context.country, sender)) return ignore();
+    const pair = completedDebitBesideCredit(source, { sender });
+    const creditReviewOnly = hasOnlyUnsettledCredit(source) || holdCredit || mentionsCredit(source);
+    const refusal = nonPostingReason(source);
+    const unsafeMoney = isNotAutoPostableMoney(source);
+    const incomplete = unsafeMoney || hasNonCompletedWording(withoutUnrelatedPendingTransactionStatus(source), context.country, sender);
+    const reviewableRefusal = (creditReviewOnly && canReviewCreditRefusal(source, refusal)) || (!!pair && refusal === 'declined');
+    if (NON_RECEIPT_PREFIX_RE.test(source) || (refusal && !reviewableRefusal) || (!(creditReviewOnly || pair) &&
+      incomplete)) return ignore();
     const session = createLaunchAlertSession({ overrides: {}, activeMarket: context.parserMarket,
       pinnedCurrency: context.ledgerMoney.currency, fxLookup: () => null,
       bestEffort: { enabled: false, country: context.country } });
@@ -252,13 +261,38 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
     const unbankedSender = sender !== '' && senderMarket === null;
     if (unbankedSender && !hasUniversalInstitutionSender(sender) && !/^\d{3,6}$/.test(sender)) return ignore();
     const inspection = session.inspect(source, sender);
-    const parsed = unbankedSender ? null
+    let parsed = unbankedSender ? null
       : session.parse(source, sender, inspection, senderMarket ?? undefined, input.observedAt);
-    const event = inspectGenericBankEventForReview(source, sender);
-    if (futureDate(event, input.observedAt, parsed ?? undefined)) return ignore();
+    // Relaxing a refusal for informational CREDIT Review cannot authorize a
+    // debit that the original source's completed-movement checks refused.
+    // Native has one notification. Keep the actual debit; the app separately
+    // retains the reversal note in its existing capture/history Review lane.
+    const debitSource = pair && parsed?.kind === 'transaction' && parsed.type === 'expense' ? pair.debit : null;
+    const principalSource = debitSource ?? source;
+    const debitAliases: UniversalParseContext['currencyAliases'] = parsed && senderMarket === 'AE' ? { 'درهم': ['AED'], 'دراهم': ['AED'] }
+      : parsed && senderMarket === 'SA' ? { 'ريال': ['SAR'] } : undefined;
+    let event = inspectGenericBankEventForReview(principalSource, sender, undefined,
+      debitAliases ? { currencyAliases: debitAliases } : undefined);
+    const completedExpense = parsed?.kind === 'transaction' && parsed.type === 'expense' && !unsafeMoney &&
+      event?.amount.evidence === 'explicit' && event.amount.spans.length === 1 &&
+      isCompletedExpensePrincipal(principalSource, event.amount.spans[0]);
+    // The generic reader can retain the denied credit rather than the new
+    // debit. Reconcile only this local preview with positive debit evidence;
+    // source/unsafe-money gates and money/principal validation still apply.
+    if (completedExpense && event?.status === 'informational' && movementFamily(event.family) &&
+      event.issues.includes('unsettled-credit-not-posting')) event = { ...event, status: 'posted', direction: 'debit' };
+    if (parsed?.kind === 'transaction' && parsed.type === 'expense' && !pair && incomplete &&
+      (unsafeMoney || !event || event.amount.spans.length !== 1 || !isCompletedExpensePrincipal(source, event.amount.spans[0]))) return ignore();
+    if (futureDate(event, input.observedAt, parsed ?? undefined) && !(creditReviewOnly && !parsed)) return ignore();
     if (parsed && parsed.kind !== 'transaction') return ignore();
+    if (parsed?.type === 'income' && event?.status === 'informational') parsed = null;
     if (event && ['statement', 'balance', 'authentication', 'bill', 'card-payment'].includes(event.family)) return ignore();
-    if (!event || !singleSourcePrincipal(source, event, parsed)) return ignore();
+    // Retaining an uncertain expense in the app cannot create a native money
+    // preview. The relaxed informational lane is for independently read credit.
+    if (!parsed && event?.status === 'informational' && event.direction === 'debit') return ignore();
+    const informationalCredit = creditReviewOnly && !parsed && event?.status === 'informational' &&
+      event.direction === 'credit' && event.amount.evidence === 'explicit' && event.amount.spans.length > 0;
+    if (!event || (!informationalCredit && !singleSourcePrincipal(principalSource, event, parsed))) return ignore();
     if (parsed && (['failed', 'future', 'informational'].includes(event.status) || event.direction === 'none' ||
       ((event.direction === 'debit' || event.direction === 'credit') &&
         event.direction !== (parsed.type === 'income' ? 'credit' : 'debit')))) return ignore();
@@ -272,11 +306,15 @@ export function parseIosBackgroundAlert(input: NativeParserInput): NativeParserR
           merchant: parsedMerchant(parsed, event, family), instrument: instrument(event, parsed) } };
     } else {
       const reviewMoney = event?.amount.evidence === 'explicit' ? sourceMoney(event.amount.value) : null;
-      if (!event || event.status !== 'posted' || !movementFamily(event.family) ||
+      if (!event || (event.status !== 'posted' && !((creditReviewOnly || holdCredit) && event.status === 'informational')) || !movementFamily(event.family) ||
         (event.direction !== 'debit' && event.direction !== 'credit') || !reviewMoney) return ignore();
       result = { v: 1, parserVersion: PARSER_VERSION, route: 'review', provenance: 'unverified',
         notification: { style: 'review', family: event.family, direction: event.direction, amount: reviewMoney,
           merchant: merchant(event.merchant.evidence === 'explicit' ? event.merchant.value : null), instrument: instrument(event) } };
+    }
+    if (result.route === 'parsed' && result.notification?.direction === 'credit' && holdCredit) {
+      result = { ...result, route: 'review', provenance: 'unverified',
+        notification: { ...result.notification, style: 'review' } };
     }
     return boundedUtf8(JSON.stringify(result), 2048) ? result : ignore();
   } catch {

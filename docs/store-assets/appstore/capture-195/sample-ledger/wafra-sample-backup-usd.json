@@ -1,0 +1,3074 @@
+{
+ "app": "wafra",
+ "version": 1,
+ "exportedAt": "2026-11-26T06:30:00.000Z",
+ "sampleData": true,
+ "data": {
+  "ledgerMoney": {
+   "schemaVersion": 2,
+   "currency": "USD",
+   "exponent": 2
+  },
+  "onboardingCurrencyEvidence": "USD",
+  "country": "US",
+  "accounts": [
+   {
+    "id": "acc-checking",
+    "name": "Everyday Checking",
+    "kind": "bank",
+    "openingFils": 620000,
+    "color": "#2DD4A8",
+    "last4": "4417",
+    "bankName": "Larkspur Bank",
+    "snapshotFils": 2468100,
+    "snapshotKind": "balance",
+    "snapshotTs": 1795656600000
+   },
+   {
+    "id": "acc-card",
+    "name": "Larkspur Rewards Card",
+    "kind": "card",
+    "openingFils": 0,
+    "color": "#60A5FA",
+    "last4": "2093",
+    "cardType": "credit",
+    "bankName": "Larkspur Bank",
+    "creditLimitFils": 800000,
+    "snapshotFils": 174875,
+    "snapshotKind": "outstanding",
+    "snapshotTs": 1795656600000
+   },
+   {
+    "id": "acc-cash",
+    "name": "Cash",
+    "kind": "cash",
+    "openingFils": 16000,
+    "color": "#E9B949"
+   }
+  ],
+  "transactions": [
+   {
+    "id": "sample-268",
+    "type": "expense",
+    "amountFils": 672,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-11-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-277",
+    "type": "expense",
+    "amountFils": 1523,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-11-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-247",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-11-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-253",
+    "type": "expense",
+    "amountFils": 13230,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-11-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-276",
+    "type": "expense",
+    "amountFils": 6007,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-11-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-262",
+    "type": "expense",
+    "amountFils": 3224,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-11-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-264",
+    "type": "expense",
+    "amountFils": 1631,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-11-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-252",
+    "type": "expense",
+    "amountFils": 12300,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-11-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-248",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-11-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-274",
+    "type": "expense",
+    "amountFils": 5498,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-11-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-278",
+    "type": "expense",
+    "amountFils": 1077,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-11-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-260",
+    "type": "expense",
+    "amountFils": 5024,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-11-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-263",
+    "type": "expense",
+    "amountFils": 3402,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-11-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-265",
+    "type": "expense",
+    "amountFils": 1418,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-11-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-275",
+    "type": "expense",
+    "amountFils": 12335,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-11-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-271",
+    "type": "expense",
+    "amountFils": 2355,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-11-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-245",
+    "type": "expense",
+    "amountFils": 1599,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-11-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-259",
+    "type": "expense",
+    "amountFils": 2715,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-11-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-273",
+    "type": "expense",
+    "amountFils": 1991,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-11-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-279",
+    "type": "expense",
+    "amountFils": 2689,
+    "originalAmountMinor": 2480,
+    "originalCurrency": "EUR",
+    "fxRate": 1.0842,
+    "fxSource": "bank",
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Cafe Lumiere",
+    "date": "2026-11-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-255",
+    "type": "expense",
+    "amountFils": 11599,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-11-12",
+    "source": "manual"
+   },
+   {
+    "id": "sample-261",
+    "type": "expense",
+    "amountFils": 1541,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-11-12",
+    "source": "manual"
+   },
+   {
+    "id": "sample-254",
+    "type": "expense",
+    "amountFils": 7058,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-11-10",
+    "source": "manual"
+   },
+   {
+    "id": "sample-251",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-11-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-246",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-11-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-257",
+    "type": "expense",
+    "amountFils": 7896,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-11-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-269",
+    "type": "expense",
+    "amountFils": 625,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-11-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-270",
+    "type": "expense",
+    "amountFils": 895,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-11-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-272",
+    "type": "expense",
+    "amountFils": 3159,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-11-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-250",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-11-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-266",
+    "type": "expense",
+    "amountFils": 1751,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-11-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-249",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-11-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-243",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-11-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-244",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-11-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-256",
+    "type": "expense",
+    "amountFils": 7523,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-11-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-284",
+    "type": "income",
+    "amountFils": 126978,
+    "category": "other",
+    "accountId": "acc-card",
+    "title": "Larkspur Rewards Card payment",
+    "date": "2026-11-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-241",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-11-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-242",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-11-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-258",
+    "type": "expense",
+    "amountFils": 1866,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-11-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-267",
+    "type": "expense",
+    "amountFils": 505,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-11-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-226",
+    "type": "expense",
+    "amountFils": 768,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-31",
+    "source": "manual"
+   },
+   {
+    "id": "sample-225",
+    "type": "expense",
+    "amountFils": 561,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-233",
+    "type": "expense",
+    "amountFils": 4506,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-10-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-237",
+    "type": "expense",
+    "amountFils": 4288,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-10-27",
+    "source": "manual"
+   },
+   {
+    "id": "sample-214",
+    "type": "expense",
+    "amountFils": 2025,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-10-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-238",
+    "type": "expense",
+    "amountFils": 3112,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-10-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-199",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-10-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-213",
+    "type": "expense",
+    "amountFils": 6481,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-10-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-220",
+    "type": "expense",
+    "amountFils": 1259,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-10-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-235",
+    "type": "expense",
+    "amountFils": 6266,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-10-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-204",
+    "type": "expense",
+    "amountFils": 11800,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-10-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-222",
+    "type": "expense",
+    "amountFils": 649,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-200",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-10-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-229",
+    "type": "expense",
+    "amountFils": 1246,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-10-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-208",
+    "type": "expense",
+    "amountFils": 11957,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-10-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-223",
+    "type": "expense",
+    "amountFils": 459,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-207",
+    "type": "expense",
+    "amountFils": 10562,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-10-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-231",
+    "type": "expense",
+    "amountFils": 2758,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-10-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-212",
+    "type": "expense",
+    "amountFils": 6014,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-10-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-215",
+    "type": "expense",
+    "amountFils": 1850,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-10-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-206",
+    "type": "expense",
+    "amountFils": 4279,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-10-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-228",
+    "type": "expense",
+    "amountFils": 972,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-10-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-221",
+    "type": "expense",
+    "amountFils": 728,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-197",
+    "type": "expense",
+    "amountFils": 1599,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-10-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-224",
+    "type": "expense",
+    "amountFils": 854,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-230",
+    "type": "expense",
+    "amountFils": 1498,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-10-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-219",
+    "type": "expense",
+    "amountFils": 1350,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-10-13",
+    "source": "manual"
+   },
+   {
+    "id": "sample-227",
+    "type": "expense",
+    "amountFils": 454,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-10-13",
+    "source": "manual"
+   },
+   {
+    "id": "sample-240",
+    "type": "expense",
+    "amountFils": 4005,
+    "originalAmountMinor": 3150,
+    "originalCurrency": "GBP",
+    "fxRate": 1.2715,
+    "fxRateDate": "2026-10-13",
+    "fxSource": "reference",
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Thames Bookshop",
+    "date": "2026-10-13",
+    "source": "manual"
+   },
+   {
+    "id": "sample-210",
+    "type": "expense",
+    "amountFils": 2775,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-10-11",
+    "source": "manual"
+   },
+   {
+    "id": "sample-239",
+    "type": "expense",
+    "amountFils": 3209,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-10-11",
+    "source": "manual"
+   },
+   {
+    "id": "sample-217",
+    "type": "expense",
+    "amountFils": 1340,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-10-10",
+    "source": "manual"
+   },
+   {
+    "id": "sample-203",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-10-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-216",
+    "type": "expense",
+    "amountFils": 1903,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-10-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-198",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-10-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-218",
+    "type": "expense",
+    "amountFils": 1646,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-10-06",
+    "source": "manual"
+   },
+   {
+    "id": "sample-232",
+    "type": "expense",
+    "amountFils": 1112,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-10-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-202",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-10-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-234",
+    "type": "expense",
+    "amountFils": 3577,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-10-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-201",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-10-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-283",
+    "type": "income",
+    "amountFils": 108129,
+    "category": "other",
+    "accountId": "acc-card",
+    "title": "Larkspur Rewards Card payment",
+    "date": "2026-10-03",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-195",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-10-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-196",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-10-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-205",
+    "type": "expense",
+    "amountFils": 9708,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-10-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-211",
+    "type": "expense",
+    "amountFils": 1812,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-10-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-236",
+    "type": "expense",
+    "amountFils": 7626,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-10-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-193",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-10-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-194",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-10-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-209",
+    "type": "expense",
+    "amountFils": 4147,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-10-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-178",
+    "type": "expense",
+    "amountFils": 559,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-30",
+    "source": "manual"
+   },
+   {
+    "id": "sample-185",
+    "type": "expense",
+    "amountFils": 4618,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-09-29",
+    "source": "manual"
+   },
+   {
+    "id": "sample-151",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-09-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-161",
+    "type": "expense",
+    "amountFils": 8672,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-09-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-182",
+    "type": "expense",
+    "amountFils": 2476,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-09-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-173",
+    "type": "expense",
+    "amountFils": 617,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-183",
+    "type": "expense",
+    "amountFils": 4917,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-09-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-156",
+    "type": "expense",
+    "amountFils": 12600,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-09-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-152",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-09-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-157",
+    "type": "expense",
+    "amountFils": 11667,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-09-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-162",
+    "type": "expense",
+    "amountFils": 3750,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-09-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-165",
+    "type": "expense",
+    "amountFils": 2996,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-09-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-187",
+    "type": "expense",
+    "amountFils": 11682,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-09-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-169",
+    "type": "expense",
+    "amountFils": 1628,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-09-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-184",
+    "type": "expense",
+    "amountFils": 4921,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-09-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-189",
+    "type": "expense",
+    "amountFils": 4799,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-09-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-188",
+    "type": "expense",
+    "amountFils": 13963,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-09-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-191",
+    "type": "expense",
+    "amountFils": 1119,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-09-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-171",
+    "type": "expense",
+    "amountFils": 1365,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-09-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-174",
+    "type": "expense",
+    "amountFils": 597,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-192",
+    "type": "expense",
+    "amountFils": 4680,
+    "originalAmountMinor": 6400,
+    "originalCurrency": "CAD",
+    "fxRate": 0.7312,
+    "fxSource": "fallback",
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Leaf Outfitters",
+    "date": "2026-09-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-170",
+    "type": "expense",
+    "amountFils": 796,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-09-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-149",
+    "type": "expense",
+    "amountFils": 1599,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-09-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-172",
+    "type": "expense",
+    "amountFils": 1216,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-09-12",
+    "source": "manual"
+   },
+   {
+    "id": "sample-179",
+    "type": "expense",
+    "amountFils": 2806,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-09-12",
+    "source": "manual"
+   },
+   {
+    "id": "sample-176",
+    "type": "expense",
+    "amountFils": 663,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-11",
+    "source": "manual"
+   },
+   {
+    "id": "sample-155",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-09-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-163",
+    "type": "expense",
+    "amountFils": 2016,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-09-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-175",
+    "type": "expense",
+    "amountFils": 576,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-150",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-09-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-164",
+    "type": "expense",
+    "amountFils": 1290,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-09-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-168",
+    "type": "expense",
+    "amountFils": 3054,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-09-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-177",
+    "type": "expense",
+    "amountFils": 491,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-09-06",
+    "source": "manual"
+   },
+   {
+    "id": "sample-181",
+    "type": "expense",
+    "amountFils": 2565,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-09-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-154",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-09-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-158",
+    "type": "expense",
+    "amountFils": 6537,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-09-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-160",
+    "type": "expense",
+    "amountFils": 7388,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-09-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-153",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-09-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-186",
+    "type": "expense",
+    "amountFils": 5819,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-09-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-190",
+    "type": "expense",
+    "amountFils": 1905,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-09-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-282",
+    "type": "income",
+    "amountFils": 157346,
+    "category": "other",
+    "accountId": "acc-card",
+    "title": "Larkspur Rewards Card payment",
+    "date": "2026-09-03",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-147",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-09-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-148",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-09-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-166",
+    "type": "expense",
+    "amountFils": 6669,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-09-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-145",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-09-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-146",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-09-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-159",
+    "type": "expense",
+    "amountFils": 13632,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-09-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-167",
+    "type": "expense",
+    "amountFils": 3330,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-09-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-180",
+    "type": "expense",
+    "amountFils": 3149,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-09-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-134",
+    "type": "expense",
+    "amountFils": 1824,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-30",
+    "source": "manual"
+   },
+   {
+    "id": "sample-136",
+    "type": "expense",
+    "amountFils": 2540,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-30",
+    "source": "manual"
+   },
+   {
+    "id": "sample-115",
+    "type": "expense",
+    "amountFils": 6480,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-08-29",
+    "source": "manual"
+   },
+   {
+    "id": "sample-118",
+    "type": "expense",
+    "amountFils": 3951,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-08-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-142",
+    "type": "expense",
+    "amountFils": 2883,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-08-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-102",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-08-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-112",
+    "type": "expense",
+    "amountFils": 5963,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-08-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-139",
+    "type": "expense",
+    "amountFils": 2093,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-08-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-130",
+    "type": "expense",
+    "amountFils": 653,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-08-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-108",
+    "type": "expense",
+    "amountFils": 11700,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-08-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-103",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-08-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-114",
+    "type": "expense",
+    "amountFils": 9481,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-08-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-121",
+    "type": "expense",
+    "amountFils": 2379,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-08-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-133",
+    "type": "expense",
+    "amountFils": 2349,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-20",
+    "source": "manual"
+   },
+   {
+    "id": "sample-105",
+    "type": "expense",
+    "amountFils": 899,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Popcorn TV",
+    "date": "2026-08-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-117",
+    "type": "expense",
+    "amountFils": 2880,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-08-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-116",
+    "type": "expense",
+    "amountFils": 1423,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-08-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-122",
+    "type": "expense",
+    "amountFils": 3554,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-08-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-143",
+    "type": "expense",
+    "amountFils": 2664,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-08-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-100",
+    "type": "expense",
+    "amountFils": 1199,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-08-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-119",
+    "type": "expense",
+    "amountFils": 4705,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-08-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-124",
+    "type": "expense",
+    "amountFils": 1677,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-08-12",
+    "source": "manual"
+   },
+   {
+    "id": "sample-131",
+    "type": "expense",
+    "amountFils": 2224,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-10",
+    "source": "manual"
+   },
+   {
+    "id": "sample-135",
+    "type": "expense",
+    "amountFils": 1053,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-10",
+    "source": "manual"
+   },
+   {
+    "id": "sample-107",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-08-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-109",
+    "type": "expense",
+    "amountFils": 3837,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-08-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-127",
+    "type": "expense",
+    "amountFils": 684,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-08-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-144",
+    "type": "expense",
+    "amountFils": 2689,
+    "originalAmountMinor": 2480,
+    "originalCurrency": "EUR",
+    "fxRate": 1.0842,
+    "fxSource": "bank",
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Cafe Lumiere",
+    "date": "2026-08-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-123",
+    "type": "expense",
+    "amountFils": 883,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-08-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-137",
+    "type": "expense",
+    "amountFils": 5135,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-08-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-138",
+    "type": "expense",
+    "amountFils": 3925,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-08-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-101",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-08-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-126",
+    "type": "expense",
+    "amountFils": 481,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-08-06",
+    "source": "manual"
+   },
+   {
+    "id": "sample-141",
+    "type": "expense",
+    "amountFils": 8660,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-08-06",
+    "source": "manual"
+   },
+   {
+    "id": "sample-110",
+    "type": "expense",
+    "amountFils": 12564,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-08-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-111",
+    "type": "expense",
+    "amountFils": 5961,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-08-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-120",
+    "type": "expense",
+    "amountFils": 3778,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-08-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-125",
+    "type": "expense",
+    "amountFils": 1091,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-08-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-106",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-08-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-113",
+    "type": "expense",
+    "amountFils": 10649,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-08-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-281",
+    "type": "income",
+    "amountFils": 104501,
+    "category": "other",
+    "accountId": "acc-card",
+    "title": "Larkspur Rewards Card payment",
+    "date": "2026-08-04",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-104",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-08-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-98",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-08-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-99",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-08-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-129",
+    "type": "expense",
+    "amountFils": 619,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-08-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-132",
+    "type": "expense",
+    "amountFils": 2123,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-08-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-96",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-08-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-97",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-08-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-128",
+    "type": "expense",
+    "amountFils": 599,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-08-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-140",
+    "type": "expense",
+    "amountFils": 6364,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-08-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-67",
+    "type": "expense",
+    "amountFils": 8835,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-07-29",
+    "source": "manual"
+   },
+   {
+    "id": "sample-81",
+    "type": "expense",
+    "amountFils": 896,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-29",
+    "source": "manual"
+   },
+   {
+    "id": "sample-66",
+    "type": "expense",
+    "amountFils": 6077,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-07-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-92",
+    "type": "expense",
+    "amountFils": 5519,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-07-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-86",
+    "type": "expense",
+    "amountFils": 1550,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-07-27",
+    "source": "manual"
+   },
+   {
+    "id": "sample-94",
+    "type": "expense",
+    "amountFils": 1805,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-07-26",
+    "source": "manual"
+   },
+   {
+    "id": "sample-55",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-07-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-93",
+    "type": "expense",
+    "amountFils": 2575,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-07-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-70",
+    "type": "expense",
+    "amountFils": 831,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-07-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-68",
+    "type": "expense",
+    "amountFils": 4111,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-07-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-61",
+    "type": "expense",
+    "amountFils": 12400,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-07-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-77",
+    "type": "expense",
+    "amountFils": 1411,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-07-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-84",
+    "type": "expense",
+    "amountFils": 2492,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-07-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-95",
+    "type": "expense",
+    "amountFils": 4005,
+    "originalAmountMinor": 3150,
+    "originalCurrency": "GBP",
+    "fxRate": 1.2715,
+    "fxRateDate": "2026-07-22",
+    "fxSource": "reference",
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Thames Bookshop",
+    "date": "2026-07-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-56",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-07-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-90",
+    "type": "expense",
+    "amountFils": 13700,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-07-20",
+    "source": "manual"
+   },
+   {
+    "id": "sample-58",
+    "type": "expense",
+    "amountFils": 899,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Popcorn TV",
+    "date": "2026-07-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-64",
+    "type": "expense",
+    "amountFils": 12752,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-07-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-89",
+    "type": "expense",
+    "amountFils": 4447,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-07-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-71",
+    "type": "expense",
+    "amountFils": 4873,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-07-18",
+    "source": "manual"
+   },
+   {
+    "id": "sample-73",
+    "type": "expense",
+    "amountFils": 1767,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-07-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-85",
+    "type": "expense",
+    "amountFils": 1880,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-07-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-87",
+    "type": "expense",
+    "amountFils": 2979,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-07-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-88",
+    "type": "expense",
+    "amountFils": 3517,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-07-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-76",
+    "type": "expense",
+    "amountFils": 1046,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-07-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-69",
+    "type": "expense",
+    "amountFils": 1964,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-07-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-53",
+    "type": "expense",
+    "amountFils": 1199,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-07-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-65",
+    "type": "expense",
+    "amountFils": 13767,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-07-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-75",
+    "type": "expense",
+    "amountFils": 600,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-07-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-78",
+    "type": "expense",
+    "amountFils": 832,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-79",
+    "type": "expense",
+    "amountFils": 787,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-13",
+    "source": "manual"
+   },
+   {
+    "id": "sample-91",
+    "type": "expense",
+    "amountFils": 5966,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-07-13",
+    "source": "manual"
+   },
+   {
+    "id": "sample-60",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-07-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-83",
+    "type": "expense",
+    "amountFils": 708,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-54",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-07-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-82",
+    "type": "expense",
+    "amountFils": 774,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-280",
+    "type": "income",
+    "amountFils": 86351,
+    "category": "other",
+    "accountId": "acc-card",
+    "title": "Larkspur Rewards Card payment",
+    "date": "2026-07-05",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-59",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-07-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-74",
+    "type": "expense",
+    "amountFils": 3579,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-07-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-57",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-07-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-51",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-07-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-52",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-07-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-49",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-50",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-62",
+    "type": "expense",
+    "amountFils": 7741,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-63",
+    "type": "expense",
+    "amountFils": 4304,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-72",
+    "type": "expense",
+    "amountFils": 5871,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-80",
+    "type": "expense",
+    "amountFils": 824,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-07-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-27",
+    "type": "expense",
+    "amountFils": 1372,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-06-29",
+    "source": "manual"
+   },
+   {
+    "id": "sample-14",
+    "type": "expense",
+    "amountFils": 8549,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-06-28",
+    "source": "manual"
+   },
+   {
+    "id": "sample-18",
+    "type": "expense",
+    "amountFils": 2544,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-06-27",
+    "source": "manual"
+   },
+   {
+    "id": "sample-28",
+    "type": "expense",
+    "amountFils": 872,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-06-27",
+    "source": "manual"
+   },
+   {
+    "id": "sample-34",
+    "type": "expense",
+    "amountFils": 546,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-27",
+    "source": "manual"
+   },
+   {
+    "id": "sample-6",
+    "type": "expense",
+    "amountFils": 299,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "CloudVault Storage",
+    "date": "2026-06-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-41",
+    "type": "expense",
+    "amountFils": 5128,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-06-25",
+    "source": "manual"
+   },
+   {
+    "id": "sample-21",
+    "type": "expense",
+    "amountFils": 8535,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-06-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-33",
+    "type": "expense",
+    "amountFils": 813,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-24",
+    "source": "manual"
+   },
+   {
+    "id": "sample-35",
+    "type": "expense",
+    "amountFils": 412,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-23",
+    "source": "manual"
+   },
+   {
+    "id": "sample-12",
+    "type": "expense",
+    "amountFils": 11700,
+    "category": "utilities",
+    "accountId": "acc-checking",
+    "title": "City Power & Light",
+    "date": "2026-06-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-23",
+    "type": "expense",
+    "amountFils": 3093,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-06-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-25",
+    "type": "expense",
+    "amountFils": 3351,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-06-22",
+    "source": "manual"
+   },
+   {
+    "id": "sample-7",
+    "type": "expense",
+    "amountFils": 1499,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "ParcelPass Plus",
+    "date": "2026-06-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-24",
+    "type": "expense",
+    "amountFils": 3347,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-06-21",
+    "source": "manual"
+   },
+   {
+    "id": "sample-16",
+    "type": "expense",
+    "amountFils": 6784,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-06-20",
+    "source": "manual"
+   },
+   {
+    "id": "sample-40",
+    "type": "expense",
+    "amountFils": 1123,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-06-20",
+    "source": "manual"
+   },
+   {
+    "id": "sample-46",
+    "type": "expense",
+    "amountFils": 2529,
+    "category": "entertainment",
+    "accountId": "acc-card",
+    "title": "Starlight Cinema",
+    "date": "2026-06-20",
+    "source": "manual"
+   },
+   {
+    "id": "sample-9",
+    "type": "expense",
+    "amountFils": 899,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Popcorn TV",
+    "date": "2026-06-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-30",
+    "type": "expense",
+    "amountFils": 704,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-06-19",
+    "source": "manual"
+   },
+   {
+    "id": "sample-36",
+    "type": "expense",
+    "amountFils": 825,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-38",
+    "type": "expense",
+    "amountFils": 2585,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-06-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-43",
+    "type": "expense",
+    "amountFils": 4313,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-06-17",
+    "source": "manual"
+   },
+   {
+    "id": "sample-31",
+    "type": "expense",
+    "amountFils": 577,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-16",
+    "source": "manual"
+   },
+   {
+    "id": "sample-20",
+    "type": "expense",
+    "amountFils": 7625,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Blue Door Bistro",
+    "date": "2026-06-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-32",
+    "type": "expense",
+    "amountFils": 593,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Daily Grind Cafe",
+    "date": "2026-06-15",
+    "source": "manual"
+   },
+   {
+    "id": "sample-4",
+    "type": "expense",
+    "amountFils": 1199,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "StreamBox",
+    "date": "2026-06-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-15",
+    "type": "expense",
+    "amountFils": 12521,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-06-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-19",
+    "type": "expense",
+    "amountFils": 3193,
+    "category": "groceries",
+    "accountId": "acc-cash",
+    "title": "Corner Pantry",
+    "date": "2026-06-14",
+    "source": "manual"
+   },
+   {
+    "id": "sample-37",
+    "type": "expense",
+    "amountFils": 1835,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-06-11",
+    "source": "manual"
+   },
+   {
+    "id": "sample-11",
+    "type": "expense",
+    "amountFils": 6500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Fiberwave Internet",
+    "date": "2026-06-09",
+    "source": "manual"
+   },
+   {
+    "id": "sample-29",
+    "type": "expense",
+    "amountFils": 611,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-06-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-45",
+    "type": "expense",
+    "amountFils": 6334,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Home Store",
+    "date": "2026-06-08",
+    "source": "manual"
+   },
+   {
+    "id": "sample-5",
+    "type": "expense",
+    "amountFils": 1099,
+    "category": "software",
+    "accountId": "acc-card",
+    "title": "Tuneful Music",
+    "date": "2026-06-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-26",
+    "type": "expense",
+    "amountFils": 1266,
+    "category": "dining",
+    "accountId": "acc-cash",
+    "title": "Sunrise Bakery",
+    "date": "2026-06-07",
+    "source": "manual"
+   },
+   {
+    "id": "sample-13",
+    "type": "expense",
+    "amountFils": 11515,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Greenleaf Market",
+    "date": "2026-06-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-42",
+    "type": "expense",
+    "amountFils": 6084,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "Fuel Stop",
+    "date": "2026-06-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-48",
+    "type": "expense",
+    "amountFils": 4680,
+    "originalAmountMinor": 6400,
+    "originalCurrency": "CAD",
+    "fxRate": 0.7312,
+    "fxSource": "fallback",
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Maple Leaf Outfitters",
+    "date": "2026-06-05",
+    "source": "manual"
+   },
+   {
+    "id": "sample-10",
+    "type": "expense",
+    "amountFils": 4500,
+    "category": "telecom",
+    "accountId": "acc-checking",
+    "title": "Brightline Mobile",
+    "date": "2026-06-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-17",
+    "type": "expense",
+    "amountFils": 2994,
+    "category": "groceries",
+    "accountId": "acc-card",
+    "title": "Harvest Grocer",
+    "date": "2026-06-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-39",
+    "type": "expense",
+    "amountFils": 1154,
+    "category": "transport",
+    "accountId": "acc-card",
+    "title": "CityRide",
+    "date": "2026-06-04",
+    "source": "manual"
+   },
+   {
+    "id": "sample-8",
+    "type": "expense",
+    "amountFils": 3900,
+    "category": "health",
+    "accountId": "acc-checking",
+    "title": "FitLoop Gym",
+    "date": "2026-06-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-44",
+    "type": "expense",
+    "amountFils": 13464,
+    "category": "shopping",
+    "accountId": "acc-card",
+    "title": "Northwind Goods",
+    "date": "2026-06-03",
+    "source": "manual"
+   },
+   {
+    "id": "sample-2",
+    "type": "expense",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-checking",
+    "title": "ATM Withdrawal",
+    "date": "2026-06-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-3",
+    "type": "income",
+    "amountFils": 20000,
+    "category": "other",
+    "accountId": "acc-cash",
+    "title": "ATM Withdrawal",
+    "date": "2026-06-02",
+    "isTransfer": true,
+    "source": "manual"
+   },
+   {
+    "id": "sample-47",
+    "type": "expense",
+    "amountFils": 3615,
+    "category": "health",
+    "accountId": "acc-card",
+    "title": "Willow Pharmacy",
+    "date": "2026-06-02",
+    "source": "manual"
+   },
+   {
+    "id": "sample-0",
+    "type": "income",
+    "amountFils": 540000,
+    "category": "salary",
+    "accountId": "acc-checking",
+    "title": "Salary",
+    "date": "2026-06-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-1",
+    "type": "expense",
+    "amountFils": 185000,
+    "category": "rent",
+    "accountId": "acc-checking",
+    "title": "Apartment Rent",
+    "date": "2026-06-01",
+    "source": "manual"
+   },
+   {
+    "id": "sample-22",
+    "type": "expense",
+    "amountFils": 3339,
+    "category": "dining",
+    "accountId": "acc-card",
+    "title": "Noodle Lane",
+    "date": "2026-06-01",
+    "source": "manual"
+   }
+  ],
+  "budgets": [
+   {
+    "category": "groceries",
+    "limitFils": 65000
+   },
+   {
+    "category": "dining",
+    "limitFils": 38000
+   },
+   {
+    "category": "transport",
+    "limitFils": 26000
+   },
+   {
+    "category": "shopping",
+    "limitFils": 45000
+   },
+   {
+    "category": "entertainment",
+    "limitFils": 12000
+   }
+  ],
+  "bills": [
+   {
+    "id": "bill-mobile",
+    "title": "Brightline Mobile",
+    "category": "telecom",
+    "amountFils": 4500,
+    "dueDay": 6,
+    "paidMonths": []
+   },
+   {
+    "id": "bill-internet",
+    "title": "Fiberwave Internet",
+    "category": "telecom",
+    "amountFils": 6500,
+    "dueDay": 11,
+    "paidMonths": []
+   },
+   {
+    "id": "bill-power",
+    "title": "City Power & Light",
+    "category": "utilities",
+    "amountFils": 11800,
+    "dueDay": 24,
+    "paidMonths": []
+   }
+  ],
+  "cardDues": [
+   {
+    "id": "sample-stmt-5",
+    "accountId": "acc-card",
+    "totalDueFils": 86351,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-07-08",
+    "paidFils": 0,
+    "settledAt": "2026-07-05"
+   },
+   {
+    "id": "sample-stmt-4",
+    "accountId": "acc-card",
+    "totalDueFils": 104501,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-08-07",
+    "paidFils": 0,
+    "settledAt": "2026-08-04"
+   },
+   {
+    "id": "sample-stmt-3",
+    "accountId": "acc-card",
+    "totalDueFils": 157346,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-09-06",
+    "paidFils": 0,
+    "settledAt": "2026-09-03"
+   },
+   {
+    "id": "sample-stmt-2",
+    "accountId": "acc-card",
+    "totalDueFils": 108129,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-10-06",
+    "paidFils": 0,
+    "settledAt": "2026-10-03"
+   },
+   {
+    "id": "sample-stmt-1",
+    "accountId": "acc-card",
+    "totalDueFils": 126978,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-11-05",
+    "paidFils": 0,
+    "settledAt": "2026-11-02"
+   },
+   {
+    "id": "sample-stmt-0",
+    "accountId": "acc-card",
+    "totalDueFils": 118730,
+    "minDueFils": 3500,
+    "minDueEstimated": true,
+    "dueDate": "2026-12-05",
+    "paidFils": 0
+   }
+  ],
+  "goals": [
+   {
+    "id": "goal-emergency",
+    "title": "Emergency fund",
+    "emoji": "target",
+    "targetFils": 1200000,
+    "savedFils": 480000
+   },
+   {
+    "id": "goal-trip",
+    "title": "Summer trip",
+    "emoji": "plane",
+    "targetFils": 250000,
+    "savedFils": 90000
+   }
+  ],
+  "onboarded": true,
+  "userName": "there",
+  "themePreference": "system",
+  "onlineLogosEnabled": false
+ }
+}

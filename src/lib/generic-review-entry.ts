@@ -16,7 +16,8 @@ const roles = ['transaction', 'bill-due', 'statement-total', 'minimum-due', 'bal
 // can contain source text and remain ephemeral.
 const safeIssues = (input: unknown): string[] => Array.isArray(input)
   ? [...new Set(input.filter((value): value is string =>
-      value === 'ai-proposed' || value === 'source-profile-field-excluded' || value === 'learned-format'))] : [];
+      value === 'ai-proposed' || value === 'source-profile-field-excluded' || value === 'learned-format' ||
+      value === 'unsettled-credit-not-posting' || value === 'supplementary-reversal-info'))] : [];
 
 const money = (value: unknown): UniversalMoney | null => {
   if (!record(value) || typeof value.currency !== 'string' ||
@@ -87,7 +88,9 @@ export const sanitizeUniversalReviewEvent = (input: unknown): UniversalBankEvent
   }
   const monetaryFacts = [amount, statementTotal, minimumDue, balance, creditLimit,
     ...observations.map((observation) => observation.field)];
-  if (!monetaryFacts.some((candidate) => candidate.value !== null || candidate.alternatives.length > 0)) {
+  const amountFreeReversalNote = input.status === 'informational' && input.direction === 'none' &&
+    input.family === 'refund' && Array.isArray(input.issues) && input.issues.includes('supplementary-reversal-info');
+  if (!amountFreeReversalNote && !monetaryFacts.some((candidate) => candidate.value !== null || candidate.alternatives.length > 0)) {
     return null;
   }
   return {
@@ -107,7 +110,8 @@ export const mergeAiReviewEvent = (
   family: prior.family === 'unknown' ? proposed.family : prior.family,
   direction: prior.direction === 'unknown' && proposed.issues.includes('learned-format')
     ? proposed.direction : prior.direction,
-  status: proposed.issues.includes('learned-format') && proposed.status === 'unknown' ? 'unknown' : prior.status,
+  status: prior.issues.some(issue => issue === 'unsettled-credit-not-posting' || issue === 'supplementary-reversal-info')
+    ? 'informational' : proposed.issues.includes('learned-format') && proposed.status === 'unknown' ? 'unknown' : prior.status,
   amount: prior.amount.evidence === 'missing' ? proposed.amount : prior.amount,
   merchant: prior.merchant.evidence === 'missing' ||
     proposed.merchant.issues.includes('source-profile-field-excluded') ? proposed.merchant : prior.merchant,

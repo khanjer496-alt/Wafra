@@ -4,6 +4,7 @@
     "modules": ["expo.modules.wafrawidgets.WafraWidgetsModule"]
   },
   "apple": {
+    "appDelegateSubscribers": ["WafraPrivacyAppDelegateSubscriber"],
     "modules": ["WafraWidgetsModule"]
   }
 }

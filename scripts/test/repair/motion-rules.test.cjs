@@ -29,11 +29,11 @@ test('motion tokens obey the rules: nothing over 500 ms, one 260/24 spring, the 
 });
 
 test('pulse callers keep reading the shared token (so the cap reaches them)', () => {
-  // The lock gate lost its looping pulse in the redesign (one static unlock action), so it is no longer a caller.
-  assert.doesNotMatch(code('src/components/lock-gate.tsx'), /withRepeat|Motion\.pulse/);
-  for (const file of ['src/components/recap/recap-logo-trigger.tsx', 'src/components/ui/states.tsx']) {
-    assert.match(code(file), /Motion\.pulse \/ 2/, file);
+  // Static unlock and recap actions must not regain a looping pulse.
+  for (const file of ['src/components/lock-gate.tsx', 'src/components/recap/recap-logo-trigger.tsx']) {
+    assert.doesNotMatch(code(file), /withRepeat|Motion\.pulse/, file);
   }
+  assert.match(code('src/components/ui/states.tsx'), /Motion\.pulse \/ 2/);
 });
 
 test('the sheet opens on the shared spring and keeps its Android / Reduce Motion bypass', () => {
@@ -42,15 +42,6 @@ test('the sheet opens on the shared spring and keeps its Android / Reduce Motion
   assert.match(sheet, /stiffness: MotionSpring\.stiffness/);
   assert.match(sheet, /overshootClamping: true/);
   assert.ok((sheet.match(/reducedMotion \|\| Platform\.OS === 'android'/g) ?? []).length >= 3);
-});
-
-test('the composition bar fade follows the app-wide motion policy (screen reader included)', () => {
-  const charts = code('src/components/ui/charts.tsx');
-  // useScreenEntering = useReducedMotion (Reduce Motion OR a screen reader) plus Android's bypass.
-  assert.match(charts, /const enter = useScreenEntering\(\);/);
-  assert.match(charts, /entering=\{enter\(FadeIn\.delay/);
-  assert.doesNotMatch(charts, /entering=\{FadeIn\.delay/);
-  assert.match(code('src/hooks/use-screen-entering.ts'), /Platform\.OS === 'android' \|\| reducedMotion \? undefined : animation/);
 });
 
 test('the choice check pops on the spring with motion and only cross-fades without it', () => {

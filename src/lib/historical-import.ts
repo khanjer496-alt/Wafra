@@ -1,4 +1,5 @@
 import { toISODate } from '@/lib/format';
+import { completedDebitBesideCredit } from '@/lib/sms-parser';
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
@@ -39,7 +40,7 @@ export interface HistoricalMessageRecord {
   receivedAt: string;
 }
 
-export interface HistoricalImportResult {
+interface HistoricalImportResult {
   parsed: ScannedSms[];
   reviewCandidates: ReviewEntry[];
   declined: DeclinedSms[];
@@ -62,6 +63,7 @@ const inspectHistoricalRefusal = (input: {
   nowMs: number;
   session: LaunchAlertSession;
   inspection: ReturnType<LaunchAlertSession['inspect']>;
+  acceptedExpense?: NonNullable<ReturnType<LaunchAlertSession['parse']>>;
 }): HistoricalRefusal => {
   const decision = inspectSourceFreeRefusedAlert({
     source: input.record.text,
@@ -70,6 +72,7 @@ const inspectHistoricalRefusal = (input: {
     channel: 'inbox',
     session: input.session,
     existingInspection: input.inspection,
+    acceptedExpense: input.acceptedExpense,
   });
   if (decision.kind === 'declined') {
     return {
@@ -342,18 +345,20 @@ export function parseHistoricalMessageRecords(
       else ignoredCount += 1;
       continue;
     }
-    if (shouldReviewParsedIncome(result)) {
+    const supplementary = result.kind === 'transaction' && result.type === 'expense' && !!completedDebitBesideCredit(record.text, { sender });
+    if (shouldReviewParsedIncome(result) || supplementary) {
       const refusal = inspectHistoricalRefusal({
         record,
         timestamp,
         nowMs: now.getTime(),
         session: launchSession,
         inspection,
+        acceptedExpense: supplementary ? result : undefined,
       });
       if (refusal.kind === 'declined') declined.push(refusal.row);
       if (refusal.kind === 'review') {
         reviewCandidates.push(refusal.item);
-        continue;
+        if (!supplementary) continue;
       }
     }
 

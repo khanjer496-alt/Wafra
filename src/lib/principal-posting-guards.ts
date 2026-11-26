@@ -1,17 +1,737 @@
+import { EN_CREDIT_PENDING_STATUS, AR_CREDIT_PENDING_STATUS, hasCreditCondition, hasPendingCreditStatus, mentionsRefund } from '@/lib/credit-settlement-guards';
+import { CURRENCY_MINOR_UNITS, CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
+import { getActiveMarket } from '@/lib/markets';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
+import { compileBrandTable, matchBrandCategory, normalizeBrandDescriptor } from '@/lib/brand-categories';
+
 /** Source-only qualifications of an already selected monetary value. */
 export interface PrincipalSpan { start: number; end: number }
+
+const CLICK_LINK_PROMPT = /(?:\b(?:click(?:ing)?|tap(?:ping)?|verify|confirm|update\s+(?:(?:your|the)\s+)?(?:details|information|credentials|account))\b[\s:：]+|(?<![ء-ي])(?:اضغط|إضغط|انقر)[\s:：]+)(?:[^.!?]|\.\d){0,120}?(?:(?:https?|hxxps?):\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[\/?#:]|\b)|www\.|\b(?:here|below|link|url)\b|الرابط|هنا)/giu;
+const ISSUER_MERCHANT_DEBIT_CONFIRMATION = /^confirm\s+that\s+[A-Z]{3}\s+\d[\d,.]*\s+was\s+debited\s+from\s+your\s+account\s+ending\s+\d{4}\s+for\s+(?:a\s+)?purchase\s+at\s+(?:[a-z0-9-]+\.)+[a-z]{2,}$/iu;
+/**
+ * Only a closed sentence end may follow a declared merchant host; any other character may continue a URL.
+ * Closed means: an optional card descriptor (`*2K1AB3CD0`), closing brackets/quotes, sentence punctuation
+ * (ASCII, ideographic, Arabic or ellipsis), then visible white space or the end. U+FEFF counts as
+ * white space in JavaScript but is invisible, so it cannot hide a path behind the host.
+ */
+const ISSUER_MERCHANT_HOST_END = /^(?:\*[A-Z0-9]{1,24})?["'”’»)\]]*[.!?;,。、،؛؟۔…]*(?:[^\S\uFEFF]|$)/iu;
+/** One link-prompt match counts unless it is a warning, a merchant name or a closed issuer debit declaration. */
+function countsAsLinkPrompt(source: string, match: RegExpMatchArray): boolean {
+  const before = source.slice(Math.max(0, match.index! - 60), match.index);
+  // A warning against clicking, or a merchant named CLICK HERE, is not a prompt.
+  if (/(?:\b(?:do\s+not|don['’]t|never|avoid|refrain\s+from)\s+(?:ever\s+)?|\b(?:at|from|merchant\s*:?)\s+|(?:لا|عدم)\s+)$/iu.test(before)) return false;
+  // A closed issuer debit declaration names a merchant, not a link to open.
+  // Skip only this match, so a later user-directed instruction is still refused.
+  // Use the complete prefix: a cropped suffix can manufacture a statement start.
+  // Only a complete greeting may bridge comma/newline; not a wrapped "Can we".
+  // Check what follows the host too: ASCII, fullwidth or %-encoded suffixes cannot be enumerated.
+  return !(ISSUER_MERCHANT_DEBIT_CONFIRMATION.test(match[0]) &&
+    ISSUER_MERCHANT_HOST_END.test(source.slice(match.index! + match[0].length)) &&
+    /(?:^|[.!?])\s*(?:Dear\s+Customer[,\s]+)?we\s+$/iu.test(source.slice(0, match.index!)));
+}
+/** A link instruction is never settlement evidence, even with an issuer label. */
+export function hasClickLinkPrompt(source: string): boolean {
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) if (countsAsLinkPrompt(source, match)) return true;
+  return false;
+}
+const WORD_ONLY_LINK_TARGET = /(?:\b(?:here|below|link|url)|الرابط|هنا)$/iu;
+// An address anywhere in the message ("click the link http://bit.ly/x", "tap here: www.x.co") makes it a phishing
+// shape even when the instruction itself ends on a bare word. A merchant domain without a path (AMAZON.COM) is not one.
+const MESSAGE_NAMES_AN_ADDRESS = /(?:https?|hxxps?):\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/iu;
+/** Every link instruction is a bare word ("tap here", "click the link") and the message names no address to open. */
+export function hasOnlyWordLinkPrompts(source: string): boolean {
+  if (MESSAGE_NAMES_AN_ADDRESS.test(source)) return false;
+  const counted = [...source.matchAll(CLICK_LINK_PROMPT)].filter((match) => countsAsLinkPrompt(source, match));
+  return counted.length > 0 && counted.every((match) => WORD_ONLY_LINK_TARGET.test(match[0]));
+}
+/**
+ * A genuine debit may carry a footer such as "If not you, tap here to block your card". With no address in it,
+ * it cannot be a phishing link, so the debit above it must reach Review instead of being dropped. The footer is
+ * blanked for that Review inspection only; posting still refuses it.
+ */
+export function blankWordLinkPrompts(source: string): string {
+  if (!hasOnlyWordLinkPrompts(source)) return source;
+  let out = source;
+  for (const match of source.matchAll(CLICK_LINK_PROMPT)) {
+    if (!countsAsLinkPrompt(source, match)) continue;
+    out = out.slice(0, match.index!) + ' '.repeat(match[0].length) + out.slice(match.index! + match[0].length);
+  }
+  return out;
+}
+
+const FIRST_PERSON_MONEY = /^\s*(?:(?:hi|hey|hello)\b(?:[^\r\n.!?]{0,40}[,!:]|\s+)\s*)?(?:I(?:\s+(?:(?:have|just|already)\s+){0,2}|['’]ve\s+(?:(?:just|already)\s+)?)(?:spent|paid|bought|sent|deposited|transferred|refunded)\b|[اأ]نا\s+(?:(?:قد|لقد)\s+)?(?:صرفت|دفعت|اشتريت|حولت|حوّلت|أرسلت|ارسلت)(?=\s))/iu;
+/** Explicit personal money wording cannot become a bank event at either entry point. */
+export function hasExplicitPersonalMoneyClaim(source: string): boolean {
+  const text = source.replace(/^\s*Dear\s+Customer[,!:]\s*/iu, '');
+  if (FIRST_PERSON_MONEY.test(text) || /^\s*they\s+charged\s+me\b/iu.test(text)) return true;
+  if (!/^\s*(?:(?:hi|hey|hello|lol|ok|just|so)\b[\s,!:]*)*(?:paid|spent|received)\b/iu.test(text)) return false;
+  // A bank receipt may name lunch or a shop; an instrument, reference or
+  // balance keeps it eligible for the normal evidence-based parser.
+  if (/\b(?:card|account|acct?|a\/c|balance|bal|avl|reference|ref|transaction|txn)\b/iu.test(text)) return false;
+  return /^\s*lol\b/iu.test(text) ||
+    /\b(?:for\s+(?:lunch|dinner|breakfast|the\s+taxi)|on\s+groceries\s+today)\b/iu.test(text);
+}
+
+/** A leading coupon invitation is an offer; the same wording may be a receipt footer. */
+export function isLeadingNumericDiscountOffer(source: string): boolean {
+  return /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:use|enter)\s+(?:code\s+)?\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b/iu.test(source) ||
+    (source.includes('خصم') && /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?(?:استمتع\s+ب)?خصم\s*\p{Nd}{1,3}\s*[%٪]/iu.test(source));
+}
+
+/** A peer says they sent money TO the reader; this cannot prove an outgoing debit. */
+export const isUnqualifiedPeerTransferClaim = (source: string): boolean =>
+  /^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?transferred\b(?:[^.\n]|\.\d){0,96}?\bto\s+(?:you|u)\b/iu.test(source);
+
+const MOBILE_MONEY_CALLBACK = /\b(?:call|phone|ring|contact)\s+(?:(?:us|me|support|on|at)\s+){0,3}(?:\+|00)(?:971|966)[\s().-]*5(?:[\s().-]*\d){8}(?![\s().-]*\d)/giu;
+/** A private mobile callback needs Review; it does not prove a stored debit imaginary. */
+export function hasMobileMoneyCallback(source: string): boolean {
+  if (!/(?:\+|00)(?:971|966)/u.test(source)) return false;
+  for (const match of source.matchAll(MOBILE_MONEY_CALLBACK)) {
+    const before = source.slice(Math.max(0, match.index! - 60), match.index);
+    if (/\b(?:do\s+not|don['’]t|never|avoid)\s*$/iu.test(before)) continue;
+    const after = source.slice(match.index! + match[0].length, match.index! + match[0].length + 60);
+    if (/^\s*(?:to|for)\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)\b/iu.test(after) ||
+      /\bto\s+(?:cancel|verify|confirm|approve|authori[sz]e|secure|unblock|release)[^.!?\n]{0,30}$/iu.test(before)) return true;
+  }
+  return false;
+}
 
 const MOVEMENT_STATUS = /\bincomplete\s+(?:transaction|txn|purchase|payment|transfer|withdrawal)\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal)(?:\s+(?:of|for|at|to|from|with|on)\b(?:[^.\n]|\.\d){0,80}?)?\s+(?:was|is|remains?|has\s+been)\s+incomplete\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:cancell?ed|voided)\s+by\s+(?:the\s+)?(?:merchant|bank|issuer|acquirer)\b|\b(?:transaction|txn|purchase|payment|authori[sz]ation)\b(?:[^.\n]|\.\d){0,100}?\s(?:will\s+be|is\s+being)\s+(?:cancell?ed|voided)\b|[ \t][-–—:|][ \t]*(?:void|voided|cancell?ed)[ \t]*(?=\n|$)|[ \t]*[,:(][ \t]*(?:cancell?ed|voided|void)[ \t]*\)?[ \t]*(?=[.\n]|$)|(?<![ء-ي])(?:تم\s+)?(?:الغاء|ايقاف|تعليق)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:الغيت|اوقفت|علقت)\s+(?:ال)?(?:عمليه|شراء|دفع|تحويل|حواله|سحب|معامله|حركه)(?![ء-ي])|(?<![ء-ي])(?:ال)?(?:عمليه|معامله|شراء|دفع|تحويل|حواله|سحب|حركه)\s+(?:غير\s+(?:ناجح|مكتمل)ه?|لم\s+(?:تكتمل|يكتمل|تنجح)|(?:ال)?(?:ملغي|ملغا|ملغاه|موقوف[هة]?))(?![ء-ي])|(?<![ء-ي])(?:و?تم|قد\s+تم)\s+(?:الغاو|الغاي|ايقاف|تعليق)(?:ها|ه)(?![ء-ي])|(?<![ء-ي])تم\s+(?:ال)?الغاء(?![ء-ي])|(?<![ء-ي])لم\s+(?:تكتمل|يكتمل|تنجح)(?![ء-ي])/gi;
 const CONDITIONAL_STATUS = /(?:\b(?:if|unless|please|pls|to|can|may|should)\b|(?<![ء-ي])(?:يرجي|الرجاء|رجاء|يمكنك|يمكنكم|يمكن|بامكانك|بامكانكم|اتصل|ارسل|للابلاغ|لطلب|طلب|خدمه|اذا|حال|تود|ترغب|عليك)(?![ء-ي]))(?:\s+(?:او|و|ب|في|علي|عن|من|كانت|كان|or|and))?(?:\s+\d{1,4})?\s*$/i;
 
-/** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
-export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
-  if (!span) return false;
+const COMPLETED_MONEY_WORDS = new Set(['made', 'completed', 'processed', 'posted', 'charged', 'debited', 'deducted', 'paid', 'sent', 'withdrawn', 'spent', 'purchased', 'used', 'transferred', 'credited', 'refunded', 'reversed', 'returned', 'deposited', 'received', 'arrived', 'settled', 'done', 'successful', 'applied', 'assessed']);
+const COMPLETED_MONEY_VERB = new RegExp(`\\b(?:${[...COMPLETED_MONEY_WORDS].join('|')})\\b`, 'iu');
+const ACTIVE_MONEY_VERB = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|credited|refunded|reversed|returned|deposited|received|arrived|made|completed|processed|posted|settled|done)\b/giu;
+const PREDICATE_AUXILIARY = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|not|never|being|yet|scheduled|pending|awaiting|[a-z]+n['’]t)\b/iu;
+const PREDICATE_START = new RegExp(`^(?:${PREDICATE_AUXILIARY.source})`, 'iu');
+const FINITE_AUXILIARY_SCAN = /\b(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could|[a-z]+n['’]t)\b/giu;
+const PREDICATE_DESCRIPTOR = /\b(?:using|with|via|at|from|to(?!\s+be\b)|towards?|into|between|on|by|for|merchant|cards?|accounts?|wallets?)\b/iu;
+const NEXT_MONEY_FIELD = /\b(?:(?:available|avail|avl|current|new|closing|remaining|updated)\s+(?:(?:account|credit)\s+)?(?:bal(?:ance)?|limit)|(?:available|left|remaining)\s+to\s+(?:spend|withdraw)|date|time|reference|balance)\b/iu;
+const RECEIPT_BUSINESS_PREFIX = /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*(?:\s+[\p{L}\p{N}&][\p{L}\p{N}.*&'’/_-]*){0,6}?\s+(?:caf[eé]|coffee|cafeteria|restaurant|bakery|shop|store|market|mart|bookstore|supermarket|hypermarket|pharmacy|tailoring|trading|services|studio|insurance|technologies|electronics|centre|center|mall|network|co(?:\s+l(?:td)?)?|corp|company|llc|ltd)\b/iu;
+const CLOSED_OWN_CARD_PREFIX = /^\s*your\s+(?:(?:credit|debit|covered|prepaid|cashback)\s+)?card\s+(?:(?:ending(?:\s+with)?|number|no\.?)\s+)?(?=[*xX•\d -]*[*xX•\d])[*xX•\d -]{1,32}\s*$/iu;
+const COMPLETION_ADVERBS = new Set(['already', 'just', 'now', 'successfully', 'fully', 'recently', 'actually', 'really']);
+const DEBIT_OUTCOME = /\b(?:made|completed|processed|posted|charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred|settled|done|successful)\b/iu;
+const EXPLICIT_DEBIT_OUTCOME = /\b(?:charged|debited|deducted|paid|sent|withdrawn|spent|purchased|used|transferred)\b/iu;
+const PRICE_SYMBOLS = Object.keys(CURRENCY_SYMBOL_CANDIDATES).sort((a, b) => b.length - a.length);
+const PRICE_SYMBOL_NAMES = new Set(PRICE_SYMBOLS.map(symbol => symbol.toUpperCase()));
+const STATED_PRICE = new RegExp(`\\b([A-Z]{3})\\s*\\d|\\d[\\d,.]*\\s*([A-Z]{3})\\b|(${PRICE_SYMBOLS.map(symbol => symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\d`, 'giu');
+
+function predicateDescriptor(text: string): RegExpExecArray | undefined {
+  return [PREDICATE_DESCRIPTOR.exec(text), NEXT_MONEY_FIELD.exec(text)]
+    .filter((match): match is RegExpExecArray => match !== null)
+    .sort((a, b) => a.index - b.index)[0];
+}
+
+function firstStatedPrice(text: string): number | null {
+  for (const match of text.matchAll(STATED_PRICE)) {
+    const code = (match[1] ?? match[2] ?? '').toUpperCase();
+    if (!match[3] && !Object.hasOwn(CURRENCY_MINOR_UNITS, code) && !PRICE_SYMBOL_NAMES.has(code)) continue;
+    if (match[3] && /[\p{L}\p{N}]/u.test(text[match.index! - 1] ?? '')) continue;
+    return match.index!;
+  }
+  return null;
+}
+
+/** A pure quoted price annotates this movement, wherever its descriptors put it. */
+function withoutPriceAnnotations(text: string): string {
+  return text.replace(/\(([^()]*)\)/gu, (whole, inner: string) => {
+    const money = /^\s*([^\d()]+?)\s*\d[\d,.]*\s*$|^\s*\d[\d,.]*\s*([^\d()]+?)\s*$/u.exec(inner);
+    const label = (money?.[1] ?? money?.[2] ?? '').trim().toUpperCase();
+    return label && (Object.hasOwn(CURRENCY_MINOR_UNITS, label) || PRICE_SYMBOL_NAMES.has(label) ||
+      getActiveMarket().currency.aliases.some(alias => alias.trim().toUpperCase() === label)) ? ' '.repeat(whole.length) : whole;
+  });
+}
+
+/**
+ * A merchant is an entity, not an open-ended suffix of a receipt. Consume a
+ * single descriptor token, a named business type, or an EXACT existing brand
+ * alias. Later words still need their own field or a completed predicate.
+ * No merchant word (MAY, NOT, etc.) is a posting veto.
+ */
+function receiptMerchantLength(text: string, knownOnly = false, metadata = false): number {
+  const boundary = text.search(/,|\s+(?:(?:with|using|on)\s+(?:your\s+)?(?:(?:debit|credit|mada|covered|prepaid)\s+)?card\b|on\s+\d|\d{1,2}:\d{2}\b)/iu);
+  const commaBound = boundary >= 0 && text[boundary] === ',';
+  text = text.slice(0, boundary < 0 ? text.length : boundary).trimEnd();
+  const atom = /^(?:%\s*)?[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(text);
+  if (!atom) return 0;
+  let length = atom[0].length, brandLength = 0;
+  const business = RECEIPT_BUSINESS_PREFIX.exec(text);
+  if (business) length = Math.max(length, business[0].length);
+  const words = [...text.matchAll(/\S+/gu)].slice(0, 8);
+  for (const word of words) {
+    const end = word.index! + word[0].length;
+    const prefix = text.slice(0, end);
+    const normalized = normalizeBrandDescriptor(prefix).replace(/\bSANDS(?=\s+SPORTS\b)/u, 'SAND');
+    const brand = matchBrandCategory(normalized, getActiveMarket().id);
+    if (!brand) continue;
+    const entry = compileBrandTable().find(row => row.table === brand.table && row.pattern === brand.pattern);
+    const match = entry?.regex.exec(normalized);
+    if (match?.index === 0 && match[0].length === normalized.length) brandLength = Math.max(brandLength, end);
+  }
+  // A known identity ends before later prose. Existing brand aliases can
+  // consume several words, but business nouns cannot swallow a later verb.
+  if (brandLength && !metadata) return text.slice(0, brandLength).replace(/\*+$/u, '').length;
+  if (knownOnly) return 0;
+  // A rendered merchant field is delimited by another typed field or the
+  // acquirer's comma/location boundary. Its words are not a new sentence.
+  // Regular finite/aspect inflections AFTER its name still need monetary
+  // completion; an unfamiliar stem does not become a noun by being unlisted.
+  const record = text.trim();
+  const descriptorWords = [...record.replace(/\bHOUES\s+HOLD\b/giu, 'HOUSEHOLD').replace(/\bSANDS(?=\s+SPORTS\b)/giu, 'SAND').matchAll(/[\p{L}\p{N}'’.-]+/gu)];
+  const noun = /^(?:yours|ours|theirs|hers|his|its|motors|services|technologies|electronics|spices|sports|cinemas|traders|discounts|families|trading|building|clothing|holdings|systems|solutions)$/iu;
+  if (descriptorWords.some((word, index) => index > 0 && ((PREDICATE_AUXILIARY.test(word[0]) && !(commaBound && index === descriptorWords.length - 1 && /^pending$/iu.test(word[0]))) || (index < descriptorWords.length - 1 && /^[a-z]{3,}s$/iu.test(word[0]) && !/ss$/iu.test(word[0]) && !noun.test(word[0]))))) return atom[0].length;
+  if (business && !metadata) return business[0].length;
+  // No free punctuation or sentence instruction can be accepted as a field.
+  if (record && /^[\p{L}\p{N}\s.*&'’/+#@_%():·-]+$/u.test(record) &&
+    !/\b(?:to\s+be|to\s+have|not\s+been|not\s+made)\b/iu.test(record)) return record.length;
+  return length;
+}
+
+/** Issuer/notification labels are metadata only; source trust is checked by callers. */
+function receiptInstitutionTitle(title: string): boolean {
+  if (!title || PREDICATE_AUXILIARY.test(title) || /\b(?:if|unless|subject|upon|provided|once|when|after|until)\b/iu.test(title) || hasCreditCondition(title)) return false;
+  return /^transaction\s+alert$/iu.test(title) || hasUniversalInstitutionSender(title) ||
+    /^[\p{L}\p{N} .&'’-]{2,40}bank$/iu.test(title) || getActiveMarket().banks.some(bank =>
+      bank.name.toLowerCase() === title.toLowerCase() || new RegExp(`^(?:${bank.re.source})$`, bank.re.flags.replace(/[gy]/gu, '')).test(title));
+}
+
+/** Positive entity spans, not masked text: later predicates still see the original. */
+function namedMerchantSpans(text: string): PrincipalSpan[] {
+  const spans: PrincipalSpan[] = [];
+  for (const marker of text.matchAll(/\b(?:at|to|from|merchant)(?:\s*:\s*|\s+)/giu)) {
+    const start = marker.index! + marker[0].length;
+    const after = text.slice(start);
+    const descriptor = predicateDescriptor(after)?.index ?? after.length;
+    const separator = after.search(/[,;\n]/u);
+    const field = after.slice(0, Math.min(descriptor, separator < 0 ? after.length : separator)).trimEnd();
+    const named = RECEIPT_BUSINESS_PREFIX.exec(field)?.[0].length ?? 0;
+    const branded = receiptMerchantLength(field, true);
+    const length = Math.max(named, branded);
+    if (length) spans.push({ start, end: start + length });
+  }
+  return spans;
+}
+
+/** A finished "service charge was applied/assessed" claim. Bare "the charge,"
+ * and "the charge was applied" stay inside the denied movement. The check is
+ * the low-level fee completion, not a posting guard.
+ */
+function closedServiceChargeAssessment(previous: string): boolean {
+  const assessment = /^(?:(?:a|the|your)\s+)?service\s+charge\s+((?:was|were|is|are|has been|have been|had been|has|have|had)\s+(?:applied|assessed))$/iu.exec(previous);
+  return assessment !== null && completedPredicate(assessment[1], false, true);
+}
+
+/** A new completed money subject can follow an independently finite assertion. */
+function independentCompletedCommaPrincipalStart(assertion: string, tail: string): number | null {
+  for (const comma of assertion.matchAll(/,/gu)) {
+    const previous = withoutPriceAnnotations(assertion.slice(0, comma.index)).trim();
+    // An instrument, movement, or generic charge still belongs to the denied
+    // movement. Only a closed service-charge assessment is a different subject.
+    const closedServiceCharge = closedServiceChargeAssessment(previous);
+    if (!previous || /[,;]/u.test(previous) ||
+      (/\b(?:cards?|accounts?|wallets?|purchases?|payments?|transactions?|transfers?|withdrawals?|debits?|charges?)\b/iu.test(previous) && !closedServiceCharge)) continue;
+    const auxiliary = /\b(?:was|were|is|are|has|have|had)\s+\p{L}/iu.exec(previous);
+    const pastVerb = /\b\p{L}+(?:ed|ied)\s*$/iu.exec(previous);
+    if (!(auxiliary && auxiliary.index > 0) && !(pastVerb && pastVerb.index > 0)) continue;
+    const next = assertion.slice(comma.index! + 1).trim();
+    const predicate = tail.slice(0, predicateDescriptor(tail)?.index ?? tail.length).trim();
+    const nominal = /^(?:(?:a|an|the|your|this)\s+)?(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*)*$/iu.test(next);
+    if ((!next || nominal) && completedPredicate(predicate, !nominal)) return comma.index! + 1;
+    // A post-comma verb alone continues the earlier instrument. A new own-card
+    // subject plus its explicit predicate instead owns the selected price.
+    for (const verb of next.matchAll(ACTIVE_MONEY_VERB)) {
+      const before = next.slice(0, verb.index);
+      const finite = PREDICATE_AUXILIARY.exec(before);
+      if (finite && CLOSED_OWN_CARD_PREFIX.test(before.slice(0, finite.index)) &&
+        completedPredicate(next.slice(finite.index), true)) return comma.index! + 1;
+    }
+  }
+  return null;
+}
+
+/** Classification alone may exclude a separately owned false lead-in. Original
+ * source still supplies every refusal/trust check. Keep offsets and evidence.
+ */
+export function selectedPrincipalClassificationSource(source: string, span: PrincipalSpan): string {
+  const clause = principalClause(source, span);
+  if (!clause || !isCompletedExpensePrincipal(source, span)) return source;
+  const lead = source.slice(clause.start, span.start);
+  for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
+    const assertionStart = proposition.index! + proposition[0].length;
+    const start = independentCompletedCommaPrincipalStart(lead.slice(assertionStart), source.slice(span.end, clause.end));
+    if (start !== null) {
+      const boundary = clause.start + assertionStart + start;
+      return ' '.repeat(boundary) + source.slice(boundary);
+    }
+  }
+  return source;
+}
+
+/** Negation belongs to the selected monetary subject, never a merchant word. */
+export function hasNegatedPrincipalAssertion(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  let lead = source.slice(clause.start, span.start);
+  if (!/\b(?:no|false|untrue|not|(?:isn|wasn)['’]t)\b/iu.test(lead)) return false;
+  for (const entity of namedMerchantSpans(lead).reverse()) lead = lead.slice(0, entity.start) + ' '.repeat(entity.end - entity.start) + lead.slice(entity.end);
+  // A proposition negates its own selected movement whether its subject is
+  // a purchase or an instrument ("false that your card was charged ...").
+  // Keep that original frame before active-verb reduction removes subjects.
+  // A separate coordinated assertion cannot inherit an earlier frame.
+  // Wrapper text cannot erase an explicit proposition. Its ownership is
+  // bounded by the selected price and independent transitions, not by a
+  // whitelist of bank/greeting prefixes. Named merchant spans were excluded.
+  for (const proposition of lead.matchAll(/\bit(?:\s+(?:is|was)|['’]s)\s+(?:false|untrue|not\s+true)\s+that\s+|\bit\s+(?:isn|wasn)['’]t\s+true\s+that\s+/giu)) {
+    const assertion = lead.slice(proposition.index! + proposition[0].length);
+    // Instrument punctuation and same-movement FX annotations do not create
+    // a new assertion. Only a separately completed comma assertion does.
+    if (independentCompletedCommaPrincipalStart(assertion, source.slice(span.end, clause.end)) !== null) continue;
+    if (!/\b(?:but|however|whereas)\b/iu.test(assertion) && firstStatedPrice(withoutPriceAnnotations(assertion)) === null) return true;
+  }
+  const head = /\b(?:purchases?|payments?|transfers?|withdrawals?|transactions?|debits?|refunds?|reversals?|credits?|salary|payroll|deposits?|fees?|charges?|commission|tax|levy|amounts?|sums?|values?)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
+  if (head) {
+    const prefix = lead.slice(0, head.index);
+    const negative = /\bno((?:\s+[\p{L}'’-]+){0,6})\s*$/iu.exec(prefix);
+    if (negative && !PREDICATE_DESCRIPTOR.test(negative[1]) && !PREDICATE_AUXILIARY.test(negative[1])) return true;
+    if (/\bnot\s+(?:a\s+single|one|any)\s*$/iu.test(prefix)) return true;
+    if (/(?:^|[.!?;:|]\s*)it\s+(?:is|was)\s+(?:false|untrue|not\s+true)\s+that\s+(?:(?:a|an|the|your|this|that)\s+)?$/iu.test(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Positively consume a terse receipt's fields through its END. Unknown words
+ * cannot become a merchant continuation merely because an auxiliary scanner
+ * did not recognise them. A closed partial receipt may keep the mature
+ * source reader's decision; only the complete instrument+merchant form is
+ * positive proof for relaxing a native/paired-refund refusal.
+ */
+function closedNominalReceipt(lead: string, tail: string, hasNextPrice: boolean): { closed: boolean; complete: boolean } {
+  // A noun in arbitrary prose is not an assertion that money moved.
+  // Only the mature receipt label or own-card/price/label record supplies
+  // implicit completion; qualified/unknown headings need an actual verb.
+  let label = lead.trim().replace(/^Dear\s+Customer[,!:\s]+/iu, '');
+  const pieces = [...label.matchAll(/\S+/gu)].slice(0, 4);
+  for (const piece of pieces) {
+    const end = piece.index! + piece[0].length;
+    const title = label.slice(0, end).replace(/[:–-]+$/u, '').trim();
+    const rest = label.slice(end).trimStart();
+    if (receiptInstitutionTitle(title) && /^(?:thank\s+you|thanks|your\s+|(?:card\s+|credit\s+|debit\s+|cash\s+|pos\s+)?(?:purchase|payment|transfer|transaction|withdrawal)\b)/iu.test(rest)) { label = rest; break; }
+  }
+
+  const thanks = /\b(?:thank\s+you|thanks)\s+for\s+/iu.exec(label);
+  if (thanks) {
+    const title = label.slice(0, thanks.index).trim();
+    // A closed notification title is metadata, not an unparsed qualifier.
+    if (!title || receiptInstitutionTitle(title)) {
+      label = label.slice(thanks.index + thanks[0].length);
+    }
+  }
+
+  const colon = label.indexOf(':');
+  if (colon >= 0) {
+    const header = label.slice(0, colon).trim();
+    const bank = receiptInstitutionTitle(header);
+    if (bank) label = label.slice(colon + 1).trimStart();
+  }
+  const ownCardLabel = /^(.*?)\s+(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.exec(lead);
+  const ownCardReceipt = !!ownCardLabel && CLOSED_OWN_CARD_PREFIX.test(ownCardLabel[1]);
+  const receiptLabel = /^(?:(?:your|this|the|an?)\s+)?(?:(?:visa|mastercard|amex|mada|credit|debit|covered|prepaid|card|cash|funds?|local|internal|outward|international|pos|dr\.?)\s+){0,4}(?:purchase|payment|transfer|withdrawal|transaction)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(label);
+  const priceFirstLabel = /^\s*(?:purchase|payment|transfer|withdrawal|transaction)\b/iu.test(tail) &&
+    (!label || /^(?:amount|value)\s*[:=]?\s*$/iu.test(label) || CLOSED_OWN_CARD_PREFIX.test(lead));
+  if (!receiptLabel && !priceFirstLabel && !ownCardReceipt) return { closed: false, complete: false };
+  let rest = tail.replace(/^\s*(?:purchase|payment|transfer|withdrawal|transaction)\b/iu, '').trim();
+  let instrument = CLOSED_OWN_CARD_PREFIX.test(lead) || ownCardReceipt, merchant = false, entityName = '', branchNumber = false;
+  for (let field = 0; field < 12 && rest; field++) {
+    const separator = /^[\s,:|=-]*/u.exec(rest)![0];
+    rest = rest.slice(separator.length);
+    if (!rest) break;
+    // Financial fields and warning footers have their own ownership. They
+    // cannot supply completion for an unparsed suffix before that boundary.
+    if (hasNextPrice && NEXT_MONEY_FIELD.exec(rest)?.index === 0) return { closed: true, complete: instrument && merchant };
+    if (/^if\b[^.!?]{0,100}\b(?:by\s+you|not\s+you)\b[^.!?]{0,60}\b(?:call|contact|ignore|report|block)\b/iu.test(rest)) return { closed: true, complete: instrument && merchant };
+    // These explicit footers own a limit or a different historical movement,
+    // never the selected receipt amount. No unknown residue is skipped first.
+    if (/^within\s+your\s+(?:daily|monthly)(?:\s+spending)?\s+limit\s*$/iu.test(rest)) return { closed: true, complete: instrument && merchant };
+    if (/^(?:and\s+|but\s+)?(?:(?:your|the|an?)\s+)?(?:earlier|previous|prior|other|another)\s+(?:transaction|purchase|payment|transfer|refund|reversal|chargeback)\b/iu.test(rest)) return { closed: true, complete: instrument && merchant };
+    if (instrument && /^(?:approved|successful|completed|processed|posted|done|authenticated\s+via\s+3d\s+secure)$/iu.test(rest)) return { closed: true, complete: true };
+    if (merchant && separator.includes(',')) {
+      const token = /^([a-z]{3,}(?:s|ed|ing))\s+[a-z]{4,}/iu.exec(rest);
+      if (!PREDICATE_AUXILIARY.test(rest.split(/\s/u)[0]) && !token) {
+        const length = receiptMerchantLength(rest, false, true);
+        if (length) { rest = rest.slice(length).trim(); continue; }
+      }
+    }
+    // A typed date/time owns its full token before a numeric branch suffix.
+    // Otherwise MART/SHOP plus 10:05 consumes "10" as an outlet number and
+    // leaves ":05", falsely refusing an already closed bank receipt.
+    const namedDate = /^(?:on\s*:?\s*)?\d{1,2}[- ]?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[- ]?\d{2,4}(?!\d)/iu.exec(rest);
+    if (namedDate) { rest = rest.slice(namedDate[0].length).trim(); continue; }
+    const date = /^(?:(?:on\s*:?|date\s*:)\s*)?\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?:T\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{3})?Z?)?(?!\d)/iu.exec(rest);
+    if (date) { rest = rest.slice(date[0].length).trim(); continue; }
+    const time = /^(?:(?:at|time\s*:)\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?(?!\d)/iu.exec(rest);
+    if (time) { rest = rest.slice(time[0].length).trim(); continue; }
+    const identifier = merchant ? (branchNumber ? /^\d{1,20}(?![\p{L}\p{N}])/u : /^(?:[*xX·•]{2,}\d{2,12}|\d{4,20})(?![\p{L}\p{N}])/u).exec(rest) : null;
+    if (identifier) { branchNumber = false; rest = rest.slice(identifier[0].length).trim(); continue; }
+    if (instrument && /^at\s*(?:,|$)/iu.test(rest) && /\bwithdrawal\s+(?:of\s*)?$/iu.test(lead)) { rest = rest.replace(/^at\s*/iu, ''); continue; }
+    let card = /^(?:(?:with|using|on|from)\s+)?(?:(?:your|the)\s+)?(?:(?:debit|credit|covered|prepaid|mada|payroll)\s+)?(?:card|account|acct?|a\/c)\s*:?\s*(?:(?:ending(?:\s+(?:with|in))?|number|no\.?)\s*)?[*xX•\d-]{1,32}(?![\p{L}\p{N}])/iu.exec(rest);
+    let instrumentPrefix = 0;
+    if (!card) {
+      const rail = /^(?:with|using|on)\s+(?:(?:your|the)\s+)?/iu.exec(rest);
+      const issuerText = rail ? rest.slice(rail[0].length) : '';
+      const issuerLabel = /^(.*?)\s+(?=(?:(?:debit|credit|covered|prepaid)\s+)?card\b)/iu.exec(issuerText);
+      const issuer = issuerLabel && receiptInstitutionTitle(issuerLabel[1]) ? issuerLabel[1].length : (rail ? receiptMerchantLength(issuerText, true) : 0);
+      if (rail && issuer) {
+        const end = rail[0].length + issuer;
+        card = /^\s+(?:(?:debit|credit|covered|prepaid)\s+)?card\s*(?:(?:ending(?:\s+(?:with|in))?|number|no\.?)\s*)?[*xX•\d-]{1,32}(?![\p{L}\p{N}])/iu.exec(rest.slice(end));
+        if (card) instrumentPrefix = end;
+      }
+    }
+    if (card) { instrument ||= /\bcard\b/iu.test(card[0]) && (card[0].match(/[*xX•\d-]+$/u)?.[0].replace(/-/gu, '').length ?? 0) >= 4; rest = rest.slice(instrumentPrefix + card[0].length).trim(); continue; }
+    const entity = /^(?:at|to|from|merchant)(?:\s*:\s*|\s+)/iu.exec(rest);
+    if (entity) {
+      const start = entity[0].length;
+      const length = receiptMerchantLength(rest.slice(start));
+      if (!length) return { closed: false, complete: false };
+      if (!entityName) entityName = rest.slice(start, start + length).split(/\s/u)[0];
+      branchNumber = /\b(?:llc|ltd|tr|sp|br|shop|store|market|mart)\s*$/iu.test(rest.slice(start, start + length));
+      merchant = true; rest = rest.slice(start + length).trim(); continue;
+    }
+    if (merchant) {
+      const processor = /^\*\s*/u.exec(rest);
+      if (processor) {
+        const suffix = rest.slice(processor[0].length);
+        const length = receiptMerchantLength(suffix, true) || /^[\p{L}\p{N}][\p{L}\p{N}.*&'’/_-]*/u.exec(suffix)?.[0].length || 0;
+        if (!length) return { closed: false, complete: false };
+        rest = rest.slice(processor[0].length + length).trim(); continue;
+      }
+      const alias = receiptMerchantLength(rest, true);
+      if (alias) { rest = rest.slice(alias).trim(); continue; }
+    }
+    const billPayee = /^on\s+(?:your|the)\s+([\p{L}\p{N} .&'’-]{1,60}?)\s+bill\b/iu.exec(rest);
+    if (billPayee && !PREDICATE_AUXILIARY.test(billPayee[1]) && !hasCreditCondition(billPayee[1])) {
+      merchant = true; rest = rest.slice(billPayee[0].length).trim(); continue;
+    }
+    const railTag = instrument ? /^(?:mada|visa|mastercard|amex)(?:\s*\((?:apple|google|samsung)\s+pay\))?(?![\p{L}\p{N}])/iu.exec(rest) : null;
+    if (railTag) { rest = rest.slice(railTag[0].length).trim(); continue; }
+    const aliasNote = /^\(([\p{L}\p{N}._-]+)\)/u.exec(rest);
+    if (merchant && aliasNote && entityName && aliasNote[1].toLowerCase().startsWith(entityName.toLowerCase())) {
+      rest = rest.slice(aliasNote[0].length).trim(); continue;
+    }
+    const qualifier = /^(?:pay|food|com|salik|interior|decor|fz|fze|card\s+services|network|insurance|coffee|subscription|subscr|fitness|tacos|services|gents|rides|seller|mall(?!\s+of\b)|store|mart|help[.]uber|inc|limited|ai|hq|cloud|icloud|premium|prime|advanced|monthly|renewal|clothing|tailoring|trading|technologies|llc|ltd|tr|sp|br)(?:\.(?=,|\s|$))?(?![\p{L}\p{N}])/iu.exec(rest);
+    if (merchant && qualifier) { branchNumber = /^(?:br|llc|ltd|tr|sp)\b/iu.test(qualifier[0]); rest = rest.slice(qualifier[0].length).trim(); continue; }
+    const mall = /^mall\s+of\s+(?:emirates|arabia)(?![\p{L}\p{N}])/iu.exec(rest);
+    if (merchant && mall) { rest = rest.slice(mall[0].length).trim(); continue; }
+    const location = /^(?:Kuwait|Tokyo|Lagos|Beijing|Shanghai|Guangzhou|MOE|JLT|SHJ|Dubai|Abu\s+Dhabi|Sharjah|Ajman|Fujairah|Riyadh|Jeddah|DIFC|AE|ARE|UAE|SA|SAU|KSA|GBR|USA|GB|US|DE|DEU|SGP|HKG|IND|JPN|FRA)(?![\p{L}\p{N}])/iu.exec(rest);
+    if (location) { rest = rest.slice(location[0].length).trim(); continue; }
+    const phone = /^(?:\+|00)[\d·•*xX][\d·•*xX -]{5,20}(?!\d)/u.exec(rest);
+    if (phone) { rest = rest.slice(phone[0].length).trim(); continue; }
+    const reference = /^(?:ref(?:erence)?|auth(?:orisation|orization)?|approval)\s*(?:no\.?|number|code)?\s*[:#-]?\s*[A-Z0-9]*\d[A-Z0-9-]*(?![\p{L}\p{N}])/iu.exec(rest);
+    if (reference) { rest = rest.slice(reference[0].length).trim(); continue; }
+    return { closed: false, complete: false };
+  }
+  return { closed: !rest && (instrument || merchant || /^\s*(?:(?:your|a|an)\s+)?(?:(?:card|cash|pos)\s+)?(?:purchase|payment|withdrawal|transfer|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead)), complete: !rest && instrument && merchant };
+}
+
+/** Reduce one owned predicate; modifiers cannot hide its polarity or aspect. */
+function completedPredicate(fragment: string, debitOnly = false, feePredicate = false, directions?: Set<'credit' | 'debit'>): boolean {
+  // A new explicit auxiliary reopens polarity: "not credited and was debited"
+  // states a debit; "not credited and debited" still shares the negation.
+  const clauses = fragment.split(/\b(?:and|but)\s+(?=(?:was|were|is|are|has|have|had|will|would|shall|should|must|may|might|can|could)\b)/iu);
+  const debits = clauses.filter(clause => DEBIT_OUTCOME.test(clause));
+  const owned = debits.length ? debits[debits.length - 1] : fragment;
+  if (debitOnly && !EXPLICIT_DEBIT_OUTCOME.test(owned)) return false;
+  // With no new auxiliary, coordinated verbs share the original polarity:
+  // "was reversed and debited" completes both; "not ... and debited" does not.
+  const shared = owned.split(/\b(?:and|but)\b/iu);
+  if (shared.length > 1) return shared.every(part => completedPredicate(part, false, feePredicate, directions));
+  const expanded = owned.trim().replace(/^['’]ve\b/iu, 'have').replace(/^['’]s\b/iu, 'has').replace(/^['’]re\b/iu, 'are');
+  const words = (expanded.toLowerCase().match(/[a-z]+(?:['’][a-z]+)?|\d+/gu) ?? [])
+    .filter(word => !COMPLETION_ADVERBS.has(word));
+  // A bank may state "paid out/back" without changing the completed aspect.
+  if (['out', 'back'].includes(words[words.length - 1] ?? '') && ['paid', 'sent'].includes(words[words.length - 2] ?? '')) words.pop();
+  const verb = words.pop();
+  if (!verb || !COMPLETED_MONEY_WORDS.has(verb)) return false;
+  if ((verb === 'applied' || verb === 'assessed') && !feePredicate) return false;
+  directions?.add(mentionsRefund(verb) || /^(?:credited|deposited)$/u.test(verb) ? 'credit' : 'debit');
+  const auxiliary = words.join(' ');
+  return auxiliary === '' || /^(?:was|were|has been|have been|had been|has|have|had)$/u.test(auxiliary) ||
+    (verb !== 'made' && /^(?:is|are)$/u.test(auxiliary));
+}
+
+/** Preserve all bytes/offsets except an earlier, money-free pending status
+ * which cannot own a later positively completed independent principal. */
+export function withoutUnrelatedPendingTransactionStatus(source: string): string {
+  if (!/pending/iu.test(source)) return source;
+  const status = /(?:^|[.!?;\n])\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?(pending\s+(?:approval|authori[sz]ation|confirmation|processing))\b/giu;
+  let scoped = source;
+  for (const match of source.matchAll(status)) {
+    const after = match.index! + match[0].length;
+    const boundary = /[.!?;\n](?:\s|$)/u.exec(source.slice(after));
+    if (!boundary || !/^[.!;]/u.test(boundary[0])) continue;
+    // Sentence order alone does not distinguish a pending transaction from
+    // the completed wording which follows. Require an affirmative statement
+    // that this status belongs to a separate movement; negated, conditional
+    // or uncertain separation supplies no ownership proof.
+    const ownership = source.slice(after, after + boundary.index);
+    if (!/^\s+is\s+(?:separate|unrelated)\s*$/iu.test(ownership)) continue;
+    const nextStart = after + boundary.index + boundary[0].length;
+    // Earlier money might itself own the status; never replace that ambiguity
+    // with a later receipt or a limit. Unknown completion is never proof.
+    if (firstStatedPrice(source.slice(0, nextStart)) !== null) continue;
+    for (const money of source.slice(nextStart).matchAll(STATED_PRICE)) {
+      const start = nextStart + money.index!;
+      const prefixEnd = start + money[0].length;
+      const end = prefixEnd + /^[\d.,]*/u.exec(source.slice(prefixEnd))![0].length;
+      if (!isCompletedExpensePrincipal(source, { start, end })) continue;
+      const at = after - match[1].length;
+      scoped = scoped.slice(0, at) + ' '.repeat(match[1].length) + scoped.slice(after);
+      break;
+    }
+  }
+  return scoped;
+}
+
+/** Explicit selected status, including a continuation after a typed limit. */
+function hasPendingTransactionStatus(source: string): boolean {
+  if (!/pending/iu.test(source)) return false;
+  return /(?:^|[.!?;\n]|\b[A-Z]{3}\s*\d[\d.,]*\s+)\s*(?:(?:this|the|your)\s+)?(?:transaction|purchase|payment)\s+(?:(?:is|was|remains?)\s+)?pending\s+(?:approval|authori[sz]ation|confirmation|processing)\b/iu.test(source);
+}
+
+/** At the full-message boundary only, a money-free earlier status may be unrelated. */
+export function hasSelectedPendingTransaction(source: string): boolean {
+  return hasPendingTransactionStatus(withoutUnrelatedPendingTransactionStatus(source));
+}
+
+/** Explicit references back to this movement retain their original assertion. */
+export function hasIncompletePrincipalReference(tail: string): boolean {
+  // This is the selected principal's suffix: its money is outside the tail.
+  // A later receipt cannot prove that this status belongs to another movement.
+  if (hasPendingTransactionStatus(tail)) return true;
+  const references = [...tail.matchAll(/\b(?:and|but)\s+(?:this|that|the)\s+(?:charge|debit|purchase|payment|transaction|transfer|withdrawal)\s+([^.!?;]+)/giu)];
+  if (!references.length) return false;
+  const entities = namedMerchantSpans(tail);
+  return references.some(reference => {
+    if (entities.some(entity => reference.index! >= entity.start && reference.index! < entity.end)) return false;
+    const assertion = reference[1].slice(0, predicateDescriptor(reference[1])?.index ?? reference[1].length).trim();
+    const directions = new Set<'credit' | 'debit'>();
+    const completed = completedPredicate(assertion, false, false, directions);
+    // A future/negated refund of this charge cannot erase its already
+    // completed debit. Direction here is ownership, never posting proof.
+    return !completed && !(directions.size === 1 && directions.has('credit'));
+  });
+}
+
+/** null leaves a genuinely terse receipt to the mature grammar. */
+function selectedPredicateCompletion(lead: string, tail: string, debitOnly = false, directions?: Set<'credit' | 'debit'>): boolean | null {
+  tail = withoutPriceAnnotations(tail);
+  if (hasNegatedPrincipalAssertion(lead + tail, { start: lead.length, end: lead.length })) return false;
+  // A descriptor bounds a predicate, but does not end its ownership: "using
+  // card 1234 has not been made" still predicates this selected purchase.
+  // A distinct stated price is a money boundary. Metadata words can also be
+  // merchant descriptors ("at BALANCE CAFE"), so they cannot erase a later
+  // finite predicate either.
+  const ownedTail = tail.slice(0, firstStatedPrice(tail) ?? tail.length);
+  // A separately named reversal note can be joined by comma or newline.
+  // It cannot extend the purchase's finite predicate. Keep the full original
+  // tail available below for explicit references back to THIS same charge.
+  const separateNote = /(?:[,;\n]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit(?!\s+(?:card|limit)\b))\b/iu.exec(ownedTail);
+  const predicateTail = ownedTail.slice(0, separateNote?.index ?? ownedTail.length);
+  // A later explicit reference predicates this SAME charge, not a different
+  // refund. An uncompleted/negated reference cannot be skipped as metadata.
+  if (hasIncompletePrincipalReference(tail)) return false;
+  // Unrecognized assertion adverbs after a closed field are not affirmative
+  // completion. Inside a declared named merchant they remain name text.
+  let entities: PrincipalSpan[] | undefined;
+  for (const qualifier of ownedTail.matchAll(/,\s*([a-z]+ly)\s*$/giu)) {
+    if (!COMPLETION_ADVERBS.has(qualifier[1].toLowerCase())) return false;
+  }
+  const descriptor = predicateDescriptor(predicateTail);
+  const predicate = predicateTail.slice(0, descriptor?.index ?? predicateTail.length).trim().replace(/^[^\p{L}\p{N}]+/u, '');
+  const following: string[] = [];
+  const unknownFollowing: string[] = [];
+  const followingFees = new Set<string>();
+  const followingReceipts = new Set<string>();
+  if (descriptor) for (const auxiliary of predicateTail.matchAll(FINITE_AUXILIARY_SCAN)) {
+    if (auxiliary.index! < descriptor.index + descriptor[0].length) continue;
+    // An auxiliary spelling wholly inside a positively named entity is not
+    // the movement predicate; a later auxiliary outside that span still is.
+    entities ??= namedMerchantSpans(predicateTail);
+    if (entities.some(entity => auxiliary.index! >= entity.start && auxiliary.index! < entity.end)) continue;
+    const before = predicateTail.slice(0, auxiliary.index);
+    const rest = predicateTail.slice(auxiliary.index);
+    // These predicates own a separate reversal or a conditional contact
+    // instruction, not the purchase whose amount was already selected.
+    if (/(?:[,;]|\band\b)\s*(?:(?:your|a|the|this|another|separate|a\s+separate)\s+)?(?:refund|reversal|charge[ -]?back|credit)\b/iu.test(before) ||
+      /(?:[,;]|\band\b)\s*(?:(?:your|the|an?)\s+)?(?:earlier|previous|prior|other|another)\s+(?:transaction|purchase|payment|transfer|refund|reversal|chargeback)\b/iu.test(before) ||
+      (/\b(?:if|unless)\b/iu.test(before) && /\bby\s+you\b[^.!?]{0,48}\b(?:call|contact|ignore)\b/iu.test(rest))) continue;
+    const finite = rest.slice(0, predicateDescriptor(rest)?.index ?? rest.length).trim();
+    const feeOwner = /^\s*(?:(?:annual|monthly|maintenance|service|card|account|bank)\s+)*(?:fees?|commission|tax|levy)\s*$/iu.test(before);
+    const approvedCardReceipt = /^(?:is|was)\s+approved$/iu.test(finite) &&
+      (/^\s*on\s+your\s+card\s+ending(?:\s+with)?\s+[*xX•\d -]{3,32}\s+at\s+\S/iu.test(before) ||
+        /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead));
+    const authenticatedPurchase = /^was\s+authenticated$/iu.test(finite) &&
+      /\bpurchase\s+(?:(?:of|for|amount|value)\s*)*$/iu.test(lead) && /^\s+via\s+3d\s+secure\b/iu.test(rest.slice(finite.length));
+    if (feeOwner) followingFees.add(finite);
+    if (approvedCardReceipt || authenticatedPurchase) followingReceipts.add(finite);
+    // Bare NOT in a merchant name is not a predicate. Nor does a later
+    // refund's verb supply debit authority. Require finite movement/status.
+    if (followingReceipts.has(finite) || (feeOwner && COMPLETED_MONEY_VERB.test(finite)) ||
+      COMPLETED_MONEY_VERB.test(finite) || /\b(?:pending|awaiting|scheduled|in\s+progress|not|never|been|being|be|have)\b/iu.test(finite)) following.push(finite);
+    else {
+      // Once the descriptor has its own object, a later auxiliary still
+      // belongs to a predicate even when its terminal verb is unfamiliar.
+      // An auxiliary at the start of a merchant name ("at MAY CAFE") alone
+      // is not that predicate and cannot veto the receipt.
+      const descriptors = [...before.matchAll(new RegExp(PREDICATE_DESCRIPTOR.source, 'giu'))];
+      const nearest = descriptors[descriptors.length - 1];
+      if (nearest && before.slice(nearest.index! + nearest[0].length).trim()) unknownFollowing.push(finite);
+    }
+    // Inner auxiliaries belong to the same reduction (has not been ...).
+    if (following.length) break;
+  }
+  const allVerbs = [...lead.matchAll(ACTIVE_MONEY_VERB)];
+  const verbs = allVerbs.filter((verb, index) => {
+    const object = lead.slice(verb.index! + verb[0].length);
+    const prior = lead.slice(index ? allVerbs[index - 1].index! + allVerbs[index - 1][0].length : 0, verb.index);
+    // A returned/reversed item's fee is a new subject with its own predicate:
+    // "a returned cheque fee ... was debited". Do not let the item's modifier
+    // veto that fee, or hide a finite "has not been charged ... fee" predicate.
+    const feeSubject = /\b(?:fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(object);
+    return !(feeSubject && !PREDICATE_AUXILIARY.test(prior) &&
+      (index > 0 || PREDICATE_START.test(predicate) || COMPLETED_MONEY_VERB.test(predicate)));
+  });
+  const before = verbs[verbs.length - 1];
+  let active: boolean | null = null;
+  if (before) {
+    let prefix = lead.slice(0, before.index);
+    const originalSubject = prefix.replace(/\b[a-z]+\b/giu, word => COMPLETION_ADVERBS.has(word.toLowerCase()) ? ' ' : word).replace(/\s+/gu, ' ');
+    const requestReceipt = /\brequest(?:\s+(?:for|of)\s+(?:(?:a|an|the|your)\s+)?(?:payment|transfer|refund|reversal|chargeback))?\s+(?:was|were|is|are|has\s+been|have\s+been|had\s+been|has|have|had)\s*$/iu.test(originalSubject);
+
+    // Instrument/subject names precede the predicate. A merchant NOT NOW CAFE
+    // following the money is never part of this auxiliary/polarity span.
+    const subjects = [...prefix.matchAll(/\b(?:card|account|wallet|you|beneficiary|payment|purchase|transaction|transfer|withdrawal|salary|deposit|fees?|charges?|commission|tax|levy)\b/giu)];
+    const subject = subjects[subjects.length - 1];
+    if (subject) prefix = prefix.slice(subject.index! + subject[0].length)
+      .replace(/^\s*(?:(?:ending|number|no|with|in)\s*)?[*xX•]*\d{3,4}\b[\s:,-]*/iu, '');
+    else prefix = prefix.slice(Math.max(prefix.lastIndexOf(':'), prefix.lastIndexOf('|'),
+      /^\s*[:=]\s*$/u.test(lead.slice(before.index! + before[0].length)) ? prefix.lastIndexOf('\n') : -1) + 1);
+    const auxiliary = PREDICATE_AUXILIARY.exec(prefix);
+    if (auxiliary) prefix = prefix.slice(auxiliary.index);
+    else if (subject?.[0].toLowerCase() === 'beneficiary') prefix = '';
+    let bridge = lead.slice(before.index! + before[0].length);
+    // A bank FX quote may put the ledger-currency figure after the original
+    // price. Its predicate ends at that first stated money, not at the quote.
+    bridge = bridge.slice(0, firstStatedPrice(bridge) ?? bridge.length);
+    bridge = bridge.split(PREDICATE_DESCRIPTOR)[0].trim();
+    if (/^(?:fees?|charges?|commission|tax|levy|payment|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge) ||
+      /^(?:a|an|the|your|this|that)\s+(?:[a-z'’ -]+\s+)?(?:fees?|charges?|commission|tax|levy|payment|amount|sum|value)(?:\s+(?:of|for))?\s*[:=]?$/iu.test(bridge)) bridge = '';
+    const nominalSubject = subject && /^(?:payment|purchase|transaction|transfer|withdrawal)$/iu.test(subject[0]);
+    active = requestReceipt && !EXPLICIT_DEBIT_OUTCOME.test(before[0]) ? false :
+      completedPredicate(`${prefix} ${before[0]} ${bridge}`, debitOnly && !nominalSubject, false, directions);
+  }
+  if (active === false) return false;
+  const nounLabel = /^(?:purchase|payment|transfer|withdrawal|transaction)$/iu.test(predicate);
+  const nominal = nounLabel || /\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+  const feePredicate = /\b(?:fees?|charges?|commission|tax|levy)\s*(?:(?:of|for|amount|value)\s*[:=]?\s*)*$/iu.test(lead);
+  // A completed purchase/payment predicate proves an expense even when it
+  // uses "made". A credit noun cannot acquire that debit authority.
+  const explicitDebitOnly = debitOnly && !nominal && !feePredicate;
+  for (const finite of following) {
+    // Existing purchase receipts distinguish pending settlement of an
+    // authorised charge from a pending purchase/authorisation itself.
+    if (nominal && /^is\s+(?:currently\s+)?pending\s+settlement$/iu.test(finite)) continue;
+    if (followingReceipts.has(finite)) continue;
+    // A final reversal predicates this same selected fee/purchase. A prior
+    // charged verb cannot certify a debit after that owned credit outcome.
+    if (debitOnly && /\b(?:reversed|refunded|returned|credited)\b/iu.test(finite) &&
+      !EXPLICIT_DEBIT_OUTCOME.test(finite)) return false;
+    const ownedFee = feePredicate || followingFees.has(finite);
+    if (!completedPredicate(finite, debitOnly && !nominal && !ownedFee, ownedFee, directions)) return false;
+  }
+  // Bare past verbs also govern a price-first receipt ("AED300 debited").
+  // Prove that closed predicate before looking at an unrelated later footer.
+  if (COMPLETED_MONEY_WORDS.has(predicate.split(/\s/u)[0]?.toLowerCase()) &&
+    completedPredicate(predicate, explicitDebitOnly, feePredicate, directions)) return true;
+  if (active === null && !following.length && unknownFollowing.length) return false;
+  if (active === null && !following.length && (nominal || nounLabel) && (!predicate || nounLabel)) {
+    const receipt = closedNominalReceipt(lead, predicateTail, firstStatedPrice(tail) !== null);
+    if (!receipt.closed) return false;
+    return receipt.complete ? true : null;
+  }
+  const monetaryTail = COMPLETED_MONEY_VERB.test(predicate);
+  if (predicate && !(nounLabel && following.length) && ((monetaryTail && (nominal || PREDICATE_START.test(predicate))) ||
+    (active === null && (nominal || PREDICATE_START.test(predicate))))) return completedPredicate(predicate, explicitDebitOnly, feePredicate, directions);
+  if (active === null && !following.length && unknownFollowing.length) return false;
+  return following.length ? true : active;
+}
+
+function principalClause(source: string, span: PrincipalSpan | undefined): { start: number; end: number } | null {
+  if (!span) return null;
   const boundary = (at: number) => /[;!?]/u.test(source[at]) ||
-    (source[at] === '.' && /^(?:\s|$)/u.test(source[at + 1] ?? ''));
+    (source[at] === '.' && (/^(?:\s|$)/u.test(source[at + 1] ?? '') || /^(?:please\s+)?do\s+not\s+share\b/iu.test(source.slice(at + 1))));
   let start = span.start, end = span.end;
   while (start > 0 && !boundary(start - 1)) start--;
   while (end < source.length && !boundary(end)) end++;
+  return { start, end };
+}
+
+/** Direction of this money's owned predicate, including a future refund.
+ * A purchase label alone cannot turn "will be refunded" into a future debit.
+ * This is Review ownership only; it never proves settlement or posting.
+ */
+export function hasSelectedCreditPredicate(source: string, span: PrincipalSpan | undefined): boolean {
+  if (hasCompletedPrincipalReturn(source, span)) return true;
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  const directions = new Set<'credit' | 'debit'>();
+  selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), false, directions);
+  return directions.size === 1 && directions.has('credit');
+}
+
+/** Positive internal proof; missing/unknown predicates cannot relax a preview refusal. */
+export function isCompletedExpensePrincipal(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span || isIncompletePrincipal(source, span, true)) return false;
+  const lead = source.slice(clause.start, span.start);
+  const completion = selectedPredicateCompletion(lead, source.slice(span.end, clause.end), true);
+  if (completion !== null) return completion;
+  // Existing Arabic completed debit receipts also provide positive evidence.
+  // Unknown/negated/modal text never becomes proof merely by being unrefused.
+  const arabic = lead.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه');
+  return /(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:خصم|شراء|دفع|سحب)(?:\s+(?:ال)?(?:مبلغ|بمبلغ|بقيمه|بواسطه))*\s*$/u.test(arabic) &&
+    !/(?<![ء-ي])(?:لم|لن|لما|اذا|لو|سوف|قد|يمكن|سيتم)(?![ء-ي])/u.test(arabic);
+}
+
+/** Explicit completed predicate only: an unknown or terse fallback is not proof. */
+export function hasCompletedExpensePredicate(source: string, span: PrincipalSpan | undefined): boolean {
+  const clause = principalClause(source, span);
+  return !!clause && !!span && !isIncompletePrincipal(source, span, true) &&
+    selectedPredicateCompletion(source.slice(clause.start, span.start), source.slice(span.end, clause.end), true) === true;
+}
+
+/** Scope indicative status to the selected movement, excluding conditional/previous-event footers. */
+export function isIncompletePrincipal(source: string, span: PrincipalSpan | undefined, expensePredicate = false): boolean {
+  const clause = principalClause(source, span);
+  if (!clause || !span) return false;
+  const { start, end } = clause;
+  if (hasNegatedPrincipalAssertion(source, span)) return true;
+  if (expensePredicate && hasIncompletePrincipalReference(source.slice(span.end))) return true;
+  if (expensePredicate && hasCompletedPrincipalReturn(source, span)) return true;
+  // A question that ends the selected completion verb is not an assertion.
+  // Ordinary fraud-contact questions after a completed receipt remain scoped
+  // to their own footer, not to the earlier monetary predicate.
+  if (source[end] === '?' && COMPLETED_MONEY_VERB.test(source.slice(start, end).trim().split(/\s/u).pop() ?? '')) return true;
+  // The selected purchase's own passive predicate must be completed too.
+  // A later refund/request sentence cannot make "will be made" or
+  // "was not made" prove an independently completed expense.
+  const ownLead = source.slice(start, span.start);
+  const ownTail = source.slice(span.end, end);
+  if (expensePredicate) {
+    if (selectedPredicateCompletion(ownLead, ownTail) === false) return true;
+  } else if (/\b(?:purchase|payment|transfer|withdrawal|transaction)\s+(?:(?:of|for|amount)\s*[:=]?\s*|[A-Z]{3}\s*)*$/iu.test(ownLead) &&
+    /^\s*(?:[A-Z]{3}\s*)?(?:(?:will|would|shall|may|might|can|could)\s+(?:not\s+)?be|(?:was|were|is|has\s+been|have\s+been)\s+(?:not|never))\s+(?:made|completed|processed|posted|charged|debited|paid|sent)\b(?!\s+by\s+you)/iu.test(ownTail)) return true;
   const blocks = [source.slice(start, end)];
   const header = source.slice(0, start);
   // A leading verdict still owns the field-list amount that follows it:
@@ -44,7 +764,7 @@ export function isHedgedPrincipal(source: string, spans: readonly PrincipalSpan[
 
 const REFUND_LEAD = /(?:\brefund(?:ed)?\s+(?:of|amount(?:\s+of)?|for)?|(?<![ء-ي])(?:(?:ال)?مبلغ\s+)?(?:ال)?استرداد(?:\s+(?:ال)?مبلغ)?(?:\s+بقيم[هة]|\s+بمبلغ)?)\s*[:\-]?\s*$/iu;
 const NOT_CURRENT_REFUND = /\b(?:if|when|unless|earlier|previous|prior|another|other|last)\b|(?<![ء-ي])(?:اذا|حال|سابق[هة]?|اخري)(?![ء-ي])/iu;
-const REFUND_PENDING = /\b(?:initiated|under\s+process(?:ing)?|in\s+process|in\s+progress|being\s+(?:processed|reversed)|will\s+(?:be|reflect|appear|show)|requested|pending|awaiting|submitted|approved|raised)\b|(?<![ء-ي])(?:قيد\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\s+الموافق[هة])(?![ء-ي])/iu;
+const REFUND_PENDING = new RegExp("\\b(?:initiated|under\\s+process(?:ing)?|in\\s+process|in\\s+progress|being\\s+(?:processed|reversed)|will\\s+(?:be|reflect|appear|show)|requested|pending|awaiting|awaited|submitted|approved|raised)\\b|(?<![ء-ي])(?:قيد\\s+(?:ال)?(?:معالج[هة]|تنفيذ|مراجع[هة]|انتظار)|سيتم|سوف|طلب|تمت\\s+الموافق[هة])(?![ء-ي])" + `|${EN_CREDIT_PENDING_STATUS}|${AR_CREDIT_PENDING_STATUS}`, 'iu');
 const REFUND_CANCELLED = /\b(?:has\s+been|was|is|got)\s+(?:cancell?ed|declined|rejected|unsuccessful|voided|reversed)\b|\brefund\s+(?:has\s+)?failed\b|(?<![ء-ي])(?:تم\s+)?(?:الغاء|إلغاء|رفض)\s+(?:طلب\s+)?(?:ال)?استرداد|(?:ال)?استرداد\s+(?:ال)?(?:ملغي|ملغى|ملغا|ملغاه|مرفوض)(?![ء-ي])/iu;
 const REFUND_COMPLETED = /\b(?:credited|issued|processed\s+(?:to|into|on)|posted\s+(?:to|into|on)|received\s+(?:on|in|into)|deposited|returned\s+to|added\s+to)\b|(?<![ء-ي])(?:تم\s+(?:[إا]يداع|[إا]ضاف[هة]|استرداد|[إا]رجاع|[إا]عاد[هة])|اضيف|أضيف|اعيد|أعيد|اودع|أودع)(?![ء-ي])/giu;
 const UNSETTLED_PREDICATE = /\b(?:will|would|shall|not|never|hasn['’]t|wasn['’]t|isn['’]t)\b/iu;
@@ -80,6 +800,16 @@ const SAME_MONEY_REFERENCE = /^\s*(?:[(\[/=≈~]|equivalent(?:\s+to)?|equiv\.?|a
 const ORIGINAL_MOVEMENT_REFERENCE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\s+(?:of|for)?\s*$|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء\s+(?:بمبلغ|بقيمه)?\s*$/i;
 const ORIGINAL_MOVEMENT_CLAUSE = /\b(?:for|against|on|of)\s+(?:your|the)\s+(?:original\s+|earlier\s+|previous\s+)?(?:purchase|transaction|payment|charge|order)\b|(?:لعمليه|عن\s+عمليه|من\s+عمليه)\s+(?:ال)?شراء(?=\s)/iu;
 
+// "and" between capitalised words inside the name a preposition introduces ("from MARKS AND SPENCER
+// has been credited", "H AND M") belongs to that name, not to a second clause. Only a plain "and"
+// counts; everything after the preposition must still be capitalised words (no verb or determiner yet);
+// and the word after "and" must be capitalised and must not open a clause ("the", "your", "a" ...).
+const NAME_BEFORE_AND = /^\s*(?:from|at|to|with|via|by)\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*\s+)+$/u;
+const NAME_AFTER_AND = /^\p{Lu}[\p{L}\p{N}&.'’-]*(?=\s|$)/u;
+const CLAUSE_OPENER = /^(?:a|an|the|your|this|that|our|my|his|her|its|their|another|separate|additional|new|it|we|you|they|i)(?=\s|$)/iu;
+const isNameJoin = (coordinator: string, before: string, after: string): boolean =>
+  /^and\s+$/iu.test(coordinator) && NAME_BEFORE_AND.test(before) && NAME_AFTER_AND.test(after) && !CLAUSE_OPENER.test(after);
+
 /** Ownership ends when a new monetary subject begins, not merely at punctuation. */
 function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly PrincipalSpan[]) {
   // Banks wrap a single movement across lines. Its predicate still belongs
@@ -100,6 +830,7 @@ function refundScope(source: string, own: PrincipalSpan, monetarySpans: readonly
     if (!subject) continue;
     const head = subject[1];
     if (continuesRefund(head) || OPEN_ARGUMENT.test(source.slice(own.end, at))) continue;
+    if (isNameJoin(boundary[0], source.slice(own.end, at), source.slice(at + boundary[0].length, end))) continue;
     end = at;
     independentSubject = true;
     break;
@@ -137,6 +868,7 @@ const SHARED_REFUND_TRANSITION = /^\s*(?:and|but|then)\s+(?:(?:has|have|had|was|
 function ownedRefundVerdict(sentence: string, principalEnd: number): RefundStatus | null {
   const hits = REFUND_VERDICTS.flatMap(([status, pattern]) => [...sentence.matchAll(pattern)]
     .filter(match => status !== 'completed' || match.index! >= principalEnd)
+    .filter(match => status !== 'pending' || hasPendingCreditStatus(sentence) || !hasPendingCreditStatus(match[0]))
     .map(match => ({ status, start: match.index!, end: match.index! + match[0].length })))
     .sort((a, b) => a.start - b.start || b.end - a.end);
   let owned: { status: RefundStatus; end: number; unsettled: boolean } | null = null;
@@ -181,6 +913,7 @@ export function refundPrincipalStatus(
   const scope = refundScope(source, own, monetarySpans);
   const sentence = scope.text;
   if (NOT_CURRENT_REFUND.test(source.slice(scope.start, own.start))) return null;
+  if (mentionsRefund(sentence) && hasCreditCondition(sentence)) return 'pending';
   const verdict = ownedRefundVerdict(sentence, own.end - scope.start);
   if (verdict) return verdict;
   if (UNSETTLED_PREDICATE.test(sentence)) return 'pending';
@@ -191,9 +924,292 @@ export function refundPrincipalStatus(
 }
 
 /** The selected purchase itself was refunded; a previous or hypothetical refund cannot qualify it. */
+/** A completed return explicitly refers to the sole selected prior debit.
+ * A new price/request/condition cannot borrow that debit's amount. */
+export function completedArabicPrincipalReturnTarget(source: string, span: PrincipalSpan | undefined): 'card' | 'account' | null {
+  if (!span || !source.includes('المبلغ') || !source.includes('استرداد')) return null;
+  // Folding preserves the money reader's offsets. The definite amount is an
+  // antecedent; an indefinite refund amount cannot borrow the debit's price.
+  const raw = source.replace(/[أإآٱ]/gu, 'ا').replace(/ة/gu, 'ه').replace(/[ىئ]/gu, 'ي');
+  const scope = sentenceAround(raw, span, true);
+  if (!/[.!;]/u.test(raw[scope.end] ?? '')) return null;
+  const next = raw.slice(scope.end + 1).trim();
+  const returned = /^تم\s+استرداد\s+المبلغ\s+الي\s+(بطاقتك|حسابك)[.!]?$/u.exec(next);
+  if (!returned) return null;
+  // Prove the original debit through the same guard, on its original prefix.
+  // That prefix has no return clause, so this does not recurse on the return.
+  if (!isCompletedExpensePrincipal(raw.slice(0, scope.end + 1), span)) return null;
+  const outside = raw.slice(0, span.start) + ' '.repeat(span.end - span.start) + raw.slice(span.end);
+  const withoutCard = outside.replace(/(من\s+بطاقتك\s+المنتهيه\s+بـ?\s*)\p{Nd}{4}(?!\p{Nd})/u, '$1');
+  // Only the selected price and the one identified debited card are admitted.
+  // Another price, identifier or numeric qualification cannot supply ownership.
+  if (withoutCard === outside || /\p{N}/u.test(withoutCard)) return null;
+  return returned[1] === 'بطاقتك' ? 'card' : 'account';
+}
+
+export function hasCompletedPrincipalReturn(source: string, span: PrincipalSpan | undefined): boolean {
+  if (source.includes('استرداد') && completedArabicPrincipalReturnTarget(source, span)) return true;
+  if (!span || !/\b(?:refunded|returned|reversed|credited)\b/iu.test(source)) return false;
+  const scope = sentenceAround(source, span, true);
+  if (!/\b(?:was\s+debited|was\s+charged)\b/iu.test(scope.text) ||
+    firstStatedPrice(source.slice(span.end, scope.end)) !== null) return false;
+  if (hasCreditCondition(scope.text) || hasPendingCreditStatus(scope.text) ||
+    selectedPredicateCompletion(source.slice(scope.start, span.start), source.slice(span.end, scope.end), true) !== true) return false;
+  const next = source.slice(scope.end).replace(/^[.!?\s]+/u, '').trim();
+  if (!next || firstStatedPrice(next) !== null || hasCreditCondition(next) || hasPendingCreditStatus(next)) return false;
+  if (/^(?:it|this\s+amount|a\s+refund\s+of\s+the\s+same)\s+(?:has\s+been|was)\s+(?:refunded|returned|reversed|credited|processed\s+and\s+credited)\s+to\s+your\s+(?:account|card)[.!]?$/iu.test(next)) return true;
+  const merchant = /^([\p{L}\p{N}._&'’-]+(?:\s+[\p{L}\p{N}._&'’-]+){0,5}?)\s+(?:has\s+)?(?:refunded|returned|reversed|credited)\s+the\s+purchase\s+to\s+your\s+(?:account|card)[.!]?$/iu.exec(next);
+  if (!merchant) return false;
+  const name = merchant[1].replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`\\bat\\s+${name}(?=\\s|[,;]|$)`, 'iu').test(scope.text);
+}
+
 export function isCompletedPrincipalRefund(source: string, span: PrincipalSpan | undefined): boolean {
+  if (hasCompletedPrincipalReturn(source, span)) return true;
   if (!span) return false;
   const scope = sentenceAround(source, span);
-  if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text)) return false;
+  if (NOT_CURRENT_REFUND.test(scope.text) || REFUND_PENDING.test(scope.text) || hasCreditCondition(scope.text)) return false;
   return /\b(?:purchase|transaction|payment|charge)\b(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is|have\s+been)\s+(?:fully\s+)?refunded\b|(?<![ء-ي])(?:عمليه\s+)?(?:ال)?شراء(?:[^.\n]|\.(?=\S)){0,120}?\s+(?:و?تم\s+)(?:استرداد|استرجاع|ارجاع)(?:ها|ه)(?![ء-ي])/i.test(scope.text);
 }
+
+const CARD_CREDIT_TARGET = /\bcredit\s+card\b|بطاق(?:تك|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة]/iu;
+const CARD_CREDIT_MOVEMENT = /\bcredited(?:\s+with|\s+to)?\b|(?<![ء-ي])(?:تم\s+)?(?:إيداع|ايداع|إضافة|اضافه|اضافة)(?![ء-ي])/iu;
+
+const REPAYMENT_MONEY = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])\s*\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+// A card is the destination, never an instrument used to pay a merchant/bill.
+const REPAYMENT_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and|of)\b)[\p{L}\p{N}.'’-]+\s+){0,3}?card\b`;
+const REPAYMENT_DESTINATION_CARD = String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|using|via|with|through|from|to|for|by|on|at|and)\b)[\p{L}\p{N}.'’-]+\s+){0,6}?card\b`;
+const REPAYMENT_NUMBER = String.raw`\p{Nd}+(?:[.,٫٬]\p{Nd}+)*`;
+const REPAYMENT_UNIT = String.raw`(?:[A-Z]{3}|Dhs?\.?|SR|[$€£])`;
+const REPAYMENT_ANY_MONEY = String.raw`(?:${REPAYMENT_UNIT}\s*${REPAYMENT_NUMBER}|${REPAYMENT_NUMBER}\s*${REPAYMENT_UNIT})`;
+const REPAYMENT_DESTINATION = String.raw`(?:on|to|towards?)\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}`;
+const REPAYMENT_GREETING = String.raw`(?:(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*)?`;
+const AR_REPAYMENT_MONEY = String.raw`(?:${REPAYMENT_ANY_MONEY}|${REPAYMENT_NUMBER}\s*(?:درهم|دراهم|ريال)|(?:درهم|دراهم|ريال)\s*${REPAYMENT_NUMBER})`;
+const COMPLETED_CARD_BALANCE_RECEIPT = new RegExp(
+  String.raw`^تم\s+(?:(?:[إا]يداع|[إا]ضاف[هة])\s+(?:مبلغ\s+)?|استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+)${AR_REPAYMENT_MONEY}`, 'iu',
+);
+const UNQUALIFIED_REPAYMENT = new RegExp(
+  // Android joins a short notification title and body with a space. This
+  // prefix only holds a repayment; it never qualifies a title as an issuer.
+  String.raw`(?:^|[\n.!?]\s*)\s*(?:[A-Z][A-Z0-9 .&-]{1,32}(?::\s*|\s+))?${REPAYMENT_GREETING}(?:` +
+  String.raw`payment\s+(?:received|credited)\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|we\s+(?:have\s+)?received\s+(?:your\s+)?payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|payment\s+(?:of\s+)?${REPAYMENT_ANY_MONEY}\s+(?:was\s+)?received\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|(?:thank\s+you|thanks)\s+for\s+(?:your\s+)?payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+${REPAYMENT_DESTINATION}` +
+  String.raw`|your\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}\s+to\s+(?:your\s+)?${REPAYMENT_DESTINATION_CARD}(?:[^.\n]|\.\d){0,80}\bsuccessful\b` +
+  String.raw`|your\s+(?:(?:[\p{L}.'’-]+)\s+){0,4}?(?:credit|charge|covered)\s+card\s+payment\s+of\s+${REPAYMENT_ANY_MONEY}(?:[^.\n]|\.\d){0,60}\bsuccessful\b` +
+  String.raw`|تم\s+استلام\s+سداد\s+(?:بمبلغ|مبلغ)\s+${AR_REPAYMENT_MONEY}\s+(?:على|علي|إلى|الى|الي|في)\s+بطاق(?:تك|تكم|ه|ة)\s+(?:ال)?ا[يئ]تماني[هة])`,
+  'giu',
+);
+const QUALIFIED_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?(?:` +
+  String.raw`payment\s+received|thank\s+you\s+for\s+(?:your\s+)?payment\s+of` +
+  String.raw`)\s+(${REPAYMENT_MONEY})\s+on\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+  String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
+// Preserve the mature receipt grammar already used by settlement pairing.
+const QUALIFIED_MATURE_REPAYMENT_RECEIPT = new RegExp(
+  String.raw`^\s*(?:[A-Z][A-Z0-9 .&-]{1,32}:\s*)?(?:Dear\s+Customer[,!:]\s*)?payment\s+of\s+(${REPAYMENT_MONEY})\s+(?:has\s+been\s+)?received\s+(?:towards?|on)\s+your\s+${REPAYMENT_CARD}\s+(?:ending(?:\s+(?:in|with))?|number|no\.?)\s*(?:[*xX•·-]\s*)*\p{Nd}{4}(?!\p{Nd})` +
+    String.raw`(?=\s*(?:[.!?\n]|$|(?:thank|avl|available|balance|for\s+(?:queries|help|details|information))\b))`,
+  'iu',
+);
+/** A receipt names the person's destination card and tail, never a merchant instrument. */
+export function isQualifiedCardRepaymentReceipt(source: string, expectedCurrency?: string): boolean {
+  const match = QUALIFIED_REPAYMENT_RECEIPT.exec(source) ?? QUALIFIED_MATURE_REPAYMENT_RECEIPT.exec(source);
+  if (!match || /\b(?:debit|prepaid)\b/iu.test(match[0])) return false;
+  if (/\bthank\s+you\b/iu.test(match[0]) && !/\b(?:credit|charge|covered)\b/iu.test(match[0])) return false;
+  if (expectedCurrency === undefined) return true;
+  const token = match[1].match(/^[^\p{Nd}]+/u)?.[0].trim().replace(/\.$/u, '').toUpperCase();
+  const code = token === 'DH' || token === 'DHS' ? 'AED' : token === 'SR' ? 'SAR' : token;
+  // This newly admitted family needs source-local currency proof; never price
+  // a foreign card settlement through the core parser's fallback FX table.
+  return code === expectedCurrency;
+}
+
+/** Weaker receipt claims cannot prove new spending/income. Keep them in Review. */
+export function isUnqualifiedCardRepayment(source: string): boolean {
+  if (!/\bpayment\b|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/iu.test(source)) return false;
+  const text = repaymentReadingText(source);
+  if (!/\bpayment\b|سداد/iu.test(text) || isQualifiedCardRepaymentReceipt(text)) return false;
+  for (const match of text.matchAll(UNQUALIFIED_REPAYMENT)) {
+    const after = text.slice(match.index! + match[0].length).split(/[\n!?;]|\.(?=\s|$)/u)[0];
+    const clause = match[0] + after;
+    // A shop receipt names the merchant; a bank/ATM/branch is a payment rail.
+    const merchantAt = /\bat\s+\p{L}/iu.test(clause) &&
+      !/\bat\s+(?:the\s+)?(?:atm\b|[\p{L}]*bank\b|(?:[\p{L}]+\s+){0,3}branch\b)/iu.test(clause);
+    if (merchantAt || /\b(?:from|using)\s+(?!your\b|the\s+(?:bank|account)\b)\p{L}/iu.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+function repaymentReadingText(source: string): string {
+  return (/[\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source) ? source.normalize('NFKC') : source)
+    .replace(/[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '');
+}
+
+function cardBalanceReceiptText(source: string): string {
+  return repaymentReadingText(source)
+    .replace(/^\s*[A-Z][A-Z .&'-]{1,32}(?:alert|bank|sms)\s*\r?\n\s*/iu, '')
+    .replace(/^\s*[A-Z][A-Z0-9 .&'-]{1,32}:\s*/iu, '')
+    .replace(/^\s*(?:Dear\s+[^\n.!?\p{N},:!]{1,40}|Hi|Hello)[,!:]\s*/iu, '').trim();
+}
+
+/** Explicit absence/future credit is not an actionable card-balance event. */
+export function isUnpostedCardBalanceClaim(source: string): boolean {
+  if (!/[إا]يداع|[إا]ضاف|سداد|[\u0640\u064B-\u065F\u0670\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFB50-\uFEFF\uFF01-\uFFEF]/u.test(source)) return false;
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && /^(?:(?:(?:لم|لن)\s+يتم|سيتم|سوف\s+يتم|(?:[إا]ذا|لو|في\s+حال[هة]?)\s+تم)\s+(?:[إا]يداع|[إا]ضاف[هة]|استلام\s+سداد)|تم\s+استلام\s+طلب\s+(?:[إا]يداع|[إا]ضاف[هة]|سداد)|تم\s+(?:[إا]يداع|[إا]ضاف[هة])\s+طلب)(?![ء-ي])/u.test(text);
+}
+
+/** Regional past-tense proof may qualify Review, never automatic settlement. */
+export function isCompletedCardBalanceReceipt(source: string): boolean {
+  const text = cardBalanceReceiptText(source);
+  return CARD_CREDIT_TARGET.test(text) && COMPLETED_CARD_BALANCE_RECEIPT.test(text);
+}
+
+/** A balance in another clause cannot become the repayment principal. */
+export function isCompletedCardRepaymentPrincipal(source: string, span: PrincipalSpan): boolean {
+  const clause = sentenceAround(source, span).text;
+  return isCompletedCardBalanceReceipt(clause) && isUnqualifiedCardRepayment(clause);
+}
+
+/** A credit to the credit-card balance may be a settlement, not new income.
+ * Leave ambiguous credits in Review; explicit refunds retain their own rules.
+ */
+export function isUnqualifiedCardCredit(source: string, span: PrincipalSpan | undefined): boolean {
+  // Most purchases have neither predicate. Avoid scanning sentence boundaries
+  // and running refund checks unless both are present somewhere in the source.
+  if (!span || !CARD_CREDIT_TARGET.test(source) || !CARD_CREDIT_MOVEMENT.test(source)) return false;
+  const clause = sentenceAround(source, span).text;
+  if (/\bcash\s*back\s+(?:amount\s+)?of\b/iu.test(clause)) return false;
+  if (/\bbooking\b[^.\n]{0,80}\bwas\s+cancell?ed\s+and\b/iu.test(clause)) return false;
+  if (isCompletedPrincipalRefund(source, span) || /\brefund(?:ed)?\b|استرداد/iu.test(clause)) return false;
+  return CARD_CREDIT_TARGET.test(clause) && CARD_CREDIT_MOVEMENT.test(clause);
+}
+
+/**
+ * A web address, with or without a scheme: `http://x`, `www.x`, or a bare
+ * `host.tld/path` (a path is required without a scheme, so "Amazon.com" as a
+ * merchant name is not a link). Group 1 is the host.
+ */
+const LINK = String.raw`(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,12})\/[^\s]*`;
+/**
+ * What a smishing text asks the reader to do at its link. The weak verbs
+ * (update, log in, sign in, receive, get) are ordinary bank-footer verbs ("Log
+ * in: https://www.chase.com", "Update the app: …"); they count only for the
+ * person's own details/money or at a bait host.
+ */
+const STRONG_ACTION = String.raw`dispute|verify|validate|confirm|cancel|claim|collect|unlock|unblock|reactivate|restore|redeem|reverse|accept`;
+const WEAK_ACTION = String.raw`update|log\s?in|sign\s?in|receive|get`;
+const LINK_ACTION = `${STRONG_ACTION}|${WEAK_ACTION}`;
+const ACTION_THEN_LINK = new RegExp(String.raw`\b(${LINK_ACTION})\b([^.!?\n]{0,30}?)(?:${LINK})`, 'giu');
+const LINK_THEN_ACTION = new RegExp(String.raw`(?:${LINK})[^.!?\n]{0,12}?\bto\s+(?:${LINK_ACTION})\b`, 'giu');
+const WEAK_ACTION_ONLY = new RegExp(String.raw`^(?:${WEAK_ACTION})$`, 'iu');
+const OWN_DETAILS = /^\s*(?:your\s+)(?:details|information|info|account|card|kyc|money|funds|payment|refund|reward)\b/iu;
+/** Link shorteners hide the destination; a bank footer that uses one is still a bait shape. */
+const SHORTENER = /^(?:bit\.ly|tinyurl\.com|rb\.gy|t\.co|cutt\.ly|is\.gd|goo\.gl|ow\.ly|shorturl\.at|tiny\.cc|s\.id|t\.ly)$/iu;
+/** App stores are where a bank's own "update the app" footer points. */
+const APP_STORE = /^(?:apps\.apple\.com|play\.google\.com)$/iu;
+/** Lookalike registrable domains spell the action or security words into the name. */
+const BAIT_HOST = /verify|secure|dispute|claim|refund|login|signin|support|help|billing|unlock|update|confirm|account/iu;
+/**
+ * The registrable domain: the last two labels, or three under a two-letter
+ * country code with a generic second level (`bank.co.uk`). A bank's own
+ * subdomain (`secure.chase.com`) is judged as `chase.com`.
+ */
+const registrableDomain = (host: string): string => {
+  const labels = host.toLowerCase().replace(/^www\./u, '').replace(/[:.]+$/u, '').split('.');
+  const take = labels.length >= 3 && /^[a-z]{2}$/u.test(labels.at(-1)!) &&
+    /^(?:co|com|net|org|gov|ac|edu|bank)$/u.test(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-take).join('.');
+};
+/**
+ * "chase.com-refund.example": a real-looking domain spelled into another one.
+ * Judged after `www.` is stripped, and only when another label follows, so a
+ * real hyphenated host ("co-operativebank.co.uk", "net-banking…") is not one.
+ */
+const SPOOFED_TLD = /\.(?:com|net|org|bank)-[^.]+\./iu;
+const spoofedHost = (host: string): boolean => SPOOFED_TLD.test(host.replace(/^www\./iu, ''));
+/** Brand and security words a lookalike domain borrows. */
+const LOOKALIKE_WORD = /chase|paypal|amazon|apple|bank|secure|verify|login|refund|wells|citi|hsbc|barclays|venmo|zelle|account|support|help/iu;
+const letters = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/gu, '');
+/** The brand the alert names in its header ("Chase: …", "Co-operative Bank: …"). */
+const headerBrand = (source: string): string | null => {
+  const header = source.match(/^\s*([\p{L}][\p{L}&' .-]{1,40}?)\s*:/u)?.[1];
+  return header ? letters(header) : null;
+};
+/** The link is the alert's own brand domain: its first label spells the header brand exactly. */
+const ownBrandHost = (host: string, brand: string | null): boolean => {
+  if (!brand) return false;
+  const label = letters(registrableDomain(host).split('.')[0]);
+  return label.length >= 3 && (label === brand || brand.startsWith(label) && /^(?:bank|uk|us|card|cards)?$/u.test(brand.slice(label.length)));
+};
+const baitHost = (host: string | undefined): boolean => {
+  if (!host) return false;
+  if (APP_STORE.test(host.replace(/^www\./iu, ''))) return false;
+  return SHORTENER.test(host) || spoofedHost(host) || BAIT_HOST.test(registrableDomain(host));
+};
+/** A "Not you?" / "If this wasn't you" / "to stop this payment" sentence. */
+const DENIAL_CONTEXT = /\bnot\s+you\b|\bwasn['’]t\s+you\b|\bwas\s+not\s+you\b|\bdidn['’]t\s+make\b|\bstop\s+this\s+(?:payment|transaction|charge)\b/iu;
+const ANY_LINK = new RegExp(LINK, 'giu');
+/**
+ * Footer noun phrases that name a service, not an action on this money:
+ * UCO Bank's "Report Dispute <link>" and "To cancel alerts, visit …".
+ */
+const FOOTER_SERVICE = /\breport\s+dispute\b|\b(?:cancel|stop|unsubscribe\s+from)\s+(?:these\s+|all\s+|text\s+|sms\s+|account\s+)?alerts?\b/giu;
+
+/**
+ * A LINK WHOSE CALL TO ACTION IS DISPUTE/VERIFY/CANCEL/CLAIM is the shape of
+ * smishing ("Your card has been charged $499 … If this wasn't you, dispute
+ * here: http://…"). The money sentence before it is bait, not a bank fact, so
+ * such a message never auto-posts. It is bait when a strong action is
+ * imperative at the link ("dispute here:", "Claim it now", "Verify: …"), a
+ * weak one names the person's own details or money ("update your details"),
+ * or the link is a shortener, a lookalike registrable domain or a spoofed one
+ * ("chase.com-refund.example"); in a "Not you?" sentence any hyphenated or
+ * lookalike domain is bait. A purpose-clause footer to a plain domain ("To
+ * dispute this charge visit www.chase.com/dispute"), a bank subdomain ("Sign
+ * in at secure.chase.com"), an app store, "Report Dispute", "To cancel
+ * alerts" and "Not you? Visit chase.com/fraud" are not.
+ */
+export const hasLinkCallToAction = (source: string): boolean => {
+  const text = source.replace(FOOTER_SERVICE, (phrase) => ' '.repeat(phrase.length));
+  const brand = headerBrand(source);
+  for (const match of text.matchAll(ACTION_THEN_LINK)) {
+    const action = match[1] ?? '';
+    const between = match[2] ?? '';
+    const host = match[3] ?? match[4];
+    if (baitHost(host)) return true;
+    if (WEAK_ACTION_ONLY.test(action)) {
+      if (OWN_DETAILS.test(between)) return true;
+      // "Log in now: http://…" is bait unless the link is the brand's own
+      // domain ("Chase: … Log in: https://www.chase.com").
+      if (/\b(?:here|now|immediately|below)\b|:/iu.test(between) && !(host && (ownBrandHost(host, brand) || APP_STORE.test(host.replace(/^www\./iu, ''))))) return true;
+      continue;
+    }
+    const purpose = /\bto\s*$/iu.test(text.slice(Math.max(0, match.index! - 4), match.index!));
+    if (!purpose && /\b(?:here|now|immediately|below)\b|:/iu.test(between)) return true;
+  }
+  for (const match of text.matchAll(LINK_THEN_ACTION)) {
+    if (baitHost(match[1] ?? match[2])) return true;
+  }
+  const sentences = text.split(/(?<=[.!?\n])\s+/u);
+  for (const [index, sentence] of sentences.entries()) {
+    // "Not you? Click …" puts the question in the sentence before the link.
+    const context = `${sentences[index - 1] ?? ''} ${sentence}`;
+    for (const match of sentence.matchAll(ANY_LINK)) {
+      const host = match[1] ?? match[2];
+      if (host && spoofedHost(host)) return true;
+      // In a "Not you?" sentence a hyphenated domain is bait only when it also
+      // borrows a brand/security word and is not the alert's own brand:
+      // "chase-x.example" is, "first-direct.com" and "credit-agricole.fr" are not.
+      const label = host ? registrableDomain(host).split('.')[0] : '';
+      if (host && DENIAL_CONTEXT.test(context) && !APP_STORE.test(host.replace(/^www\./iu, '')) &&
+        !ownBrandHost(host, brand) &&
+        (baitHost(host) || (label.includes('-') && LOOKALIKE_WORD.test(label)))) return true;
+    }
+  }
+  return false;
+};

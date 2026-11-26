@@ -13,7 +13,6 @@
  * never leave the iPhone.
  */
 import { workflowCopy } from '@/components/workflows/workflow-copy';
-import * as Device from 'expo-device';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -71,9 +70,13 @@ import {
 
 type InviteState = TrustedDeviceInvite & { expiresAt: number; link: string };
 
+/**
+ * A generic, localized label, never the phone's own name. expo-device's
+ * deviceName is often "<owner>'s Galaxy" on Android and the user-assigned
+ * UIDevice.name on iOS 15, and the relay stores this label; the store privacy
+ * answers declare no Name. The user can rename the device after pairing.
+ */
 function defaultDeviceName(language: Lang): string {
-  const reported = Device.deviceName?.trim();
-  if (reported && [...reported].length <= 40) return reported;
   if (language === 'ar') return Platform.OS === 'ios' ? 'هذا الآيفون' : 'هذا الهاتف';
   return Platform.OS === 'ios' ? 'This iPhone' : 'This phone';
 }

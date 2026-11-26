@@ -11,7 +11,7 @@ import { reconcileTransfers } from '@/lib/transfer-reconciliation';
  */
 type BalanceState = Pick<AppState, 'accounts' | 'transactions'>;
 
-export interface NetWorthBreakdown {
+interface NetWorthBreakdown {
   /** Known positive balances in exact ledger minor units. */
   balanceFils: number;
   /** Absolute value of known negative balances, including card amounts owed. */

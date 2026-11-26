@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createHash } = require('node:crypto');
 const load = require('./load-ts.cjs').createLoader();
+const { assertCreditRetained } = require('./credit-retention.cjs');
 const { inspectUniversalBankEvent } = load('@/lib/universal-parser');
 const { createLaunchAlertSession } = load('@/lib/launch-alert-parser');
 const { parseHistoricalMessageRecords } = load('@/lib/historical-import');
@@ -105,6 +106,18 @@ for (const [label, body, type] of [
 ]) test(`${label} remains the correct direction beside the new ownership grammar`, () => {
   const row = { ...fixtures[label === 'incoming Interac' ? 2 : 0], id: label, body };
   const parsed = android(row);
+  if (label.includes('security advice')) {
+    assert.equal(parsed, null, 'the broad original-text guard also holds courtesy conditions');
+    assertCreditRetained(load, body, { minor: 2500, currency: 'GBP', country: 'GB', sender: 'Barclays', reviewOnly: true });
+    const imported = history(row);
+    assert.deepEqual(imported.parsed, []);
+    assert.equal(imported.reviewCandidates.length, 1);
+    const review = imported.reviewCandidates[0];
+    assert.equal(review.kind, 'universal');
+    assert.equal(review.event.status, 'informational');
+    assert.equal(review.event.amount.value.minorUnits, '2500');
+    return;
+  }
   assert.ok(parsed);
   assert.equal(parsed.type, type);
   const imported = history(row);

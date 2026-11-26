@@ -72,7 +72,7 @@ test('Home, widget, and native reminder projections preserve both service identi
   const output = snapshot.buildWidgetSnapshot({ now, currency: 'AED', exponent: 2, language: 'en', hideAmounts: false,
     today: { todayFils: 0, todayCount: 0, week: [], budget: null }, upcoming: widget });
   assert.deepEqual(output.bills.map(bill => [bill.title, bill.logoId]), [
-    ['E& · •••• 1111', 'etisalat'], ['E& · •••• 2222', 'etisalat'],
+    ['E& · •••• 1111', null], ['E& · •••• 2222', null],
   ]);
 });
 

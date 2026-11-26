@@ -1,3 +1,4 @@
+import { formatMoneyText } from '@/lib/ui-money-text';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { spendingTrendsCopy as copy } from '@/lib/reference-copy';
 import React, { useState } from 'react';
@@ -18,7 +19,6 @@ import { formatAED, ledgerWholeMajor, monthLabel, weekdayShort } from '@/lib/for
 import { tapped } from '@/lib/haptics';
 import {
   displayNumberConventions,
-  formatMinorUnits,
   type LedgerMoneySpec,
   wholeMajorUnits,
 } from '@/lib/ledger-money';
@@ -40,7 +40,7 @@ function shortAmount(fils: number, spec: LedgerMoneySpec | null): string {
   return `${value}`;
 }
 
-export type MonthFlow = { key: string; incomeFils: number; expenseFils: number };
+type MonthFlow = { key: string; incomeFils: number; expenseFils: number };
 type Props = {
   months: readonly MonthFlow[];
   selectedKey: string;
@@ -75,7 +75,7 @@ export function SpendingTrends(p: Props) {
   const theme = useTheme(); const band = useBand('spending'); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
-    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+    ? formatMoneyText(Math.round(fils), moneySpec) : formatAED(fils);
   const { width, fontScale } = useWindowDimensions();
   // Keep compact chart labels only when they fit. The visible detail list
   // below always names every month and both exact amounts.

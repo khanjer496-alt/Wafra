@@ -55,7 +55,6 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
     '@/components/ui/action-icon-button': { ActionIconButton: boundary('ActionIconButton') },
     '@/components/ui/icon': { Icon: boundary('Icon') },
     '@/components/ui/money': { Money: boundary('Money') },
-    '@/components/ui/period-pill': { PeriodPill: boundary('PeriodPill') },
     '@/components/ui/text-field': { TextField: boundary('TextField') },
     '@/constants/theme': { Spacing: { one: 4, two: 8, three: 12, four: 16, five: 24 } },
     '@/hooks/use-band': { useBand: () => band },

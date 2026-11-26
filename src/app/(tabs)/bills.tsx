@@ -92,6 +92,7 @@ import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
+import { withIosTabGate } from '@/components/ios-tab-gate';
 
 
 /**
@@ -349,7 +350,7 @@ const RecurringRow = React.memo(function RecurringRow({
   );
 });
 
-export default function BillsScreen() {
+function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const language = useLanguage();
@@ -1416,3 +1417,6 @@ const styles = StyleSheet.create({
   detailQuiet: { flexGrow: 1, flexShrink: 1, maxWidth: '100%', paddingHorizontal: Spacing.three },
   detailPrimary: { flexGrow: 2, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
 });
+
+// iOS: NativeTabs mounts every tab at launch and never freezes them; see ios-tab-gate.tsx.
+export default withIosTabGate(BillsScreen);

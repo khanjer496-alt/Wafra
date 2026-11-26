@@ -101,7 +101,7 @@ check(snapshot(hidden: false)?.weekTotalMinor == nil, "partial week never has a 
 check(snapshot(hidden: false, week: "[1,2,3,4,5,6,7]")?.weekTotalMinor == 28, "seven-day total retains minor units exactly")
 check(snapshot(hidden: true, week: "[1,2,3,4,5,6,7]")?.weekTotalMinor == nil, "hidden week has no total")
 check(snapshot(hidden: false, week: "[9007199254740991,1,0,0,0,0,0]")?.weekTotalMinor == nil, "unsafe week total is hidden")
-check(snapshot(hidden: false, billLogo: "\"logoId\":\"dewa\",")?.bills.first?.logoId == "dewa", "bundled logo id decodes")
+check(snapshot(hidden: false, billLogo: "\"logoId\":\"dewa\",")?.bills.first?.logoId == nil, "legacy brand id uses monogram")
 check(snapshot(hidden: false, billLogo: "\"logoId\":\"../../dewa\",")?.bills.first?.logoId == nil, "paths cannot select a logo")
 check(snapshot(hidden: false)?.bills.first?.logoId == nil, "older snapshots retain fallback")
 

@@ -69,23 +69,3 @@ test('disabled research deep links redirect without exposing the research UI', (
   assert.equal(tree.type, 'Redirect');
   assert.equal(tree.props.href, '/settings-data');
 });
-
-for (const [file, exported] of [
-  ['src/components/diagnostic-export-control.tsx', 'DiagnosticExportControl'],
-  ['src/components/tester-diagnostics-control.tsx', 'TesterDiagnosticsControl'],
-]) {
-  test(`${exported} fails closed if accidentally mounted in a release screen`, () => {
-    const filename = path.join(root, file);
-    const ast = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
-    const boundary = new Proxy(function forbiddenPrivateWork() { throw Error('developer component executed'); }, {
-      get(_target, key) { return key === '__esModule' ? true : boundary; },
-    });
-    const dependencies = Object.fromEntries(ast.statements.filter(ts.isImportDeclaration)
-      .map(node => [node.moduleSpecifier.text, boundary]));
-    dependencies['react/jsx-runtime'] = boundary;
-    for (const development of [false, undefined]) {
-      const api = load(filename, dependencies, { __DEV__: development });
-      assert.equal(api[exported](), null);
-    }
-  });
-}

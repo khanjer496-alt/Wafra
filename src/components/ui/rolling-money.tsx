@@ -1,3 +1,5 @@
+import { useLanguage } from '@/hooks/use-language';
+import { moneyCodeRun } from '@/lib/money-code-run';
 import React, { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import Animated, {
@@ -148,14 +150,15 @@ export function RollingMoney({
   prefixStyle,
   maxFontSizeMultiplier,
 }: RollingMoneyProps) {
+  const language = useLanguage();
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const reducedMotion = useReducedMotion();
   const denomination = moneySpec ?? contextMoney;
   const currency = denomination?.currency ?? ledgerCurrencyDisplay();
   const amount = `${signGlyph(fils, sign)}${figureText(fils, denomination, decimals, localeKey)}`;
-  const label = `${prefix ? `${currency} ` : ''}${amount}`;
-  const placement = placementFor(currency, localeKey);
+  const label = prefix ? moneyCodeRun(amount, currency, language) : amount;
+  const placement = language === 'ar' ? { position: 'after' as const, spaced: true } : placementFor(currency, localeKey);
   const motion = !reducedMotion && (Platform.OS !== 'android' || motionOnAndroid);
 
   // Derived during render (not in an effect) so the frame that first shows a
@@ -186,7 +189,7 @@ export function RollingMoney({
 
   const currencyNode = prefix ? (
     <ThemedText themeColor="textSecondary" style={[styles.currencyPrefix, prefixStyle]}>
-      {labelFor(currency, localeKey)}
+      {language === 'ar' ? currency : labelFor(currency, localeKey)}
     </ThemedText>
   ) : null;
   const figure = activeRoll ? (
@@ -207,7 +210,7 @@ export function RollingMoney({
   const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
     <View testID={testID} accessible accessibilityRole="text" accessibilityLabel={label}
-      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      style={[styles.inline, { direction: 'ltr' }, !placement.spaced && styles.tight, style]}>
       {first}
       {second}
     </View>

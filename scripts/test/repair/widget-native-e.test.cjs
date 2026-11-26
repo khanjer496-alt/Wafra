@@ -201,18 +201,12 @@ test('the widget Foundation logic compiles and passes on macOS', { skip: os.plat
   assert.match(run.stdout, /all checks passed/);
 });
 
-test('native logo allowlists have exactly the bundled JS identities and identical artwork bytes', () => {
-  const crypto = require('node:crypto');
+test('native widgets reject all legacy brand identities and keep labelled totals', () => {
   const logos = load(path.join(root, 'src/lib/widget-logo.ts'));
-  const digest = file => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
+  assert.equal(logos.WIDGET_LOGO_IDS.length, 0);
+  assert.match(swiftSnapshot, /static let ids: Set<String> = \[\]/);
   const kotlin = read(`${kotlinDir}/WidgetSnapshot.kt`);
-  for (const id of logos.WIDGET_LOGO_IDS) {
-    assert.ok(swiftSnapshot.includes(`"${id}"`));
-    assert.ok(kotlin.includes(`"${id}"`));
-    const original = digest(`assets/merchants/${id}.png`);
-    assert.equal(digest(`targets/widget/Assets.xcassets/wafra_logo_${id}.imageset/${id}.png`), original);
-    assert.equal(digest(`${androidRes}/drawable-nodpi/wafra_logo_${id}.png`), original);
-  }
+  assert.match(kotlin, /val LOGO_IDS = emptySet<String>\(\)/);
   assert.match(swiftSnapshot, /WafraLogo.validated\(bill.logoId\)/);
   assert.match(kotlin, /takeIf \{ it in LOGO_IDS \}/);
   // The week's bars never stand alone: the exact, labelled total sits under them.

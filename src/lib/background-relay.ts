@@ -115,7 +115,7 @@ async function appendDurable(rows: ScannedSms[]): Promise<ScannedSms[]> {
  * the app. `enableRelayBackgroundSync` refreshes this on every foreground
  * launch, which is where the answer is actually known.
  */
-export interface ChargeAlertPreference {
+interface ChargeAlertPreference {
   enabled: boolean;
   lang: Lang;
 }

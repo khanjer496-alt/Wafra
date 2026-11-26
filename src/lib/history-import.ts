@@ -1,6 +1,7 @@
 /** Durable, body-free progress for Android's first inbox history import. */
 export type HistoryImportStatus = 'paused' | 'running' | 'failed' | 'complete';
-export type HistoryImportError = 'page-failed' | 'inbox-access';
+export type HistoryImportError = 'page-failed' | 'inbox-access' | 'review-capacity' | 'review-expired';
+export interface HistoryImportHold { paused: 'review-capacity' | 'review-expired' }
 
 // Explicit Resume must also work when the persisted status is already paused.
 // This source-free signal carries neither progress nor ledger data.
@@ -60,7 +61,7 @@ export interface HistoryImportCoordinatorDependencies<Page extends HistoryImport
     page: Page,
     next: HistoryImportProgress,
     canCommit: () => boolean,
-  ): Promise<void | boolean>;
+  ): Promise<void | boolean | HistoryImportHold>;
   /** Status-only transition; never advances a provider cursor. */
   persistProgress(next: HistoryImportProgress): Promise<void>;
   classifyError?(error: unknown): HistoryImportError;
@@ -118,10 +119,10 @@ export function normalizeHistoryImportProgress(value: unknown): HistoryImportPro
     found,
     startedAt,
     updatedAt,
-    error: status === 'failed' &&
-      (candidate.error === 'page-failed' || candidate.error === 'inbox-access')
+    error: status === 'paused' && (candidate.error === 'review-capacity' || candidate.error === 'review-expired')
       ? candidate.error
-      : null,
+      : status === 'failed' && (candidate.error === 'page-failed' || candidate.error === 'inbox-access')
+        ? candidate.error : null,
   };
 }
 
@@ -186,12 +187,12 @@ export function createHistoryImportCoordinator<Page extends HistoryImportPage>(
         if (!complete && !next.cursor) throw new Error('History page did not provide a cursor');
         const committed = await dependencies.commitPage(page, next, canContinue);
         if (!generationIsCurrent()) return currentProgress();
-        if (committed === false) {
+        if (committed === false || (typeof committed === 'object' && committed !== null)) {
           progress = {
             ...progress,
             status: 'paused',
             updatedAt: dependencies.now(),
-            error: null,
+            error: typeof committed === 'object' ? committed.paused : null,
           };
           await dependencies.persistProgress(progress);
           return progress;

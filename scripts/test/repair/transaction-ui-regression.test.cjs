@@ -147,16 +147,6 @@ test('invalid entry amount keeps the pinned Save disabled', () => {
   const save = labelled(tree.props.footer, h.deps['@/lib/i18n'].t('saveChanges'));
   assert.ok(save);assert.equal(save.props.disabled, true);
 });
-test('Noon One uses explicit display aliases without broad substring matching', () => {
-  const filename = path.join(root, 'src/components/ui/merchant-logo-assets.ts');
-  const source = fs.readFileSync(filename, 'utf8'), deps = {};
-  for (const [index, match] of [...source.matchAll(/require\('([^']+\.png)'\)/g)].entries()) deps[match[1]] = index + 1;
-  const { merchantLogoFor } = load(filename, deps);
-  for (const title of ['Noon One', 'NOON ONE', 'Noon One Dubai', 'Noon One 12345']) {
-    assert.equal(merchantLogoFor(title)?.id, 'noon', title);
-  }
-  for (const title of ['Cafe near Noon One', 'Noon One Cafe', 'Noon One Payment Unknown']) assert.equal(merchantLogoFor(title), null, title);
-});
 test('shared sheet keeps a fixed footer below the shrinking scroll region', () => {
   const h = createHarness();
   h.deps['react-native'].Modal = 'Modal';

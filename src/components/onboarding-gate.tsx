@@ -45,7 +45,6 @@ import { RemindersStep } from '@/components/onboarding/e-reminders';
 import { WatchStep } from '@/components/onboarding/e-watch';
 import { WelcomeStep } from '@/components/onboarding/e-welcome';
 import { ReadySummary } from '@/components/onboarding/ready-summary';
-import { SmsPermissionExplainer } from '@/components/onboarding/sms-explainer';
 import { suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
 import { useBand } from '@/hooks/use-band';
 import {
@@ -53,6 +52,7 @@ import {
   hasSmsPermission,
   isSmsScanningAvailable,
   openBankNotificationAccessSettings,
+  openSmsPermissionSettings,
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
@@ -73,6 +73,7 @@ import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-
 import { getIosCaptureNativeModule } from '@/lib/capture';
 import { iosCaptureChecklist, type IosChecklistEvidence } from '@/lib/ios-capture-checklist';
 import { resolveIosSetupReadiness } from '@/lib/ios-capture-setup';
+import { iosSupportsLiveCapture } from '@/lib/ios-setup-availability';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
@@ -137,6 +138,8 @@ const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
+declare const __DEV__: boolean | undefined;
+const isDevelopmentBuild = () => typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const isWebPlatform = () => Platform.OS === 'web';
 const isPublicWebSurface = () =>
   isWebPlatform() && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1';
@@ -219,8 +222,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   /** Why the Welcome restore stopped: the file could not be read, or it was not a backup. */
   const [restoreFailed, setRestoreFailed] = useState<'read' | 'invalid' | null>(null);
-  /** Android: the explainer shown before the system SMS permission prompt. */
-  const [smsExplainerVisible, setSmsExplainerVisible] = useState(false);
   /** iPhone: recorded evidence behind the four-row capture checklist. */
   const [checklistEvidence, setChecklistEvidence] = useState<IosChecklistEvidence | null>(null);
   const startedEventSent = useRef(false);
@@ -275,7 +276,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ((statementImportSession.current !== null &&
       params.statementSession === statementImportSession.current) ||
       (Platform.OS === 'ios' && matchesIosStatementHandoff(params.statementSession)));
-  const previewMode = state.onboarded && params.onboarding === 'preview';
+  // Replaying the welcome flow was a testing aid. Release builds never enter it,
+  // whatever the link or route params say; __DEV__ is false there.
+  const previewMode = isDevelopmentBuild() && state.onboarded && params.onboarding === 'preview';
   const previewStarted = useRef(false);
 
   const resetJourneyState = () => {
@@ -641,18 +644,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  /**
-   * Android SMS: explain what the permission means before Android asks.
-   * A phone that already granted it, and the preview, go straight on.
-   */
+  // The shared permission boundary presents the same explainer from every entry point.
   const openSmsSource = async () => {
-    if (previewMode || androidSmsReady) {
-      await runSetupAction(startScan);
-      return;
-    }
-    const granted = await hasSmsPermission().catch(() => false);
-    if (granted) await runSetupAction(startScan);
-    else setSmsExplainerVisible(true);
+    await runSetupAction(startScan);
   };
 
   /**
@@ -867,13 +861,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
     trackOnboardingEvent('capture_setup_started', { focus: legacyFocus, tracking: legacyTracking, source: 'sms' });
     let granted = false;
+    let disclosureDeclined = false;
     try {
-      granted = await requestSmsPermission();
+      granted = await requestSmsPermission({ onDisclosureDeclined: () => { disclosureDeclined = true; } });
     } catch {
       trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'sms', outcome: 'failed' });
       setSmsDenied(true);
       return;
     }
+    if (disclosureDeclined) return;
     if (!granted) {
       trackOnboardingEvent('capture_permission_denied', { focus: legacyFocus, tracking: legacyTracking, source: 'sms', outcome: 'denied' });
       setSmsDenied(true);
@@ -935,27 +931,28 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       return;
     }
     trackOnboardingEvent('capture_setup_started', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
-    await setAndroidCaptureSources({
-      sms: androidSmsReady || state.androidCaptureSources?.sms === true,
-      notifications: true,
+    const opened = await openBankNotificationAccessSettings({
+      skipSettingsIfGranted: true,
+      onAccepted: async () => {
+        await setAndroidCaptureSources({
+          sms: androidSmsReady || state.androidCaptureSources?.sms === true,
+          notifications: true,
+        });
+        await setCaptureOptOut(false);
+        if (!await enableAndroidNotificationAdmission()) {
+          trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
+          return false;
+        }
+        if (!androidSmsReady) {
+          recordCaptureChoice('notifications');
+          saveJourney('capture');
+        }
+        const granted = hasBankNotificationSystemAccess();
+        setAndroidNotificationReady(granted);
+        setAwaitingNotificationAccess(!granted);
+        return true;
+      },
     });
-    await setCaptureOptOut(false);
-    const admitted = await enableAndroidNotificationAdmission();
-    if (!admitted) {
-      trackOnboardingEvent('capture_setup_failed', { focus: legacyFocus, tracking: legacyTracking, source: 'bank-notifications' });
-      return;
-    }
-    if (!androidSmsReady) {
-      recordCaptureChoice('notifications');
-      saveJourney('capture');
-    }
-    if (hasBankNotificationSystemAccess()) {
-      setAndroidNotificationReady(true);
-      setAwaitingNotificationAccess(false);
-      return;
-    }
-    setAwaitingNotificationAccess(true);
-    const opened = await openBankNotificationAccessSettings();
     if (!opened) setAwaitingNotificationAccess(false);
   };
 
@@ -1040,6 +1037,29 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     const session = Crypto.randomUUID();
     statementImportSession.current = session;
     router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
+  };
+
+  /**
+   * iOS 15 has no automatic capture (App Intents need iOS 16), so step 5
+   * leads with statements. Preview imports nothing; it shows the result as
+   * "I'll add by hand" does.
+   */
+  const importStatementsInstead = () => {
+    if (previewMode) {
+      void runSetupAction(continueManually);
+      return;
+    }
+    openStatementImport();
+  };
+
+  /**
+   * "Paste bank messages": the paste form needs no automation, so it works on
+   * iOS 15. The gate steps aside on /import-sms and resumes this step after.
+   */
+  const openPasteImport = () => {
+    if (Platform.OS !== 'ios' || previewMode || !beginStepTransition()) return;
+    saveJourney('capture');
+    router.push({ pathname: '/import-sms', params: { manual: '1' } });
   };
 
   // The iPhone checklist reads only recorded evidence: the owner's own
@@ -1418,18 +1438,29 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const backDisabled = setupBusy || finishing;
   const onClose = previewMode ? closePreview : undefined;
   const lang = language === 'ar' ? 'ar' : 'en';
+  // The rule /ios-setup's controller uses: below iOS 16 it could only say so.
+  const iosCaptureUnsupported = Platform.OS === 'ios' && !iosSupportsLiveCapture(Platform.Version);
+  // iOS 15: once a statement or pasted message is in the ledger, step 5 leads
+  // with Continue (the "by hand" finish) and a result that says so. The
+  // preview reads the real ledger, so it keeps the first-run shape.
+  const iosImported = iosCaptureUnsupported && !previewMode && state.transactions.length > 0;
+  const iosImportedResult = iosCaptureUnsupported && !previewMode && (discoveredResult?.tx ?? 0) > 0;
 
   const captureStep = (
     <EStepFrame palette={stepBand} step={5} testID={Platform.OS === 'ios' ? 'onboarding-ios-live' : 'onboarding-capture'}
       // Pinned only with a primary action: Set up on iPhone, Continue once an
       // Android source is ready. "How it works" alone ends the scroll.
       pinActions={Platform.OS === 'ios' || (Platform.OS === 'android' && (androidSmsReady || androidNotificationReady))}
-      // Back from the SMS explainer returns to the source list on the same
-      // step; it never leaves the explainer flag set behind.
-      onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
+      onBack={goBack}
       onClose={onClose} backDisabled={backDisabled}
-      footer={Platform.OS === 'android' && smsExplainerVisible ? null : <>
-        {Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
+      footer={<>
+        {iosImported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={words.continue}
+          onPress={() => void runSetupAction(continueManually)} disabled={setupBusy} busy={setupBusy}
+          testID="onboarding-live-continue" />
+          : iosCaptureUnsupported ? <EButton palette={stepBand} color={bandButtonColor(stepBand)}
+          label={t('iosLocalUnsupportedStatement')} onPress={importStatementsInstead} disabled={setupBusy}
+          testID="onboarding-live-statements" />
+          : Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
           onPress={() => void runSetupAction(beginCapture)} disabled={setupBusy} busy={setupBusy}
           testID="onboarding-live-action" /> : null}
         {Platform.OS === 'android' && (androidSmsReady || androidNotificationReady) ? <EButton palette={stepBand}
@@ -1437,27 +1468,19 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           label={t(androidSmsReady && androidNotificationReady ? 'onboardCaptureContinueBoth' : 'onboardCaptureContinueOne')}
           onPress={() => void runSetupAction(finishAndroidCapture)} disabled={setupBusy}
           testID="onboarding-capture-continue" /> : null}
-        {Platform.OS !== 'web' ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
+        {/* "How it works" explains the Messages automation iOS 15 cannot run. */}
+        {Platform.OS !== 'web' && !iosCaptureUnsupported ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
           onPress={() => setLearnMoreVisible(true)} testID="onboarding-how-it-works" /> : null}
       </>}>
-      {Platform.OS === 'android' && smsExplainerVisible ? (
-        <SmsPermissionExplainer
-          palette={stepBand}
-          language={lang}
-          disabled={setupBusy}
-          onContinue={() => {
-            setSmsExplainerVisible(false);
-            void runSetupAction(startScan);
-          }}
-          onNotNow={() => setSmsExplainerVisible(false)}
-          currency={confirmedCurrency} country={confirmedCountry}
-        />
-      ) : <>
-        <EHeadline palette={stepBand} size={42}>{Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}</EHeadline>
+      <>
+        <EHeadline palette={stepBand} size={42}>
+          {iosCaptureUnsupported ? t('onboardLiveUnsupportedTitle') : Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}
+        </EHeadline>
         <EBody palette={stepBand}>
-          {Platform.OS === 'ios' ? t('onboardLiveBody') : Platform.OS === 'android' ? words.captureBodyAndroid : words.captureBodyWeb}
+          {iosCaptureUnsupported ? t('onboardLiveUnsupportedBody') : Platform.OS === 'ios' ? t('onboardLiveBody')
+            : Platform.OS === 'android' ? words.captureBodyAndroid : words.captureBodyWeb}
         </EBody>
-        {Platform.OS === 'ios' ? <CaptureChecklist
+        {Platform.OS === 'ios' && !iosCaptureUnsupported ? <CaptureChecklist
           palette={stepBand}
           rows={iosCaptureChecklist(previewMode ? null : checklistEvidence)}
           titles={{
@@ -1488,14 +1511,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               ready={androidNotificationReady} disabled={setupBusy}
               onPress={() => void runSetupAction(connectAndroidNotifications)} testID="onboarding-source-notifications" />
           </> : null}
-          {Platform.OS !== 'web' && !previewMode ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
+          {/* On iOS 15 statements are the primary action above until one is in; pasting sits beside them. */}
+          {Platform.OS !== 'web' && !previewMode && (!iosCaptureUnsupported || iosImported) ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
             body={words.importStatementsBody} disabled={setupBusy} onPress={openStatementImport}
             testID="onboarding-source-statements" /> : null}
-          <SourceRow palette={stepBand} icon="plus" title={words.addByHand} body={words.addByHandBody}
+          {iosCaptureUnsupported && !previewMode ? <SourceRow palette={stepBand} icon="mail" title={t('iosLocalUnsupportedPaste')}
+            body={t('onboardPasteMessagesBody')} disabled={setupBusy} onPress={openPasteImport}
+            testID="onboarding-source-paste" /> : null}
+          {/* Continue above is this same finish once something is imported. */}
+          {!iosImported ? <SourceRow palette={stepBand} icon="plus" title={words.addByHand}
+            body={iosCaptureUnsupported ? t('onboardManualIosUnsupportedBody') : words.addByHandBody}
             disabled={setupBusy} onPress={() => void runSetupAction(continueManually)}
-            testID="onboarding-source-manual" />
+            testID="onboarding-source-manual" /> : null}
         </View>
-        {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={[
+        {/* iOS 15 has no automatic capture to describe; only the no-login promise applies. */}
+        {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={iosCaptureUnsupported ? [
+          { icon: 'bank', title: t('onboardPrivacyNoLoginTitle'), body: t('onboardPrivacyNoLoginBody') },
+        ] : [
           { icon: 'lock', title: t('onboardCaptureLocalAutomaticTitle'), body: t('onboardCaptureLocalAutomaticBody') },
           { icon: 'bank', title: t('onboardPrivacyNoLoginTitle'), body: t('onboardPrivacyNoLoginBody') },
           { icon: 'repeat', title: t('onboardPrivacyChoiceTitle'), body: t('onboardPrivacyChoiceBody') },
@@ -1503,22 +1535,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         {/* Not on the capture step as it fades away after the choice: the result is already on its way. */}
         {setupBusy ? <ActiveStepOnly><ThemedText type="meta" accessibilityLiveRegion="polite"
           style={{ color: stepBand.onBandSecondary }}>{t('onboardSetupWorking')}</ThemedText></ActiveStepOnly> : null}
-      </>}
+      </>
     </EStepFrame>
   );
 
   const completeTitle = finishSaveFailed ? t('onboardFinishSaveFailedTitle')
     : failedCompletion ? t('onboardCompleteNeedsAttentionTitle')
       : smsDenied ? t('onboardPermissionChoiceTitle')
-        : !automaticCompletion ? words.manualTitle
+        : !automaticCompletion ? iosImportedResult ? t('onboardIosImportedTitle') : words.manualTitle
           : firstPayment ? words.workingTitle(preferredName)
             : words.waitingTitle;
   const completeBody = finishSaveFailed ? t('onboardFinishSaveFailedBody')
     : failedCompletion ? t('onboardCompleteNeedsAttentionBody')
       : smsDenied ? t('onboardPermissionChoiceBody')
-        : !automaticCompletion ? t('onboardCompleteManualBody')
+        : !automaticCompletion ? t(iosImportedResult ? 'onboardIosImportedBody' : 'onboardCompleteManualBody')
           : firstPayment ? null
-            : words.waitingBody;
+            : Platform.OS === 'android' ? words.waitingBodyAndroid : words.waitingBody;
   // Nothing arrived by itself: the watched limit, still whole, as Home's stack.
   const completeWatch = watchedNow && state.ledgerMoney && !failedCompletion && !smsDenied && !finishSaveFailed
     ? <LimitResult palette={stepBand} watch={watchedNow} money={state.ledgerMoney} />
@@ -1544,7 +1576,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         <EButton palette={stepBand} variant="secondary" label={t('retryHistoryRead')}
           onPress={() => void runSetupAction(startScan)} disabled={setupBusy} />
         <EButton palette={stepBand} variant="secondary" label={t('openPhoneSettings')}
-          onPress={() => void Linking.openSettings().catch(() => {})} />
+          onPress={() => void (Platform.OS === 'android' ? openSmsPermissionSettings() : Linking.openSettings()).catch(() => {})} />
       </View> : null}
       {automaticCompletion && firstPayment && !failedCompletion && !smsDenied && !finishSaveFailed
         ? <ArrivedCard palette={stepBand} transaction={firstPayment.arrived} money={state.ledgerMoney ?? null}
@@ -1645,7 +1677,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           onBack={goBack} onClose={onClose} disabled={setupBusy || finishing} />;
       case 'paywall':
         return <PaywallStep tiles={patternTiles} watchedCategory={watchedLabel} remindersOn={remindersOn}
-          trialDays={trialDaysLeft(state)} captureOn={captureOn} onFinish={finishJourney} onBack={goBack} onClose={onClose}
+          trialDays={trialDaysLeft(state)} trialStartTs={state.trialStartTs} captureOn={captureOn} onFinish={finishJourney} onBack={goBack} onClose={onClose}
           preview={previewMode} finishing={setupBusy || finishing} arrivedFrom={arrivedFrom} />;
     }
   };

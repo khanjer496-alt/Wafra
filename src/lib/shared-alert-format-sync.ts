@@ -14,25 +14,25 @@ import {
  */
 
 /** Same ceiling as relay.ts requests: fail fast on bad networks. */
-export const SHARED_FORMAT_TIMEOUT_MS = 15_000;
+const SHARED_FORMAT_TIMEOUT_MS = 15_000;
 /** Refresh at most once a day. */
 export const SHARED_FORMAT_REFRESH_MS = 24 * 60 * 60 * 1000;
 /** Defensive cap on the response body we are willing to parse. */
 const MAX_BODY_CHARS = 8 * 1024 * 1024;
 
-export type SharedFormatTransport = (url: string, init: RequestInit) => Promise<Response>;
+type SharedFormatTransport = (url: string, init: RequestInit) => Promise<Response>;
 
-export interface SharedFormatSyncOptions {
+interface SharedFormatSyncOptions {
   /** Injected in tests; defaults to the same expo/fetch transport relay.ts uses. */
   fetch?: SharedFormatTransport;
   timeoutMs?: number;
 }
 
-export type SubmitSharedShapeResult =
+type SubmitSharedShapeResult =
   | { ok: true; status: 'pending' | 'published' | 'blocked' }
   | { ok: false; reason: 'invalid-shape' | 'unauthorized' | 'rate-limited' | 'rejected' | 'unavailable' };
 
-export type PublishedFormatsResult =
+type PublishedFormatsResult =
   | { kind: 'updated'; etag: string | null; formats: SharedAlertFormat[] }
   | { kind: 'not-modified' }
   | { kind: 'failed' };

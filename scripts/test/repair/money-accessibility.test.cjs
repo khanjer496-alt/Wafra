@@ -51,7 +51,7 @@ test('Arabic Money uses the same localized digits in its visible and accessible 
   const h = createHarness({ language: 'ar' });
   const node = h.deps['@/components/ui/money'].Money({ fils: 12345 });
   assert.equal(node.props.accessibilityLabel, h.format.formatAED(12345));
-  assert.equal(String(text(node)).replace(/\s+/g, ' ').trim(), node.props.accessibilityLabel);
+  assert.equal(String(text(node)).replace(/[\u2066\u2069]/g, '').replace(/\s+/g, ' ').trim(), node.props.accessibilityLabel.replace(/[\u2066\u2069]/g, '').replace(/\s+/g, ' '));
 });
 
 test('Spending trend month selection is exposed to web as well as native accessibility', () => {

@@ -1,0 +1,5 @@
+[
+  {"id": "08-privacy", "n": "08", "out": "appstore-6.3-en-08.png", "source": "v-settings-privacy.png", "cropTop": 200, "theme": "indigo", "headline": ["Privacy,", "you control."], "sub": "No bank login. Optional App Lock. Backups you keep."},
+  {"id": "05-accounts-alt", "n": "05", "out": "alt-appstore-6.3-en-05-accounts.png", "source": "v-accounts-default.png", "cropTop": 186, "theme": "indigo", "headline": ["Card dues,", "without surprises."], "sub": "What's left on each statement, and when it's due."},
+  {"id": "07-budgets-alt", "n": "07", "out": "alt-appstore-6.3-en-07-budgets.png", "source": "v-limits-default.png", "cropTop": 186, "theme": "slate", "headline": ["Give each", "category a limit."], "sub": "See how much of each limit you've used."}
+]

@@ -17,7 +17,7 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 /** The settle after the second frame, before the foreground lease is checked. */
 export const AFTER_FIRST_FRAMES_DELAY_MS = 120;
 
-export interface AfterFirstFramesOptions {
+interface AfterFirstFramesOptions {
   /** The settle after the two frames, in ms (default AFTER_FIRST_FRAMES_DELAY_MS). */
   delayMs?: number;
   /** Also wait out the foreground lease. Default true. */

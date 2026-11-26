@@ -29,6 +29,8 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+# Public certificate only (no key): build-apk.yml encrypts Android artifacts to it.
+!.github/android-artifact-recipient.pem
 
 # local env files
 .env*.local
@@ -51,6 +53,7 @@ app-example
 scripts/test/build/
 
 # Local build products and simulator/test captures
+__pycache__/
 /artifacts/
 /builds/
 /modules/*/android/build/

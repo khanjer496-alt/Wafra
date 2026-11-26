@@ -100,8 +100,9 @@ ok('capacity, expiry and currency-skip notices are localized and counted, never 
 
 // Design language E: "I'll add by hand" sits beside every automatic source on
 // the first-payment step, and says there is no message access.
+// iOS 15 has no capture to turn on later, so its row names what stays available.
 ok('SMS access is visibly optional and the no-access path is explicit',
-  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\} body=\{words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
+  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}\s*body=\{iosCaptureUnsupported \? t\('onboardManualIosUnsupportedBody'\) : words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
     /addByHandBody: 'No message access\./.test(read('src/lib/onboarding-e-copy.ts')) &&
     /continueManually/.test(onboarding) &&
     /onboardManualChoiceBody:[\s\S]{0,180}No SMS access/.test(copy) &&

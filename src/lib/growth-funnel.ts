@@ -14,7 +14,7 @@ export const GROWTH_PLACEMENTS = {
   settingsPro: 'settings_pro',
 } as const;
 
-export type GrowthEvent =
+type GrowthEvent =
   | 'onboarding_started'
   | 'onboarding_focus_selected'
   | 'onboarding_tracking_selected'
@@ -30,7 +30,7 @@ export type GrowthEvent =
   | 'onboarding_completed'
   | 'post_import_pro_opened';
 
-export interface GrowthEventPayload {
+interface GrowthEventPayload {
   focus?: OnboardingFocus | null;
   tracking?: OnboardingTracking | null;
   /** How the bank delivers alerts. A channel, never a provider identity. */
@@ -41,7 +41,7 @@ export interface GrowthEventPayload {
   source?: 'sms' | 'bank-notifications';
 }
 
-export type GrowthEventSink = (event: GrowthEvent, payload: GrowthEventPayload) => void;
+type GrowthEventSink = (event: GrowthEvent, payload: GrowthEventPayload) => void;
 
 let sink: GrowthEventSink | null = null;
 
@@ -50,7 +50,7 @@ export function setGrowthEventSink(next: GrowthEventSink | null): void {
   sink = next;
 }
 
-export function growthPlatform(): GrowthEventPayload['platform'] {
+function growthPlatform(): GrowthEventPayload['platform'] {
   if (Platform.OS === 'ios' || Platform.OS === 'android' || Platform.OS === 'web') return Platform.OS;
   return 'other';
 }

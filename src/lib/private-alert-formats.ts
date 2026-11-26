@@ -16,7 +16,7 @@ import { extractUniversalDates } from '@/lib/universal-dates';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 
 /** Private device format metadata. It never contains source text or extracted values. */
-export type PrivateAlertToken = Exclude<TemplateToken, { k: 'L' } | { k: 'NUM' } | { k: 'CARD' } | { k: 'ALNUM' }> |
+type PrivateAlertToken = Exclude<TemplateToken, { k: 'L' } | { k: 'NUM' } | { k: 'CARD' } | { k: 'ALNUM' }> |
   { k: 'L'; h: string } | { k: 'NUM' | 'CARD'; f: string; h?: string } | { k: 'ALNUM'; n: number; h?: string };
 export interface PrivateAlertFormat {
   v: 1;
@@ -43,10 +43,10 @@ export interface PrivateAlertMatchOptions extends MatchOptions {
   country?: string | null;
   dateOrder?: LearnedDateOrder | null;
 }
-export type PrivateAlertFormatMatch = { kind: 'none' } | { kind: 'prefill'; fields: LearnedFields; templateId: string };
-export type PrivateAlertLearnResult = { ok: true; template: PrivateAlertFormat } | { ok: false; reason: string };
-export type PrivateAlertValidationResult = { ok: true; template: PrivateAlertFormat; fields: LearnedFields } | { ok: false; reason: string };
-export const PRIVATE_ALERT_FORMAT_MAX_TEMPLATES = 50;
+type PrivateAlertFormatMatch = { kind: 'none' } | { kind: 'prefill'; fields: LearnedFields; templateId: string };
+type PrivateAlertLearnResult = { ok: true; template: PrivateAlertFormat } | { ok: false; reason: string };
+type PrivateAlertValidationResult = { ok: true; template: PrivateAlertFormat; fields: LearnedFields } | { ok: false; reason: string };
+const PRIVATE_ALERT_FORMAT_MAX_TEMPLATES = 50;
 const MAX_TOKENS = 160;
 const DIGEST = /^[a-f0-9]{64}$/;
 const MAX_EPOCH = 8_640_000_000_000_000;

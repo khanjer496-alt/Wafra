@@ -14,7 +14,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 const flat = (style) => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
 
 function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform = 'ios', states, appState = 'active',
-  largeText = false, width = 390, checkoutReady = true } = {}) {
+  largeText = false, width = 390, checkoutReady = true, purchaseOutcome = 'cancelled' } = {}) {
   const h = createHarness({ platform, theme, language, states, largeText, width });
   const effects = [];
   const started = [];
@@ -62,7 +62,7 @@ function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform =
   h.local('@/lib/pro-plans', 'src/lib/pro-plans.ts');
   h.deps['@/components/superwall-billing-context'] = { useWafraBilling: () => ({ available: true, configured: checkoutReady,
     configurationError: null, fetchProOffers: async () => { h.events.push(['fetchProOffers']); return []; },
-    purchasePro: async () => 'cancelled', restorePro: async () => null }) };
+    purchasePro: async () => purchaseOutcome, restorePro: async () => null }) };
   h.local('@/lib/pattern', 'src/lib/pattern.ts');
   h.local('@/lib/onboarding-e-copy', 'src/lib/onboarding-e-copy.ts');
   h.local('@/components/ui/pattern-mosaic');
@@ -295,6 +295,28 @@ for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) 
   });
 }
 
+// App Store Review Guideline 2.3.10: an iPhone paywall names only Apple's
+// store. Android keeps its Google Play wording exactly as before.
+for (const language of ['en', 'ar']) for (const platform of ['ios', 'android']) {
+  test(`onboarding without a storefront names only this platform's store: ${language}/${platform}`, async () => {
+    const s = setup({ language, platform, checkoutReady: false, states: { 1: 'unavailable' } });
+    const { t } = s.deps['@/lib/i18n'];
+    const expected = t(platform === 'ios' ? 'playOnlyBodyIos' : 'playOnlyBody');
+    const panel = text(byID(renderPaywall(s).nodes, 'onboarding-plans-unavailable'));
+    assert.ok(panel.includes(expected), 'the panel says where Pro can be bought');
+
+    // The store itself answering "unavailable" to a purchase gets the same platform's wording.
+    const store = setup({ language, platform, purchaseOutcome: 'unavailable', states: { 0: PRO_OFFERS, 1: 'ready', 2: 'yearly' } });
+    byID(renderPaywall(store).nodes, 'onboarding-paywall-pro').props.onPress();
+    await new Promise((resolve) => setImmediate(resolve));
+    const notices = store.events.filter((event) => event[0] === 'state' && event[2]?.title === t('purchaseUnavailable'));
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0][2].body, expected);
+    if (platform === 'ios') assert.doesNotMatch(`${panel} ${notices[0][2].body}`, /Android|Google|Play Store|أندرويد|اندرويد|جوجل/);
+    else assert.match(expected, /Google Play/);
+  });
+}
+
 test('unavailable onboarding prices can retry only with a configured store', async () => {
   const s = setup({ platform: 'android', states: { 1: 'unavailable' } });
   const retry = byID(renderPaywall(s).nodes, 'onboarding-plans-retry');
@@ -340,7 +362,7 @@ test('the paywall decoration is hidden from assistive tech, untouchable, and dra
   const own = s.deps['@/components/ui/pattern-mosaic'].PatternMosaic({ tiles: [dining], tile: flat(drawn.props.style).width, compact: true, accessibilityLabel: '' });
   assert.equal(JSON.stringify(drawn.props.children), JSON.stringify(own.props.children), 'their category glyph');
   // The timeline's spoken label is unchanged.
-  assert.match(byID(nodes, 'onboarding-trial-timeline').props.accessibilityLabel, /^What happens during the free days\. Today: /);
+  assert.match(byID(nodes, 'onboarding-trial-timeline').props.accessibilityLabel, /^What happens with free automatic capture\. Today: /);
   // No watched category: an example tile, never a figure.
   const generic = byID(renderPaywall(setup(), answers.skipped, { watchedCategory: null }).nodes, 'onboarding-paywall-keeps-going');
   assert.doesNotMatch(text(generic), /\d/);
@@ -415,7 +437,7 @@ test('the free way on is the one button when there is no Pro button; prices and 
   const free = byID(nodes, 'onboarding-paywall-free');
   assert.equal(free.type, 'Pressable');
   assert.equal(free.props.accessibilityRole, 'button');
-  assert.equal(free.props.accessibilityLabel, 'Start the free 3 days');
+  assert.equal(free.props.accessibilityLabel, 'Start 3 days of free automatic capture');
   assert.ok(byID(nodes, 'onboarding-plans-unavailable'));
   // With the Pro button, the free way on stays a text action under it.
   const shown = renderPaywall(setup());

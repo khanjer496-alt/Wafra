@@ -14,7 +14,8 @@ import { CoinColors, Fonts, type BandPalette, type Colors } from '@/constants/th
 import { useAppActive } from '@/hooks/use-app-active';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { filledCoins, shareOf } from '@/lib/coin-math';
-import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText } from '@/lib/ui-money-text';
 import type { HomeToday } from '@/lib/home-today';
 
 type Props = {

@@ -3,6 +3,7 @@ import { isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/
 import type { FxQuote } from '@/lib/fx';
 import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { nonPostingReason } from '@/lib/sms-parser';
+import { hasLinkCallToAction, hasClickLinkPrompt, hasMobileMoneyCallback, isLeadingNumericDiscountOffer, isUnqualifiedPeerTransferClaim, isUnqualifiedCardRepayment, isQualifiedCardRepaymentReceipt, isUnpostedCardBalanceClaim } from '@/lib/principal-posting-guards';
 import type { BestEffortMarker, CaptureInstrument } from '@/lib/types';
 import type { UniversalBankEvent, UniversalMoney } from '@/lib/universal-types';
 
@@ -331,131 +332,6 @@ const AUTHORISATION = /\bauthori[sz](?:ed|ation)\b/iu;
 const COMPLETED = /\b(?:completed|posted|settled)\b/iu;
 
 /**
- * A web address, with or without a scheme: `http://x`, `www.x`, or a bare
- * `host.tld/path` (a path is required without a scheme, so "Amazon.com" as a
- * merchant name is not a link). Group 1 is the host.
- */
-const LINK = String.raw`(?:https?:\/\/|www\.)([^\s/?#]+)[^\s]*|\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,12})\/[^\s]*`;
-/**
- * What a smishing text asks the reader to do at its link. The weak verbs
- * (update, log in, sign in, receive, get) are ordinary bank-footer verbs ("Log
- * in: https://www.chase.com", "Update the app: …"); they count only for the
- * person's own details/money or at a bait host.
- */
-const STRONG_ACTION = String.raw`dispute|verify|validate|confirm|cancel|claim|collect|unlock|unblock|reactivate|restore|redeem|reverse|accept`;
-const WEAK_ACTION = String.raw`update|log\s?in|sign\s?in|receive|get`;
-const LINK_ACTION = `${STRONG_ACTION}|${WEAK_ACTION}`;
-const ACTION_THEN_LINK = new RegExp(String.raw`\b(${LINK_ACTION})\b([^.!?\n]{0,30}?)(?:${LINK})`, 'giu');
-const LINK_THEN_ACTION = new RegExp(String.raw`(?:${LINK})[^.!?\n]{0,12}?\bto\s+(?:${LINK_ACTION})\b`, 'giu');
-const WEAK_ACTION_ONLY = new RegExp(String.raw`^(?:${WEAK_ACTION})$`, 'iu');
-const OWN_DETAILS = /^\s*(?:your\s+)(?:details|information|info|account|card|kyc|money|funds|payment|refund|reward)\b/iu;
-/** Link shorteners hide the destination; a bank footer that uses one is still a bait shape. */
-const SHORTENER = /^(?:bit\.ly|tinyurl\.com|rb\.gy|t\.co|cutt\.ly|is\.gd|goo\.gl|ow\.ly|shorturl\.at|tiny\.cc|s\.id|t\.ly)$/iu;
-/** App stores are where a bank's own "update the app" footer points. */
-const APP_STORE = /^(?:apps\.apple\.com|play\.google\.com)$/iu;
-/** Lookalike registrable domains spell the action or security words into the name. */
-const BAIT_HOST = /verify|secure|dispute|claim|refund|login|signin|support|help|billing|unlock|update|confirm|account/iu;
-/**
- * The registrable domain: the last two labels, or three under a two-letter
- * country code with a generic second level (`bank.co.uk`). A bank's own
- * subdomain (`secure.chase.com`) is judged as `chase.com`.
- */
-const registrableDomain = (host: string): string => {
-  const labels = host.toLowerCase().replace(/^www\./u, '').replace(/[:.]+$/u, '').split('.');
-  const take = labels.length >= 3 && /^[a-z]{2}$/u.test(labels.at(-1)!) &&
-    /^(?:co|com|net|org|gov|ac|edu|bank)$/u.test(labels.at(-2)!) ? 3 : 2;
-  return labels.slice(-take).join('.');
-};
-/**
- * "chase.com-refund.example": a real-looking domain spelled into another one.
- * Judged after `www.` is stripped, and only when another label follows, so a
- * real hyphenated host ("co-operativebank.co.uk", "net-banking…") is not one.
- */
-const SPOOFED_TLD = /\.(?:com|net|org|bank)-[^.]+\./iu;
-const spoofedHost = (host: string): boolean => SPOOFED_TLD.test(host.replace(/^www\./iu, ''));
-/** Brand and security words a lookalike domain borrows. */
-const LOOKALIKE_WORD = /chase|paypal|amazon|apple|bank|secure|verify|login|refund|wells|citi|hsbc|barclays|venmo|zelle|account|support|help/iu;
-const letters = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/gu, '');
-/** The brand the alert names in its header ("Chase: …", "Co-operative Bank: …"). */
-const headerBrand = (source: string): string | null => {
-  const header = source.match(/^\s*([\p{L}][\p{L}&' .-]{1,40}?)\s*:/u)?.[1];
-  return header ? letters(header) : null;
-};
-/** The link is the alert's own brand domain: its first label spells the header brand exactly. */
-const ownBrandHost = (host: string, brand: string | null): boolean => {
-  if (!brand) return false;
-  const label = letters(registrableDomain(host).split('.')[0]);
-  return label.length >= 3 && (label === brand || brand.startsWith(label) && /^(?:bank|uk|us|card|cards)?$/u.test(brand.slice(label.length)));
-};
-const baitHost = (host: string | undefined): boolean => {
-  if (!host) return false;
-  if (APP_STORE.test(host.replace(/^www\./iu, ''))) return false;
-  return SHORTENER.test(host) || spoofedHost(host) || BAIT_HOST.test(registrableDomain(host));
-};
-/** A "Not you?" / "If this wasn't you" / "to stop this payment" sentence. */
-const DENIAL_CONTEXT = /\bnot\s+you\b|\bwasn['’]t\s+you\b|\bwas\s+not\s+you\b|\bdidn['’]t\s+make\b|\bstop\s+this\s+(?:payment|transaction|charge)\b/iu;
-const ANY_LINK = new RegExp(LINK, 'giu');
-/**
- * Footer noun phrases that name a service, not an action on this money:
- * UCO Bank's "Report Dispute <link>" and "To cancel alerts, visit …".
- */
-const FOOTER_SERVICE = /\breport\s+dispute\b|\b(?:cancel|stop|unsubscribe\s+from)\s+(?:these\s+|all\s+|text\s+|sms\s+|account\s+)?alerts?\b/giu;
-
-/**
- * A LINK WHOSE CALL TO ACTION IS DISPUTE/VERIFY/CANCEL/CLAIM is the shape of
- * smishing ("Your card has been charged $499 … If this wasn't you, dispute
- * here: http://…"). The money sentence before it is bait, not a bank fact, so
- * such a message never auto-posts. It is bait when a strong action is
- * imperative at the link ("dispute here:", "Claim it now", "Verify: …"), a
- * weak one names the person's own details or money ("update your details"),
- * or the link is a shortener, a lookalike registrable domain or a spoofed one
- * ("chase.com-refund.example"); in a "Not you?" sentence any hyphenated or
- * lookalike domain is bait. A purpose-clause footer to a plain domain ("To
- * dispute this charge visit www.chase.com/dispute"), a bank subdomain ("Sign
- * in at secure.chase.com"), an app store, "Report Dispute", "To cancel
- * alerts" and "Not you? Visit chase.com/fraud" are not.
- */
-const hasLinkCallToAction = (source: string): boolean => {
-  const text = source.replace(FOOTER_SERVICE, (phrase) => ' '.repeat(phrase.length));
-  const brand = headerBrand(source);
-  for (const match of text.matchAll(ACTION_THEN_LINK)) {
-    const action = match[1] ?? '';
-    const between = match[2] ?? '';
-    const host = match[3] ?? match[4];
-    if (baitHost(host)) return true;
-    if (WEAK_ACTION_ONLY.test(action)) {
-      if (OWN_DETAILS.test(between)) return true;
-      // "Log in now: http://…" is bait unless the link is the brand's own
-      // domain ("Chase: … Log in: https://www.chase.com").
-      if (/\b(?:here|now|immediately|below)\b|:/iu.test(between) && !(host && (ownBrandHost(host, brand) || APP_STORE.test(host.replace(/^www\./iu, ''))))) return true;
-      continue;
-    }
-    const purpose = /\bto\s*$/iu.test(text.slice(Math.max(0, match.index! - 4), match.index!));
-    if (!purpose && /\b(?:here|now|immediately|below)\b|:/iu.test(between)) return true;
-  }
-  for (const match of text.matchAll(LINK_THEN_ACTION)) {
-    if (baitHost(match[1] ?? match[2])) return true;
-  }
-  const sentences = text.split(/(?<=[.!?\n])\s+/u);
-  for (const [index, sentence] of sentences.entries()) {
-    // "Not you? Click …" puts the question in the sentence before the link.
-    const context = `${sentences[index - 1] ?? ''} ${sentence}`;
-    for (const match of sentence.matchAll(ANY_LINK)) {
-      const host = match[1] ?? match[2];
-      if (host && spoofedHost(host)) return true;
-      // In a "Not you?" sentence a hyphenated domain is bait only when it also
-      // borrows a brand/security word and is not the alert's own brand:
-      // "chase-x.example" is, "first-direct.com" and "credit-agricole.fr" are not.
-      const label = host ? registrableDomain(host).split('.')[0] : '';
-      if (host && DENIAL_CONTEXT.test(context) && !APP_STORE.test(host.replace(/^www\./iu, '')) &&
-        !ownBrandHost(host, brand) &&
-        (baitHost(host) || (label.includes('-') && LOOKALIKE_WORD.test(label)))) return true;
-    }
-  }
-  return false;
-};
-
-/**
  * Wording that withdraws or questions the money sentence it sits beside:
  * fraud prompts ("Fraud alert", "Was this you?", "that we blocked"), an
  * advert ("Earn $5 every time…"), an accept-the-money prompt, a question or a
@@ -463,6 +339,9 @@ const hasLinkCallToAction = (source: string): boolean => {
  * JORDAN LEE paid you $48.20, mark it received").
  */
 const NOT_A_SETTLED_FACT: readonly RegExp[] = [
+  // A leading cashback invitation quotes a reward to earn. The launch
+  // semantic fallback must not rebuild its purchase wording as a new debit.
+  /^\s*(?:Dear\s+Customer[,!:]\s*)?(?:[^\n.!?\p{N}]{0,40}?[،,!:\s]\s*)?احصل\s+عل[ىي]\s+(?:استرداد|استرجاع)\s+نقدي/iu,
   // A conditional footer ("In case the transaction is suspicious, call …",
   // "If you notice unusual activity …") is advice, not a fraud prompt.
   /\bfraud\s+alert\b|(?<!\b(?:if|in\s+case|should)\b[^.!?\n]{0,60})\b(?:suspicious\s+(?:activity|transaction|charge|payment|login|purchase)|unusual\s+activity)\b|\bif\s+it\s+was\s+you\b|\bwas\s+this\s+you\b|\bwe\s+(?:have\s+)?(?:blocked|stopped|declined|locked)\b|(?<!\b(?:if|in\s+case|should|can|could|may)\b[^.!?\n]{0,60})\blocked\b|\bunder\s+review\b/iu,
@@ -529,10 +408,19 @@ const OWN_CARD_PAYMENT = /\b(?:[Yy]ou\s+)?paid\b(?:[^.\n]|\.\d){0,40}?\bto\s+you
  * auto-added; whether it then reaches Review is the refusal inspector's
  * decision (on the iPhone History path most of these are simply not imported).
  */
-export const isNotAutoPostableMoney = (source: string): boolean =>
-  hasLinkCallToAction(source) || NOT_A_SETTLED_FACT.some((pattern) => pattern.test(neutraliseBenignShapes(source))) ||
-  NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
-  (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+const notAutoPostableMoney = (source: string, repaymentReview: boolean): boolean => {
+  if (hasClickLinkPrompt(source) || hasMobileMoneyCallback(source) || isUnqualifiedPeerTransferClaim(source) ||
+    isUnpostedCardBalanceClaim(source) || isLeadingNumericDiscountOffer(source) ||
+    (!repaymentReview && isUnqualifiedCardRepayment(source)) || hasLinkCallToAction(source)) return true;
+  const wording = neutraliseBenignShapes(source);
+  return NOT_A_SETTLED_FACT.some((pattern) => pattern.test(wording)) ||
+    NOT_A_NEW_MOVEMENT.some((pattern) => pattern.test(source)) ||
+    (MERCHANT_ORDER_RECEIPT.test(source) && !OWN_BALANCE_STATED.test(source));
+};
+export const isNotAutoPostableMoney = (source: string): boolean => notAutoPostableMoney(source, false);
+/** Only the repayment hold itself is exempted; all other wording vetoes remain. */
+export const isSafeCardRepaymentReviewSource = (source: string): boolean =>
+  (isUnqualifiedCardRepayment(source) || isQualifiedCardRepaymentReceipt(source)) && !notAutoPostableMoney(source, true);
 
 /**
  * A link next to the money. Lures always carry one ("confirm your
@@ -763,7 +651,7 @@ const PROMO_AND_SHOP_WORDING: readonly RegExp[] = [
 const REFUND_AVAILABLE = /\brefund\b[^\n]{0,30}?\b(?:is|are)\s+(?:now\s+)?(?:available|ready)\b/iu;
 
 const hardNonCompletedWording = (source: string, market?: string | null): boolean =>
-  nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
+  isUnpostedCardBalanceClaim(source) || nonPostingReason(source) !== null || NON_COMPLETED_WORDING.some((pattern) => pattern.test(source)) ||
   (!!market && LATAM_MARKETS.has(market) && LATAM_NON_COMPLETED_WORDING.some((pattern) => pattern.test(source))) ||
   TEMPORARY_HOLD.test(source) || (AUTHORISATION.test(source) && !COMPLETED.test(source));
 
@@ -804,13 +692,31 @@ const REVERSED_THEN_CREDITED_TO_YOU =
   /\brevers(?:al|ed|e)\b(?:[^.\n]|\.(?=\S)){0,200}?\b(?:is|has\s+been|was)\s+(?:successfully\s+)?credited\s+to\s+your\b/giu;
 const RECOGNISE_CALLBACK_FOOTER =
   /(?<!\p{L})(?:(?:don['’]t|do\s+not|didn['’]t)\s+recogni[sz]e\b[^.!?\n]{0,30}\?\s*(?=(?:call|contact|ring|phone)\b)|si\s+no\s+(?:lo\s+|la\s+)?reconoc(?:e|es)\b[^.!?\n]{0,60}?(?=\bllam(?:a|e|ar)\b)|n[ãa]o\s+reconhece\b[^.!?\n]{0,40}?\??\s*(?=(?:ligue|ligar)\b))/giu;
+// #190 wave 3 (ported, CEO 56bc3c4e): a completed alert may END with a bare fraud question ("… on 01/11/2026. Was this
+// you?") or a reply-to-block footer ("… Not you? Reply NO to block your card."). Only at the very end of the message, with
+// nothing after it: a leading "Was this you? Purchase …", "Was this you? Reply Y", "Reply YES to confirm" or any link keeps
+// refusing through its own arm.
+const CLOSING_FRAUD_FOOTER =
+  /(?:^|(?<=[\s.!?]))(?:was\s+this\s+(?:you|yours)\s*[?？]|not\s+(?:you|u)\s*[?？]\s*reply\s+["']?(?:no|n)["']?\s+to\s+block\s+(?:your\s+)?(?:(?:debit|credit)\s+)?card\s*[.!]?)\s*$/iu;
+// This exact discount instruction names a promo code, not an OTP challenge.
+const NUMERIC_DISCOUNT_CODE = /\b((?:use|enter)\s+)code(\s+\d{4,8}\s+to\s+get\s+\d{1,3}\s?%\s+off\b)/giu;
+// Only closed advice clauses with no quoted digits are benign. A numbered
+// challenge or a following enter/use/confirm instruction remains untouched.
+const CODE_WARNING_NOUN = String.raw`(?:(?:(?:verification|security|authentication|one[-\s]?time)\s+)?codes?|otp(?:\s+code)?|pin|one[-\s]?time\s+password)`;
+const CODE_SAFETY_WARNING = new RegExp(
+  String.raw`(^|[.!?;,\r\n:])\s*(?:please\s+)?(?:(?:do\s+not|don['’]t|never)\s+(?:share|disclose|reveal)\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}(?:\s+with\s+(?:anyone|anybody|others))?(?:,?\s+including\s+(?:bank\s+staff|bank\s+employees))?|keep\s+(?:(?:your|the|this)\s+)?${CODE_WARNING_NOUN}\s+confidential)(?=\s*(?:[.!?;\r\n]|$))`,
+  'giu',
+);
 const neutraliseBenignShapes = (source: string): string =>
   source
+    .replace(CODE_SAFETY_WARNING, '$1 ')
+    .replace(NUMERIC_DISCOUNT_CODE, '$1promo code$2')
     .replace(CARD_PRODUCT_NAME, 'card')
     .replace(EXECUTED_MANDATE_DEBIT, '$1instruction')
     .replace(CREDITED_TOWARDS_REVERSAL, '$1refund')
     .replace(REVERSED_THEN_CREDITED_TO_YOU, (span) => span.replace(/\brevers(?:al|ed|e)\b/giu, 'refunded'))
-    .replace(RECOGNISE_CALLBACK_FOOTER, ' ');
+    .replace(RECOGNISE_CALLBACK_FOOTER, ' ')
+    .replace(CLOSING_FRAUD_FOOTER, ' ');
 
 /** The text the wording guard reads: promo footers set aside when the alert answers for itself. */
 const wordingGuardText = (source: string, sender: string | undefined): { text: string; ownCompleted: boolean } => {

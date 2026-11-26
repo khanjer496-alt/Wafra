@@ -7,6 +7,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { formatAmount } from '@/lib/format';
+import { moneyCodeRun } from '@/lib/money-code-run';
+import { useLanguage } from '@/hooks/use-language';
 import { figureFontMultiplier, MIN_FIGURE_SCALE } from '@/lib/large-text-figure';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
@@ -32,6 +34,12 @@ interface MoneyProps {
    * own gutters (a card's inset), so Larger Text fits it to the real width.
    */
   fitInset?: number;
+  /**
+   * For a fixed-width tile only (its parent sets the width): the currency may
+   * take its own line when the pair cannot fit, so the digits keep the tile's
+   * whole width. Elsewhere the pair is one line (see Money).
+   */
+  wrapCurrency?: boolean;
 }
 
 function signGlyph(fils: number, sign: Sign): string {
@@ -71,14 +79,14 @@ const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code
  * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
  * Screen readers hear the ISO code, never a bare symbol.
  */
-function CurrencyPrefix({ label, color }: { label?: string; color?: string }) {
+function CurrencyPrefix({ label, color, isoCode = false }: { label?: string; color?: string; isoCode?: boolean }) {
   const ledgerMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
     <ThemedText themeColor="textSecondary" style={[styles.currencyPrefix, color ? { color } : undefined]}
       accessibilityLabel={code}>
-      {labelFor(code, localeKey)}
+      {isoCode ? code : labelFor(code, localeKey)}
     </ThemedText>
   );
 }
@@ -93,7 +101,7 @@ const HERO_FIGURE: Partial<Record<TextType, { size: number; cap: number }>> = {
   amount: { size: 32, cap: 1.8 },
 };
 /** figureFontMultiplier for the hero figure types (see src/lib/large-text-figure.ts). */
-export function heroFigureMultiplier(
+function heroFigureMultiplier(
   chars: number,
   type: TextType,
   availableWidth: number,
@@ -126,40 +134,47 @@ export function Money({
   prefix = true,
   style,
   fitInset,
+  wrapCurrency = false,
 }: MoneyProps) {
+  const language = useLanguage();
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const denomination = moneySpec ?? contextMoney;
   const currency = denomination?.currency ?? ledgerCurrencyDisplay();
   const value = figureText(fils, denomination, decimals, localeKey);
   const amount = `${signGlyph(fils, sign)}${value}`;
-  const label = `${prefix ? `${currency} ` : ''}${amount}`;
+  const label = prefix ? moneyCodeRun(amount, currency, language) : amount;
   // The locale's own pattern: "1.234,56 €" in de-DE, "$1,234.56" in en-US;
-  // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
-  // reader label above always speaks the ISO code first.
-  const placement = placementFor(currency, localeKey);
-  const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} /> : null;
+  // Arabic keeps one number-then-ISO-code run, matching inline ledger text. The screen
+  // reader label always uses the ISO code.
+  const placement = language === 'ar' ? { position: 'after' as const, spaced: true } : placementFor(currency, localeKey);
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} isoCode={language === 'ar'} /> : null;
   const fitMultiplier = useHeroFigureMultiplier(amount, type, fitInset);
   // A figure has no good place to break: "AED 1,752.6" over "7" is a wrong
-  // number. At every text size it keeps its full width and the row around it
-  // wraps the currency onto its own line first. A figure still wider than its
-  // box shrinks to fit on iOS and Android (never below 60%), and on the web it
-  // stays on one line — digits are never split across lines.
-  // At the accessibility sizes the row already stacks the figure on its own
-  // line at full width (the long-standing rule), so the web keeps its wrap there.
+  // number, and "$" over "24,681" reads as two things. On iOS and Android the
+  // currency and the digits are one line that never wraps; a pair wider than
+  // its box shrinks the digits to fit (never below 60%) instead. A wrapping
+  // row sized to its own content let Yoga break the pair with room to spare
+  // (build 195: Accounts rows and category limits drew "$" above the amount).
+  // A fixed-width tile opts in to `wrapCurrency`: its width is the tile's, so
+  // the currency wraps only when the pair truly cannot fit, and the digits keep
+  // the whole width. On the web the figure stays on one line and the currency
+  // may wrap; at the accessibility sizes the row around it already stacks the
+  // figure on its own line at full width, so the web keeps its wrap there.
   const large = useLargeTextLayout();
+  const oneLine = Platform.OS !== 'web' && !wrapCurrency;
   const figure = (
     <ThemedText type={type} tabular maxFontSizeMultiplier={fitMultiplier}
       numberOfLines={Platform.OS === 'web' ? undefined : 1}
       adjustsFontSizeToFit={Platform.OS !== 'web'} minimumFontScale={MIN_FIGURE_SCALE}
-      style={[styles.value, Platform.OS === 'web' && !large && WEB_NO_WRAP, color ? { color } : undefined]}>
+      style={[oneLine ? styles.fit : styles.value, Platform.OS === 'web' && !large && WEB_NO_WRAP, color ? { color } : undefined]}>
       {amount}
     </ThemedText>
   );
   const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
     <View accessible accessibilityRole="text" accessibilityLabel={label}
-      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      style={[styles.inline, oneLine && styles.oneLine, { direction: 'ltr' }, !placement.spaced && styles.tight, style]}>
       {first}
       {second}
     </View>
@@ -237,6 +252,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: 15,
     lineHeight: 19,
+    flexShrink: 0,
   },
   inline: {
     flexDirection: 'row',
@@ -244,8 +260,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: Spacing.two - 2,
   },
+  // Native default: currency and digits on one line, bounded by the column.
+  oneLine: { flexWrap: 'nowrap', maxWidth: '100%' },
   tight: { gap: 1 },
   value: { flexShrink: 0, maxWidth: '100%' },
+  // The digits give way to the currency beside them and shrink to fit (adjustsFontSizeToFit).
+  fit: { flexShrink: 1, minWidth: 0 },
   field: {
     gap: Spacing.two,
   },

@@ -21,7 +21,7 @@ export const reviewBandCopyTables = {
   },
 } as const;
 
-export type ReviewBandCopy = { [K in keyof (typeof reviewBandCopyTables)['en']]: (typeof reviewBandCopyTables)['en'][K] extends (...args: infer A) => string ? (...args: A) => string : string };
+type ReviewBandCopy = { [K in keyof (typeof reviewBandCopyTables)['en']]: (typeof reviewBandCopyTables)['en'][K] extends (...args: infer A) => string ? (...args: A) => string : string };
 
 export function reviewBandCopy(language: string | null | undefined): ReviewBandCopy {
   return language === 'ar' ? reviewBandCopyTables.ar : reviewBandCopyTables.en;

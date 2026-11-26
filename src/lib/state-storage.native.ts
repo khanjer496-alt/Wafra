@@ -438,7 +438,10 @@ const encryptedStorage: StateStorage = {
       if (failure) {
         // "Erase everything" reporting it worked when it did not is its own
         // privacy bug, so this one is recorded too.
-        recordStorageFailure('destroy', failure);
+        // Names the source `failure` came from (the same `??` order).
+        const op: StorageOp = databaseError != null ? 'destroy:sqlite'
+          : keyError != null ? 'destroy:securestore' : 'destroy:close';
+        recordStorageFailure(op, failure);
         throw failure;
       }
     }));

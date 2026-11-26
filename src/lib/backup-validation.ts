@@ -252,6 +252,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     hydrationFinalizeVersion: nonnegative, bnplCategoryRepairVersion: nonnegative,
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
+    onlineLogosEnabled: boolean, hideWidgetAmountsWhenLocked: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
     bestEffortAutoPost: boolean, shareAlertFormats: boolean, shareAlertFormatsV1: boolean,
     // What the person asked Wafra to do: short code ids, never text or money.
