@@ -244,9 +244,9 @@ export function LockGate({ children }: { children: React.ReactNode }) {
 
         {biometric === 'unavailable' ? (
           <View style={styles.actions}>
-            <ThemedText type="smallBold" style={[styles.centreText, { color: band.onBand }]}>{t('phoneHasNoLock')}</ThemedText>
+            <ThemedText type="smallBold" style={[styles.centreText, { color: band.onBand }]}>{t(Platform.OS === 'ios' ? 'phoneHasNoLockIos' : 'phoneHasNoLock')}</ThemedText>
             <ThemedText type="meta" style={[styles.centreText, { color: band.onBandSecondary }]}>
-              {t('setPhoneLockBody')}
+              {t(Platform.OS === 'ios' ? 'setPhoneLockBodyIos' : 'setPhoneLockBody')}
             </ThemedText>
             <EButton
               palette={band}

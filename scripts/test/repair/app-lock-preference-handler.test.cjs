@@ -53,8 +53,16 @@ test('cancelling authentication never enables or saves App Lock', async () => {
 });
 test('a phone with no screen lock never attempts authentication or native activation', async () => {
   const h = handler({ level: 0 }); await h.run(true);
-  assert.deepEqual(h.events, [['alert', 'noScreenLock', 'noScreenLockBody']]);
+  assert.deepEqual(h.events, [['alert', 'noScreenLockIos', 'noScreenLockBodyIos']], 'iPhone names its passcode');
+  const android = handler({ platform: 'android', level: 0 }); await android.run(true);
+  assert.deepEqual(android.events, [['alert', 'noScreenLock', 'noScreenLockBody']], 'Android keeps its screen-lock wording');
 });
+for (const [platform, title, body] of [['ios', 'noScreenLockIos', 'noScreenLockBodyIos'], ['android', 'noScreenLock', 'noScreenLockBody']]) {
+  test(`authentication the phone cannot offer explains the missing lock in ${platform} words`, async () => {
+    const h = handler({ platform, outcome: { success: false, error: 'not_enrolled' } }); await h.run(true);
+    assert.deepEqual(h.events, [['authenticate', false], ['alert', title, body]]);
+  });
+}
 test('web cannot enable native App Lock', async () => {
   const h = handler({ platform: 'web' }); await h.run(true);
   assert.deepEqual(h.events, [['alert', 'notAvailable', 'appLockPhoneOnly']]);

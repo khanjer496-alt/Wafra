@@ -357,8 +357,8 @@ export default function SettingsScreen() {
     }
     if (level === 'none') {
       Alert.alert(
-        t('noScreenLock'),
-        t('noScreenLockBody'),
+        t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
+        t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'),
       );
       return;
     }
@@ -368,7 +368,8 @@ export default function SettingsScreen() {
     });
     const outcome = unlockOutcome(result);
     if (outcome === 'unlocked') await setAppLock(true).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
-    else if (outcome === 'unavailable') Alert.alert(t('noScreenLock'), t('noScreenLockBody'));
+    else if (outcome === 'unavailable') Alert.alert(t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
+      t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'));
   };
 
   // Older versions offered a global local-only opt-out. Preserve that saved
@@ -1226,7 +1227,7 @@ export default function SettingsScreen() {
           <SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />
           <SettingsSwitchRow
             title={lockTitle}
-            subtitle={(biometricKind && copy.lockDetail[biometricKind]) || t('appLockDetail')}
+            subtitle={(biometricKind && copy.lockDetail[biometricKind]) || t(Platform.OS === 'ios' ? 'appLockDetailIos' : 'appLockDetail')}
             value={state.appLock}
             onChange={toggleAppLock}
             testID="settings-app-lock"

@@ -1001,6 +1001,11 @@ const S = {
     en: 'Fingerprint, face unlock, or your phone PIN',
     ar: 'البصمة أو التعرّف على الوجه أو رمز الهاتف',
   },
+  // iPhone uses Apple's own names for the same lock (Android keeps the line above).
+  appLockDetailIos: {
+    en: 'Face ID, Touch ID, or your passcode',
+    ar: 'Face ID أو Touch ID أو رمز الدخول',
+  },
   readBankSms: { en: 'Read bank SMS', ar: 'قراءة رسائل البنك' },
   smsOffNoImport: {
     en: 'Off · nothing can import',
@@ -1264,7 +1269,10 @@ const S = {
   transferLabel: { en: 'Transfer', ar: 'تحويل' },
   // ── strings screens used to write in English inline ──
   noScreenLock: { en: 'No screen lock set up', ar: 'لا يوجد قفل شاشة' },
+  noScreenLockIos: { en: 'No passcode set up', ar: 'لم يُشغَّل رمز الدخول' },
   noScreenLockBody: { en: 'Set up a fingerprint, face unlock, or PIN in your phone settings first.', ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN في إعدادات هاتفك أولاً.' },
+  // No passcode means no Face ID or Touch ID either: the passcode comes first.
+  noScreenLockBodyIos: { en: 'Turn on a passcode in Settings first. Then Wafra can use Face ID, Touch ID, or the passcode.', ar: 'شغّل رمز الدخول في الإعدادات أولاً، ثم يمكن لوفرة استخدام Face ID أو Touch ID أو رمز الدخول.' },
   confirmAppLock: { en: 'Confirm to enable app lock', ar: 'أكّد لتفعيل قفل التطبيق' },
   smsRevokeHint: { en: 'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.', ar: 'يُلغى هذا الإذن من إعدادات أندرويد فقط: الإعدادات ← التطبيقات ← وفرة ← الأذونات ← الرسائل.' },
   notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
@@ -2517,9 +2525,14 @@ const S = {
 
   unlockWafra: { en: 'Unlock Wafra', ar: 'فتح وفرة' },
   phoneHasNoLock: { en: 'This phone has no screen lock', ar: 'لا يوجد قفل شاشة لهذا الهاتف' },
+  phoneHasNoLockIos: { en: 'This iPhone has no passcode', ar: 'لا يوجد رمز دخول على هذا الآيفون' },
   setPhoneLockBody: {
     en: 'Set up a fingerprint, face unlock, or a PIN and Wafra can use it.',
     ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN ليتمكن وفرة من استخدامه.',
+  },
+  setPhoneLockBodyIos: {
+    en: 'Turn on a passcode in Settings and Wafra can use Face ID, Touch ID, or the passcode.',
+    ar: 'شغّل رمز الدخول في الإعدادات ليتمكن وفرة من استخدام Face ID أو Touch ID أو رمز الدخول.',
   },
 
   newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
