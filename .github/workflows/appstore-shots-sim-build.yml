@@ -1,0 +1,135 @@
+name: App Store screenshot simulator build (capture-only)
+
+# Capture-only. Builds the EXACT App Store candidate source (1.0.0 build 195,
+# a2ee7ce0) in the Release configuration for the iOS Simulator, with the same
+# `production` EAS profile environment the signed archive used, and uploads
+# the .app so App Store screenshots can be taken from native Release UI on an
+# iPhone 16 Pro simulator (1206x2622). Nothing here signs, submits or uploads
+# to App Store Connect. App code is checked out at the pinned commit; only this
+# workflow file lives on the capture branch.
+on:
+  push:
+    branches: [capture/appstore-sim-build-195]
+    paths: ['.github/workflows/appstore-shots-sim-build.yml']
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_COMMIT: a2ee7ce0e2c7ded6dc434a17ba1c400ef05d74fc
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+  EXPO_NO_TELEMETRY: 1
+  NODE_ENV: production
+  EAS_BUILD_PROFILE: production
+  # eas.json build.production.env (inherits build.base.env), verbatim.
+  EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: "0"
+  EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "0"
+  EXPO_PUBLIC_WAFRA_RELAY_URL: https://wafra-relay.khanjer496.workers.dev
+  EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "0"
+  EXPO_PUBLIC_WAFRA_SHORTCUT_URL: https://www.icloud.com/shortcuts/822bcc1dd2964b9f887ef9b93601441d
+  EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
+  WAFRA_SMS_CORPUS_EXPORT: "0"
+  EXPO_PUBLIC_SUPERWALL_IOS_API_KEY: pk_xwC_I1SLdNOLaL2r2zxx3
+  EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: pk_h206sECq-roxM9QdMvVBJ
+  EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION: "1"
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Confirm the pinned source
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          grep -q '"buildNumber": "195"' app.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Select stable Xcode 26.2 or newer
+        run: |
+          BEST=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version | tee xcode-version.txt
+          VER=$(sed -n '1s/^Xcode //p' xcode-version.txt)
+          node -e 'const [a,b]=process.argv[1].split(".").map(Number); if (!(a>26||(a===26&&b>=2))) process.exit(1)' "$VER"
+          xcrun simctl list runtimes | tee runtimes.txt
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild iOS (production profile environment)
+        run: |
+          npx expo prebuild --platform ios --no-install --clean
+          npx pod-install ios
+          # Show exactly the embedded bundle of this commit: never fetch an
+          # over-the-air update during capture.
+          PLIST=$(find ios -name Expo.plist -not -path '*/Pods/*' | head -1)
+          echo "Expo.plist: $PLIST"
+          /usr/libexec/PlistBuddy -c 'Set :EXUpdatesCheckOnLaunch NEVER' "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c 'Add :EXUpdatesCheckOnLaunch string NEVER' "$PLIST"
+          cat "$PLIST"
+
+      - name: Build Release for the iOS Simulator
+        run: |
+          set -o pipefail
+          WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          build() {
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
+              -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+              -derivedDataPath build/ios ARCHS=arm64 ONLY_ACTIVE_ARCH=NO "$@" build \
+              | tee build.log | grep -E 'error:|warning: .*signing|\*\* BUILD' || true
+            grep -q '\*\* BUILD SUCCEEDED \*\*' build.log
+          }
+          # Simulator ad-hoc signing keeps entitlements (keychain, app group).
+          build CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            || { echo '::warning::ad-hoc simulator signing failed; retrying unsigned'; build CODE_SIGNING_ALLOWED=NO; }
+
+      - name: Record provenance and package the app
+        run: |
+          APP=$(find build/ios/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          mkdir -p out
+          ditto -c -k --keepParent "$APP" out/Wafra-sim-Release.app.zip
+          {
+            echo "sourceCommit=$SOURCE_COMMIT"
+            echo "configuration=Release"
+            echo "sdk=iphonesimulator"
+            echo "profileEnv=production"
+            echo "version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")"
+            echo "buildNumber=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")"
+            echo "bundleId=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+            echo "mainJsbundleSha256=$(shasum -a 256 "$APP/main.jsbundle" | cut -d' ' -f1)"
+            echo "appZipSha256=$(shasum -a 256 out/Wafra-sim-Release.app.zip | cut -d' ' -f1)"
+            echo "xcode=$(head -1 xcode-version.txt) $(sed -n 2p xcode-version.txt)"
+            echo "runnerImage=$ImageOS $ImageVersion"
+            echo "runId=$GITHUB_RUN_ID"
+          } | tee out/provenance.txt
+          codesign -dv --entitlements - "$APP" 2>&1 | tee out/codesign.txt || true
+          cp runtimes.txt out/
+
+      - name: Launch smoke on iPhone 16 Pro
+        continue-on-error: true
+        run: |
+          RUNTIME=$(xcrun simctl list runtimes -j | jq -r '[.runtimes[]|select(.platform=="iOS" and .isAvailable)]|sort_by(.version)|last|.identifier')
+          UDID=$(xcrun simctl create shots "iPhone 16 Pro" "$RUNTIME")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          APP=$(find build/ios/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" app.wafra.ios
+          sleep 25
+          xcrun simctl io "$UDID" screenshot out/smoke-iphone16pro.png
+          echo "smokeRuntime=$RUNTIME" | tee -a out/provenance.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-195-sim-release
+          path: out/
+          retention-days: 14
