@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 9 November 2026_
+_Last updated: 26 November 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasida Apps LLC** ("Wafra", "we", "us").
@@ -22,7 +22,7 @@ Wafra ("the app") is a personal money manager for Android and iOS published by
 - **Privacy is built in:** local capture and encrypted native ledger storage
   do not require a separate mode. A local-only preference saved in an older
   version remains in effect until explicitly reviewed in Settings → Privacy
-  and data; it pauses cloud imports, reference FX and online logos and removes
+  and data; it pauses cloud imports and reference FX and removes
   retained diagnostic message text. Local capture and history import still work.
 - **iPhone history import:** on iOS 26 or later, a user-run Apple Shortcut can
   check up to 1,500 newest and 1,500 oldest retained Messages. It continues only
@@ -32,9 +32,12 @@ Wafra ("the app") is a personal money manager for Android and iOS published by
   also has a 24 MiB safety limit. Nothing from this history import is sent to
   Wafra's relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
-  app storage on the device. Wafra has no ads. Superwall provides purchase and
-  entitlement services; optional in-app event collection is disabled. Google's ML Kit SDK can collect diagnostic and
-  usage data. See the SDK disclosures below.
+  app storage on the device. Wafra has no ads and does not track you. Superwall
+  provides purchase and entitlement services; optional in-app event collection
+  is disabled, but Superwall still receives device details, usage counts and
+  purchase history. Expo Updates delivers app updates and receives a random
+  install ID and, after a crash, the crash message. Google's ML Kit SDK can
+  collect diagnostic and usage data. See the SDK disclosures below.
 - **Manual entry is always available:** turn off Android SMS tracking and
   bank-app notification access, or leave iPhone automatic capture unconfigured.
 - Wafra cannot sign in to a bank, reply to a message, approve a transaction or
@@ -279,22 +282,15 @@ refreshes.
 
 ## Other network activity
 
-- **Logo consent (iPhone only):** Android does not request online logos in this version. On iPhone, online logo lookups are off by default, including after upgrading a build without this preference. Bundled images and local fallback icons work without sharing names. You may opt in using Settings → Online merchant logos. Turning it off stops new name searches and artwork downloads; requests already sent cannot be recalled. Your saved local-only preference also blocks online logos. Restoring a backup keeps this device’s logo-sharing and widget-amount privacy choices; the file cannot enable logo sharing or change that widget preference.
-
-- **Optional online logos:** 112 merchant logos are bundled with the app and supported
-  launch-market banks are matched locally to fixed bank domains. For other
-  merchant or bank identities, only after you opt in to Online merchant logos and local-only mode is off, Wafra may use
-  Brandfetch's Brand Search API. Merchant lookup first removes payment prefixes,
-  amounts, account/card tails, URLs and common terminal/location suffixes. Bank
-  lookup uses the institution name and rejects labels containing account/card
-  tails. Wafra accepts only a high-confidence name match and then loads artwork
-  from Brandfetch's image CDN. Brandfetch therefore receives the cleaned merchant
-  or institution name for those searches, the requested brand domain and the
-  device's network address. Wafra does not send the transaction amount,
-  account/card number or bank Message text as part of logo lookup. Searches and
-  misses are cached to reduce repeated requests. Older local-only opt-outs block
-  both name searches and image requests. Logo caches are removed by Erase all
-  data; image bitmap caching remains managed by the platform image library.
+- **Merchant and bank logos:** this version ships no third-party merchant or
+  bank artwork and makes no online logo requests on iPhone, Android or the
+  widgets. Transactions and accounts show a letter or a generic icon drawn on
+  the device, so no merchant or bank name is sent anywhere to find a logo.
+  Earlier builds could look up logos online through Brandfetch after an
+  opt-in; this version has no such setting, and a saved opt-in from an earlier
+  build cannot turn lookups back on. **Erase all data** removes any logo cache
+  an earlier build left. Restoring a backup keeps this device's widget-amount
+  privacy choice; the file cannot change it.
 
 - **Exchange rates for foreign-currency spending:** when a purchase is in a
   currency other than the ledger's (travel, online shopping) and the bank alert
@@ -372,29 +368,58 @@ refreshes.
 
 - **Complimentary access codes:** When you enter a complimentary access code, Wafra sends the code over HTTPS to its dedicated access service on Cloudflare to verify access to Pro. The app stores the code in Android secure storage and checks it again on app use while enrolled. The service stores a hash of the publisher-issued code and returns a short-lived entitlement. It receives no ledger, SMS, transaction, account, or device identifiers from the app. Cloudflare handles the connection, including the network address, to deliver the service. Private Mode pauses verification. Removing the code or erasing the app’s data clears the local credential. No account or purchase is created.
 
-- **Purchases and paywalls:** when store billing is configured, Apple or Google
-  processes payment and Superwall provides paywalls and subscription entitlement
-  state. Wafra configures optional SDK event collection off and sends only the
-  app's display language (English or Arabic) with a paywall request so the right
-  language is shown; it does not send market, onboarding, capture-choice or
-  free-capture day-count targeting attributes. This does not remove the SDK's own billing identifiers: Superwall
-  can receive purchase/subscription details, SDK-generated user/device identifiers
-  including the vendor identifier, device/locale information and the network
-  address. Its service may derive approximate location or process install
-  attribution according to the SDK and service configuration. Wafra runs no ads
-  and sends no bank messages, ledger rows, balances, bank-transaction amounts,
-  account/card identifiers or locally stored first name to Superwall. Store
-  purchase, renewal, cancellation and refund reporting can continue independently
-  of optional in-app event collection so entitlements remain accurate.
+- **Purchases and paywalls (Superwall):** on iPhone and Android, Apple or
+  Google processes payment and Superwall provides products, checkout, restore
+  and subscription entitlement state. Wafra configures Superwall once when the
+  app starts, with optional SDK event collection and external data collection
+  off and a locale made of the app's display language (English or Arabic) and,
+  when the device reports one, its region, so Superwall content uses the right
+  language and region. Wafra sets no user attributes and does not send
+  market, onboarding, capture-choice or free-capture day-count targeting
+  attributes. Turning events off does not stop the SDK's own requests.
+  Superwall receives SDK-generated user and device identifiers, including an
+  install-persistent alias ID and the vendor identifier (IDFV on iPhone);
+  purchase history, meaning store transactions, Apple's app transaction ID and
+  active entitlements; device context such as device model, operating-system
+  version, network type, low-power mode, light or dark appearance, SDK version
+  and locale; usage counters such as the install date, days since install,
+  paywall views and whether this is the first app open; and the network
+  address, from which its service can derive an approximate location (country,
+  region, city and time zone). Wafra uses this for subscriptions and
+  entitlements (App Functionality), and Superwall uses it for analytics. It is
+  not used for tracking or advertising: Wafra has no ads, no advertising
+  identifier and no App Tracking Transparency prompt. Wafra sends no bank
+  messages, ledger rows, balances, bank-transaction amounts, account/card
+  identifiers or locally stored first name to Superwall. Store purchase,
+  renewal, cancellation and refund reporting can continue independently of
+  optional in-app event collection so entitlements remain accurate.
+- **App updates (Expo Updates):** when the app starts, it checks Expo's update
+  service for a newer version of Wafra's app code and downloads it if one is
+  available. Each check carries a random ID created for this installation
+  (`EAS-Client-ID`) and the app's platform and version details. If the app
+  stopped because of a fatal error, the next check also sends that error
+  message (up to 1,024 characters). This is used only to deliver working app
+  updates (App Functionality). It carries no ledger, bank-message, account or
+  purchase data. Wafra has no separate crash-reporting SDK.
+- **Relay wake-ups (iPhone):** on an iPhone paired with Wafra's relay (for
+  example by statement import, trusted devices or format sharing) that allows
+  notifications, Wafra obtains a push token from Expo's push service and
+  registers it with the relay. The relay stores it encrypted and sends pushes
+  through Expo's push service, for example to wake the app when sealed rows
+  are waiting. A registration the app does not refresh expires after 180 days.
 - **Forwarded bank email:** not available in this version; the app does not
   create a forwarding address, so no bank email is forwarded to or processed by the relay.
-- **PDF statement import:** a user-selected PDF of up to 5 MiB and 100 pages is
-  sent to the relay. PDF bytes and extracted text are discarded after parsing;
-  only conservative, structured debit or credit rows are sealed and queued.
-- **CSV or TSV statement import:** a user-selected UTF-8 export of up to 1 MiB
-  and 200 rows is sent to the relay. The bytes are discarded after parsing;
-  only rows with supported named fields and explicit debit or credit direction
-  are sealed and queued. Rejected-row counts contain no statement text.
+- **Statement import:** a statement file you pick is sent to the relay to be
+  read: PDF (up to 5 MiB and 100 pages), CSV or TSV (UTF-8, up to 1 MiB),
+  Excel XLSX, OFX or QFX, QIF, ISO 20022 camt XML or MT940 (each up to 2 MiB).
+  At most 200 transaction rows are accepted from one file. The file's bytes
+  and any extracted text are discarded after parsing; only conservative,
+  structured debit or credit rows with an explicit direction are sealed and
+  queued. Rejected-row counts contain no statement text. If a PDF is password
+  protected and you type its password, the password is sent with that one
+  upload only so the relay can open the file. The app does not save it, and
+  the relay uses it only to open that file and does not store it. Statement
+  import is user-initiated and paused by a saved local-only preference.
 - **Trusted devices and family:** an owner may invite up to eight devices to
   receive future captures. Each device has its own public key and credentials;
   the relay stores device labels and roles but cannot decrypt sealed rows.
@@ -418,7 +443,7 @@ refreshes.
   merges a change automatically. Raw message bodies are not uploaded. Reports
   contain no device, advertising, installation or push identifier.
 
-Wafra does not use financial records for advertising. Superwall and ML Kit
+Wafra does not use financial records for advertising. Superwall, Expo and ML Kit
 processing is described above.
 
 ## Website
