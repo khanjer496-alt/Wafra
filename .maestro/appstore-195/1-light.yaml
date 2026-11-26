@@ -11,12 +11,13 @@ appId: app.wafra.ios
 - tapOn: {text: "On My iPhone", optional: true}
 - extendedWaitUntil: {visible: "wafra-sample-backup-usd.json", timeout: 30000}
 - takeScreenshot: 00-picker
-- tapOn: {text: "wafra-sample-backup-usd\\.json, json.*", optional: true}
-- extendedWaitUntil: {visible: "Restore backup\\?", timeout: 10000, optional: true}
-- runFlow:
-    when: {notVisible: "Restore backup\\?"}
+- extendedWaitUntil: {visible: "__pause__", timeout: 3000, optional: true}
+- repeat:
+    times: 4
+    while: {notVisible: "Restore backup\\?"}
     commands:
-      - tapOn: {point: "71,250"}
+      - tapOn: {point: "71,258"}
+      - extendedWaitUntil: {visible: "Restore backup\\?", timeout: 8000, optional: true}
 - extendedWaitUntil: {visible: "Restore backup\\?", timeout: 20000}
 - tapOn: {point: "295,800"}
 - extendedWaitUntil: {visible: "Good (morning|afternoon|evening)", timeout: 60000}
