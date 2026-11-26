@@ -619,10 +619,12 @@ const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.t
   ok('StoreProvider adopts an OS hour-cycle change on the next render without changing UI language',
     /^2:32 pm$/i.test(clock()), clock());
 
-  locales = [{ languageCode: 'en', languageTag: 'en-US', regionCode: 'JP' }];
+  // US order differs from the GB date above; a year-first Region such as JP
+  // now keeps the month name too ("7 Nov", issue #268), so it cannot show this.
+  locales = [{ languageCode: 'en', languageTag: 'en-US', regionCode: 'US' }];
   runtime.StoreProvider({ children: null });
   ok('StoreProvider adopts a changed device Region independently of an English language tag',
-    date() === '11-07', date());
+    date() === 'Nov 7', date());
   dateLocale.setDateTimeLocale(null);
 }
 
