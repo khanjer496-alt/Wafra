@@ -1,5 +1,9 @@
 appId: app.wafra.ios
 ---
-- tapOn: "Spending"
 - waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 3000, optional: true}
+- tapOn: {point: "157,822", retryTapIfNoChange: true}
+- extendedWaitUntil: {visible: "Total spent.*", timeout: 15000}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
 - takeScreenshot: 06-spending-dark
