@@ -391,12 +391,17 @@ ok('A caller-supplied maxFontSizeMultiplier wins over the ramp cap',
   /rest\.maxFontSizeMultiplier !== undefined\s*\? rest\.maxFontSizeMultiplier : RAMP_CAP\[type\]/.test(themedText) &&
     /\{\.\.\.rest\}\s*maxFontSizeMultiplier=\{maxFontSizeMultiplier\}/.test(themedText));
 // Every figure is kept whole at every text size (not only the accessibility
-// ones): at 1.3x a stat tile split "1,752.6" from "7". Natively one line that
-// shrinks to fit (never below MIN_FIGURE_SCALE, so never an ellipsis on a
-// figure that fits at 60%); on the web, no wrapping.
+// ones): at 1.3x a stat tile split "1,752.6" from "7". Natively the currency
+// and the digits are one line that never wraps (build 195 drew "$" above
+// "24,681"), and the digits shrink to fit (never below MIN_FIGURE_SCALE). A
+// fixed-width tile (Transfers) opts in to wrapping the currency so its digits
+// keep the whole tile width; on the web, no wrapping of the digits.
 ok('Money keeps every figure whole: fitted from the width, never split, full amount labelled',
   /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
+    /const oneLine = Platform\.OS !== 'web' && !wrapCurrency;/.test(money) &&
+    /oneLine: \{ flexWrap: 'nowrap', maxWidth: '100%' \}/.test(money) &&
     /value: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
+    /fit: \{ flexShrink: 1, minWidth: 0 \}/.test(money) &&
     /adjustsFontSizeToFit=\{Platform\.OS !== 'web'\} minimumFontScale=\{MIN_FIGURE_SCALE\}/.test(money) &&
     /Platform\.OS === 'web' && !large && WEB_NO_WRAP/.test(money) &&
     /accessibilityLabel=\{label\}/.test(money));

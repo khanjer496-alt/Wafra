@@ -565,7 +565,7 @@ export default function TransfersScreen() {
         style={[styles.tile, { backgroundColor: ground, borderWidth: 1, borderColor: on ? band.fill : band.rule }]}>
         <Icon name={icon} size={15} color={ink} />
         <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
-        <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} />
+        <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} wrapCurrency />
         {counted ? <ThemedText type="meta" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
       </Pressable>;
     })}
