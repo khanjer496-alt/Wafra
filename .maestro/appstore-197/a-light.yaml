@@ -1,0 +1,61 @@
+# Capture-only verification tour for PR #292 (c75d4ba9), light, default text size.
+appId: app.wafra.ios
+---
+- launchApp
+- extendedWaitUntil: {visible: "Restore from a backup", timeout: 180000}
+- tapOn: "Restore from a backup"
+- waitForAnimationToEnd: {timeout: 5000}
+- tapOn: {text: "Try Again", optional: true}
+- tapOn: {text: "Browse", optional: true}
+- tapOn: {text: "On My iPhone", optional: true}
+- extendedWaitUntil: {visible: "wafra-sample-backup-usd.json", timeout: 30000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 3000, optional: true}
+- repeat:
+    times: 4
+    while: {notVisible: "Restore backup\\?"}
+    commands:
+      - tapOn: {point: "71,258"}
+      - extendedWaitUntil: {visible: "Restore backup\\?", timeout: 8000, optional: true}
+- extendedWaitUntil: {visible: "Restore backup\\?", timeout: 20000}
+- tapOn: {point: "295,800"}
+- extendedWaitUntil: {visible: "Good (morning|afternoon|evening)", timeout: 60000}
+- tapOn: {text: "Dismiss", optional: true}
+- tapOn: "Accounts"
+- extendedWaitUntil: {visible: "Recorded balances", timeout: 15000}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-accounts-default
+- scrollUntilVisible: {element: "Transfers.*", direction: DOWN}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-accounts-default-lower
+- tapOn: "Transfers.*"
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-transfers-default
+- swipe: {start: "200,700", end: "200,250", duration: 1200}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-transfers-default-lower
+- tapOn: "Back"
+- waitForAnimationToEnd: {timeout: 3000}
+- tapOn: "Spending"
+- extendedWaitUntil: {visible: "With limits", timeout: 15000}
+- tapOn: "With limits"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,600", end: "200,140", duration: 1500}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-limits-default
+- tapOn: "Home"
+- extendedWaitUntil: {visible: "Settings", timeout: 15000}
+- tapOn: "Settings"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- swipe: {start: "200,750", end: "200,150", duration: 1200}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-settings-privacy
+- tapOn: "Privacy and data.*"
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-privacy-sheet

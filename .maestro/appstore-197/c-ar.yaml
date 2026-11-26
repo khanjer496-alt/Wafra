@@ -1,0 +1,20 @@
+# Arabic pass (device language ar, Region United States).
+appId: app.wafra.ios
+---
+- launchApp
+- extendedWaitUntil: {visible: "__pause__", timeout: 6000, optional: true}
+- launchApp
+- extendedWaitUntil: {visible: "الحسابات", timeout: 60000}
+- waitForAnimationToEnd: {timeout: 5000}
+- tapOn: "الحسابات"
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-accounts-ar
+- tapOn: "الإنفاق"
+- waitForAnimationToEnd: {timeout: 5000}
+- scrollUntilVisible: {element: "بحد إنفاق", direction: DOWN}
+- tapOn: "بحد إنفاق"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,600", end: "200,200", duration: 1200}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-limits-ar

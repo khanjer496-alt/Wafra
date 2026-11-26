@@ -1,0 +1,24 @@
+# Larger Text pass; SIZE names the content size set with simctl before this flow.
+appId: app.wafra.ios
+---
+- launchApp
+- extendedWaitUntil: {visible: "Accounts", timeout: 60000}
+- waitForAnimationToEnd: {timeout: 5000}
+- tapOn: "Accounts"
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-accounts-${SIZE}
+- swipe: {start: "200,650", end: "200,250", duration: 1200}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-accounts-${SIZE}-lower
+- tapOn: "Spending"
+- waitForAnimationToEnd: {timeout: 5000}
+- scrollUntilVisible: {element: "With limits", direction: DOWN}
+- tapOn: "With limits"
+- waitForAnimationToEnd: {timeout: 5000}
+- swipe: {start: "200,650", end: "200,250", duration: 1200}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-limits-${SIZE}
+- swipe: {start: "200,650", end: "200,250", duration: 1200}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: v-limits-${SIZE}-lower
