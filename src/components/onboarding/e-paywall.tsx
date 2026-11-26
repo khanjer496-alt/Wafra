@@ -60,6 +60,7 @@ type Notice = { title: string; body: string; tone?: 'neutral' } | null;
  */
 function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
   const billing = useWafraBilling();
+  const store = billingStore();
   const billingRef = useRef(billing);
   billingRef.current = billing;
   const checkoutReady = billing.available && billing.configured;
@@ -97,7 +98,7 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
     setNotice(null);
     if (!legalReady) { setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') }); return; }
     if (!checkoutReady) {
-      setNotice({ title: t('purchaseUnavailable'), body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody') });
+      setNotice({ title: t('purchaseUnavailable'), body: billing.configurationError ? t('purchaseFailedBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody') });
       return;
     }
     if (!selected) { setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') }); return; }
@@ -115,7 +116,7 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
     if (outcome === 'cancelled') { setNotice({ title: '', body: t('purchaseNotCompleted'), tone: 'neutral' }); return; }
     if (outcome === 'purchased') { onPurchased(); return; }
     if (outcome === 'pending') { setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') }); return; }
-    if (outcome === 'unavailable') { setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') }); return; }
+    if (outcome === 'unavailable') { setNotice({ title: t('purchaseUnavailable'), body: t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody') }); return; }
     setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
   };
 
@@ -439,7 +440,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, tr
           </ThemedText> : null}
         </> : <View testID="onboarding-plans-unavailable">
           <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
-            {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+            {checkout.checkoutReady ? t('priceUnavailableBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody')}
           </ThemedText>
           {checkout.checkoutReady ? <ETextAction palette={band} label={t('retryPrices')}
             onPress={() => void checkout.load()} disabled={busy || preview} testID="onboarding-plans-retry" /> : null}

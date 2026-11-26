@@ -132,7 +132,7 @@ export function useProCheckout() {
     if (!checkoutReady) {
       setNotice({
         title: t('purchaseUnavailable'),
-        body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody'),
+        body: billing.configurationError ? t('purchaseFailedBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody'),
       });
       return;
     }
@@ -162,11 +162,11 @@ export function useProCheckout() {
       return;
     }
     if (outcome === 'unavailable') {
-      setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') });
+      setNotice({ title: t('purchaseUnavailable'), body: t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody') });
       return;
     }
     setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
-  }, [billing, checkoutReady, legalReady, selectedOffer]);
+  }, [billing, checkoutReady, legalReady, selectedOffer, store]);
 
   const restore = async () => {
     if (actionLatch.current) return;
@@ -201,12 +201,12 @@ export function useProCheckout() {
     const url = await subscriptionManagementUrl();
     try {
       if (!url || !(await Linking.canOpenURL(url))) {
-        setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+        setNotice({ title: t('manageSubscriptionFailed'), body: t(store === 'appStore' ? 'manageSubscriptionFailedBodyIos' : 'manageSubscriptionFailedBody') });
         return;
       }
       await Linking.openURL(url);
     } catch {
-      setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+      setNotice({ title: t('manageSubscriptionFailed'), body: t(store === 'appStore' ? 'manageSubscriptionFailedBodyIos' : 'manageSubscriptionFailedBody') });
     } finally {
       actionLatch.current = false;
       setBillingAction(null);

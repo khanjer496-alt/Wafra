@@ -104,7 +104,7 @@ export function ProPlanOptions({ checkout, palette, testIDPrefix = 'pro-plan' }:
             {checkoutReady ? t('priceUnavailable') : t('playOnlyTitle')}
           </ThemedText>
           <ThemedText type="meta" style={{ color: palette.textSecondary }}>
-            {checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+            {checkoutReady ? t('priceUnavailableBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody')}
           </ThemedText>
           {checkoutReady && retryPrices}
         </View>
