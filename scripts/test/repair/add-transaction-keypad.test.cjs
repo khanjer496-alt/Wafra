@@ -8,9 +8,10 @@ const byType = (tree, type) => walk(tree).find((node) => node.type === type);
 const amountField = (tree) => walk(tree).find((node) => node.props?.keyboardType === 'decimal-pad' &&
   typeof node.props.onChangeText === 'function');
 
-function harness({ ledgerMoney = { schemaVersion: 2, currency: 'USD', exponent: 2 }, language = 'en', height = 844, fontScale = 1 } = {}) {
+function harness({ ledgerMoney = { schemaVersion: 2, currency: 'USD', exponent: 2 }, language = 'en', height = 844, fontScale = 1,
+  accounts = [{ id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#997349' }] } = {}) {
   const h = createWorkflowHarness({ language, state: { ledgerMoney, reviewTray: { pending: [], tombstones: [], templateRules: [] },
-    accounts: [{ id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#997349' }] } });
+    accounts } });
   h.deps['react-native'].useWindowDimensions = () => ({width: 320, height, fontScale, scale: 1});
   const states = [], refs = []; let stateIndex = 0, refIndex = 0;
   h.deps.react.useState = (initial) => {
@@ -234,3 +235,35 @@ test('a new entry starts with no category and asks for one before saving', () =>
   button.props.onPress();
   assert.equal(h.events.find((event) => event[0] === 'add'), undefined, 'nothing is saved without a category');
 });
+
+// #266: a hand-entered transaction is not an alert. The manual account chip,
+// its hint and its validation line use manual-entry copy; Review keeps the
+// alert wording (pinned in launch-f10-f11-ui.test.cjs).
+for (const language of ['en', 'ar']) {
+  test(`${language}: manual entry never asks which account "this alert" belongs to`, () => {
+    const alertWords = (h) => h.deps['@/lib/i18n'].t('reviewAlertChooseAccount');
+    const manualWords = (h) => h.deps['@/lib/motion-android-copy'].motionAndroidCopy(language).manualEntryChooseAccount;
+    const mentionsAlert = (tree, words) => walk(tree).some((node) => node.props?.accessibilityHint === words ||
+      node.props?.accessibilityLabel === words || (typeof node.props?.children === 'string' && node.props.children === words) ||
+      (Array.isArray(node.props?.children) && node.props.children.includes(words)));
+
+    const withAccount = harness({ language });
+    const tree = withAccount.render();
+    const trigger = byId(tree, 'account-picker-trigger');
+    assert.equal(trigger.props.accessibilityHint, manualWords(withAccount));
+    assert.equal(mentionsAlert(tree, alertWords(withAccount)), false);
+
+    // No account yet: Save shows the validation line under the chips.
+    const empty = harness({ language, accounts: [] });
+    empty.deps['react-native'] = { ...empty.deps['react-native'], findNodeHandle: () => null,
+      AccessibilityInfo: { ...(empty.deps['react-native'].AccessibilityInfo ?? {}), setAccessibilityFocus: () => {} } };
+    empty.press('5');
+    empty.pickCategory();
+    walk(empty.render()).find((node) => node.props?.onPress &&
+      node.props.accessibilityLabel === empty.deps['@/lib/i18n'].t('saveTransaction')).props.onPress();
+    const invalid = empty.render();
+    assert.ok(mentionsAlert(invalid, manualWords(empty)), 'the manual validation line is shown');
+    assert.equal(mentionsAlert(invalid, alertWords(empty)), false);
+    assert.equal(empty.events.find((event) => event[0] === 'add'), undefined);
+  });
+}
