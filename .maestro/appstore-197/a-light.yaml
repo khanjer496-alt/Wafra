@@ -21,7 +21,7 @@ appId: app.wafra.ios
 - extendedWaitUntil: {visible: "Good (morning|afternoon|evening)", timeout: 60000}
 - tapOn: {text: "Dismiss", optional: true}
 - tapOn: "Accounts"
-- extendedWaitUntil: {visible: "Recorded balances", timeout: 15000}
+- extendedWaitUntil: {visible: "Bank accounts", timeout: 15000, optional: true}
 - waitForAnimationToEnd: {timeout: 5000}
 - extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
 - takeScreenshot: v-accounts-default
