@@ -77,7 +77,7 @@ import {
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
-import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
+import { APP_LOCK_AUTH_OPTIONS, appLockOwnerPrompt, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
 import { tapped } from '@/lib/haptics';
 import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
@@ -338,14 +338,15 @@ export default function SettingsScreen() {
   /* ── Privacy ────────────────────────────────────────────────────────── */
 
   const toggleAppLock = async (enabled: boolean) => {
-    if (!enabled) {
-      await setAppLock(false).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
-      return;
-    }
     if (Platform.OS === 'web') {
-      Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
+      // The web build has no native lock to confirm: switching off only clears the preference.
+      if (!enabled) await setAppLock(false).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
+      else Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
       return;
     }
+    // Turning the lock off asks for the same owner authentication as turning
+    // it on, or anyone holding the unlocked phone could switch it off. A
+    // failed or cancelled prompt leaves the setting as it was.
     // Any owner authentication will do — a passcode-only phone included. The
     // gate accepts the passcode (app-lock.ts), so refusing to turn the lock
     // on without biometrics would only be inconsistent.
@@ -362,14 +363,26 @@ export default function SettingsScreen() {
       );
       return;
     }
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: t('confirmAppLock'),
-      ...APP_LOCK_AUTH_OPTIONS,
-    });
+    // While the lock is on, the gate's re-lock listener is live: tell it this
+    // sheet is the owner answering (lock-gate.tsx), not the app being left.
+    appLockOwnerPrompt.begin();
+    let result: LocalAuthentication.LocalAuthenticationResult;
+    try {
+      result = await LocalAuthentication.authenticateAsync({
+        promptMessage: t(enabled ? 'confirmAppLock' : 'confirmDisableAppLock'),
+        ...APP_LOCK_AUTH_OPTIONS,
+      });
+    } finally {
+      appLockOwnerPrompt.end();
+    }
     const outcome = unlockOutcome(result);
-    if (outcome === 'unlocked') await setAppLock(true).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
-    else if (outcome === 'unavailable') Alert.alert(t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
-      t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'));
+    if (outcome === 'unlocked') {
+      appLockOwnerPrompt.confirmed();
+      await setAppLock(enabled).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
+    } else if (outcome === 'unavailable') {
+      Alert.alert(t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
+        t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'));
+    }
   };
 
   // Older versions offered a global local-only opt-out. Preserve that saved

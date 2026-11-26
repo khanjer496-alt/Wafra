@@ -56,11 +56,41 @@ ok('the gate ignores app-state changes caused by its own OS prompt',
 ok('the no-lock sheet re-checks when the user returns from Settings',
   /unavailableRef\.current/.test(gate));
 
+ok('the gate ignores only the inactive sheet of a Settings owner prompt, never leaving the app',
+  /if \(next === 'inactive' && appLockSession\.prompting\(\)\) return;/.test(gate) &&
+    !/next === 'background' && appLockSession\.prompting\(\)/.test(gate));
+{
+  const fresh = lock.createUnlockSession();
+  eq('no Settings owner prompt is up in a new process', fresh.prompting(), false);
+  fresh.setPrompting(true);
+  eq('a Settings owner prompt is visible to the gate while it is up', fresh.prompting(), true);
+  fresh.setPrompting(false);
+  eq('and cleared after it', fresh.prompting(), false);
+}
+eq('Settings gets only the prompt flag and the confirmed-owner reset, never an unlock',
+  Object.keys(lock.appLockOwnerPrompt).sort(), ['begin', 'confirmed', 'end']);
+{
+  const was = lock.appLockSession.isUnlocked();
+  lock.appLockSession.setUnlocked(false);
+  lock.appLockSession.setLeftAt(5);
+  lock.appLockOwnerPrompt.begin();
+  eq('begin flags the prompt to the gate', lock.appLockSession.prompting(), true);
+  lock.appLockOwnerPrompt.end();
+  lock.appLockOwnerPrompt.confirmed();
+  eq('end clears the flag', lock.appLockSession.prompting(), false);
+  eq('confirmed clears the pending absence', lock.appLockSession.leftAt(), 0);
+  eq('none of it unlocks a locked app', lock.appLockSession.isUnlocked(), false);
+  lock.appLockSession.setUnlocked(was);
+}
+
 const settings = stripComments(read('src/app/settings.tsx'));
 const toggle = settings.slice(settings.indexOf('const toggleAppLock'), settings.indexOf('const toggleAppLock') + 1500);
 ok('turning App Lock on accepts a passcode-only phone',
   /getEnrolledLevelAsync\(\)/.test(toggle) && !/isEnrolledAsync\(\)/.test(toggle) &&
     /\.\.\.APP_LOCK_AUTH_OPTIONS/.test(toggle));
+ok('Settings flags its owner prompt around authenticateAsync and resets the absence only on success',
+  /appLockOwnerPrompt\.begin\(\);[\s\S]*?try \{[\s\S]*?authenticateAsync\([\s\S]*?\} finally \{\s*appLockOwnerPrompt\.end\(\);/.test(settings) &&
+    /if \(outcome === 'unlocked'\) \{\s*appLockOwnerPrompt\.confirmed\(\);\s*await setAppLock\(enabled\)/.test(settings));
 
 // Changing the language remounts the navigator subtree, and the gate sits inside
 // it. The unlock flag therefore lives in a process-wide session, not only in

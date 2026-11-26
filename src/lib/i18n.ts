@@ -1274,6 +1274,7 @@ const S = {
   // No passcode means no Face ID or Touch ID either: the passcode comes first.
   noScreenLockBodyIos: { en: 'Turn on a passcode in Settings first. Then Wafra can use Face ID, Touch ID, or the passcode.', ar: 'شغّل رمز الدخول في الإعدادات أولاً، ثم يمكن لوفرة استخدام Face ID أو Touch ID أو رمز الدخول.' },
   confirmAppLock: { en: 'Confirm to enable app lock', ar: 'أكّد لتفعيل قفل التطبيق' },
+  confirmDisableAppLock: { en: 'Confirm to turn off app lock', ar: 'أكّد لإيقاف قفل التطبيق' },
   smsRevokeHint: { en: 'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.', ar: 'يُلغى هذا الإذن من إعدادات أندرويد فقط: الإعدادات ← التطبيقات ← وفرة ← الأذونات ← الرسائل.' },
   notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },

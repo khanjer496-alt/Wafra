@@ -77,19 +77,40 @@ export function createUnlockSession(): {
   /** When the app left the foreground (epoch ms), or 0: kept here so a remount cannot forget a long absence. */
   leftAt(): number;
   setLeftAt(at: number): void;
+  /**
+   * Settings is showing its own owner prompt (turning App Lock on or off).
+   * The passcode sheet makes iOS 'inactive' while the owner answers it; the
+   * gate must not count that as leaving the app.
+   */
+  prompting(): boolean;
+  setPrompting(prompting: boolean): void;
 } {
   let unlocked = false;
   let leftAt = 0;
+  let prompting = false;
   return {
     isUnlocked: () => unlocked,
     setUnlocked: (next) => { unlocked = next; },
     leftAt: () => leftAt,
     setLeftAt: (at) => { leftAt = at; },
+    prompting: () => prompting,
+    setPrompting: (next) => { prompting = next; },
   };
 }
 
 /** The one session of this process, shared by every mount of the gate. */
 export const appLockSession = createUnlockSession();
+
+/**
+ * All Settings may touch of the session while it asks the owner to turn App
+ * Lock on or off: that its prompt is up, and that the owner just confirmed
+ * (no earlier absence is then left to re-lock for). It cannot unlock the app.
+ */
+export const appLockOwnerPrompt = {
+  begin: (): void => { appLockSession.setPrompting(true); },
+  end: (): void => { appLockSession.setPrompting(false); },
+  confirmed: (): void => { appLockSession.setLeftAt(0); },
+} as const;
 
 /**
  * Whether the app was away long enough to re-lock: `leftAt` is when it left the foreground
