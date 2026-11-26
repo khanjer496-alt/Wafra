@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 354ea7aaf9bff74ebf174c2cf8b41deddfc1add74e489ee6698104c5ebccb949
+// Generated from normal shipping TypeScript. Source SHA-256: 4a195b6527d7aa89010374db0be3ad368c7a053495b9a22dee68b14d411368b1
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6562,9 +6562,9 @@ const S = {
     onboardAlertsReachManual: { en: 'You add these yourself', ar: 'تضيفها بنفسك' },
     onboardAlertsReachUnknown: { en: 'Wafra will check', ar: 'سيتحقق وفرة' },
     onboardHistoryGapTitle: { en: 'Your past months need a statement', ar: 'الأشهر السابقة تحتاج كشف حساب' },
-    onboardHistoryGapBody: { en: 'Wafra will catch everything from here on its own. To get earlier months right, import a statement — it takes a minute and nothing leaves your phone.', ar: 'سيلتقط وفرة كل ما يأتي من الآن تلقائياً. وللحصول على الأشهر السابقة بدقة، استورد كشف حساب — يستغرق دقيقة ولا تغادر بياناتك هاتفك.' },
+    onboardHistoryGapBody: { en: 'Wafra will catch everything from here on its own. To get earlier months right, import a statement — it takes a minute. Wafra’s import service reads the file, then deletes it.', ar: 'سيلتقط وفرة كل ما يأتي من الآن تلقائياً. وللحصول على الأشهر السابقة بدقة، استورد كشف حساب — يستغرق دقيقة، وتقرأ خدمة الاستيراد في وفرة الملف ثم تحذفه فوراً.' },
     onboardHistoryGapManualTitle: { en: 'This bank needs a statement', ar: 'هذا البنك يحتاج كشف حساب' },
-    onboardHistoryGapManualBody: { en: 'A bank that sends nothing leaves Wafra nothing to read, now or later. Import a statement to bring this spending in — you can also add entries yourself. Nothing leaves your phone.', ar: 'البنك الذي لا يرسل شيئاً لا يترك لوفرة ما يقرأه، لا الآن ولا لاحقاً. استورد كشف حساب لإدخال هذه العمليات — ويمكنك أيضاً إضافتها بنفسك. ولا تغادر بياناتك هاتفك.' },
+    onboardHistoryGapManualBody: { en: 'A bank that sends nothing leaves Wafra nothing to read, now or later. Import a statement to bring this spending in — you can also add entries yourself. Wafra’s import service reads the file, then deletes it.', ar: 'البنك الذي لا يرسل شيئاً لا يترك لوفرة ما يقرأه، لا الآن ولا لاحقاً. استورد كشف حساب لإدخال هذه العمليات — ويمكنك أيضاً إضافتها بنفسك. وتقرأ خدمة الاستيراد في وفرة الملف ثم تحذفه فوراً.' },
     onboardHistoryGapAction: { en: 'Import a statement', ar: 'استيراد كشف حساب' },
     onboardIntentionControl: { en: 'Feel more in control', ar: 'أشعر بسيطرة أكبر' },
     onboardIntentionSpend: { en: 'Spend more intentionally', ar: 'أنفق بوعي أكبر' },
@@ -6752,7 +6752,7 @@ const S = {
     },
     underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
     perYear: { en: 'per year', ar: 'سنوياً' },
-    playOnlyTitle: { en: 'Purchases unavailable in this build', ar: 'الشراء غير متاح في هذا الإصدار' },
+    playOnlyTitle: { en: 'Purchases are unavailable right now', ar: 'الشراء غير متاح حالياً' },
     playOnlyBody: {
         en: 'Install Wafra from the App Store or Google Play to purchase Pro.',
         ar: 'ثبّت وفرة من App Store أو Google Play لشراء برو.',
