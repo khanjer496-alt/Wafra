@@ -309,9 +309,12 @@ const hits = parsed.filter((x) => x.p);
     ratio < 10 && five.recognized > 0 && one.recognized > 0,
     `${five.recognized} recognized of 5,000`,
   );
+  // A hang guard only: the linear-scaling check above is what catches a slowdown. The limit was
+  // 3,000ms, and shared CI runners took 3,102-3,128ms on 26 Nov 2026 with no code change (the
+  // 1,000-row pass was ~640ms), failing release CI twice. 10,000ms still catches a real hang.
   ok(
-    `5,000-message import finishes (hang guard, not a speed budget: ${five.best.toFixed(0)}ms < 3,000ms)`,
-    five.best < 3_000,
+    `5,000-message import finishes (hang guard, not a speed budget: ${five.best.toFixed(0)}ms < 10,000ms)`,
+    five.best < 10_000,
   );
 }
 
