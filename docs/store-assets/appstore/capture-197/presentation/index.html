@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=1206"><title>Wafra App Store presentation</title><style>
+@font-face{font-family:Geist;src:url('../../../../../public/fonts/Geist-Regular.ttf');font-weight:400}@font-face{font-family:Geist;src:url('../../../../../public/fonts/Geist-Medium.ttf');font-weight:500}@font-face{font-family:Geist;src:url('../../../../../public/fonts/Geist-SemiBold.ttf');font-weight:600}
+/* Same palette, type and layout grammar as ../../../play/presentation/index.html, set at 1206 x 2622. */
+*{box-sizing:border-box}html,body{margin:0;width:1206px;height:2622px;overflow:hidden;background:#f5f1e7;font-family:Geist,sans-serif}
+.stage{width:1206px;height:2622px;position:relative;overflow:hidden;--bg:#f4f0e7;--fg:#191b17;--muted:#62645e;--edge:rgba(0,0,0,.14);background:var(--bg);color:var(--fg)}
+.ink{--bg:#14251e;--fg:#fcf8ef;--muted:#bbcbc2;--edge:rgba(255,255,255,.22)}.indigo{--bg:#252c55;--fg:#fcf8ef;--muted:#c6cce4;--edge:rgba(255,255,255,.22)}.ochre{--bg:#e3b75e;--fg:#24201a;--muted:#65522f}.slate{--bg:#285665;--fg:#fcf8ef;--muted:#c0d0d3;--edge:rgba(255,255,255,.22)}
+.brand{position:absolute;top:74px;left:80px;display:flex;align-items:center;gap:20px;font-size:40px;font-weight:600;letter-spacing:-1.1px}.brand img{width:69px;height:69px}
+.category{position:absolute;top:99px;right:83px;color:var(--muted);font-size:25px;letter-spacing:.7px}
+.heading{position:absolute;left:80px;top:196px;margin:0;font-size:96px;line-height:1.04;letter-spacing:-3.8px;font-weight:600;max-width:1050px}
+.sub{position:absolute;left:85px;top:432px;width:1040px;font-size:35px;line-height:1.35;color:var(--muted);margin:0;letter-spacing:-.45px}
+/* The status bar is cropped; the rest of the native screen keeps its aspect ratio. */
+.device{position:absolute;overflow:hidden;border-radius:40px;box-shadow:0 0 0 2px var(--edge),0 25px 50px rgba(0,0,0,.16);background:#f5f1e7}
+.device img{position:absolute;left:0;max-width:none}
+.footer{position:absolute;left:83px;right:83px;bottom:24px;display:flex;justify-content:space-between;font-size:23px;color:var(--muted);letter-spacing:.2px}
+</style></head><body><main class="stage" id="stage"></main><script>
+(async()=>{const q=new URLSearchParams(location.search),f=q.get('frame')||'01-home',stage=document.querySelector('#stage');
+const frames=await(await fetch('./frames.json')).json(),p=frames.find(x=>x.id===f);if(!p)throw Error('Unknown frame');
+const W=1206,H=2622,crop=p.cropTop,top=596,bottom=78,visible=H-crop,scale=(H-top-bottom)/visible,w=W*scale;
+stage.className='stage '+p.theme;
+stage.innerHTML=`<div class="brand"><img src="../../../../../public/wafra-icon.svg">Wafra</div><div class="category">PERSONAL FINANCE</div><h1 class="heading">${p.headline.join('<br>')}</h1><p class="sub">${p.sub}</p>`+
+`<div class="device" style="top:${top}px;left:${(W-w)/2}px;width:${w}px;height:${visible*scale}px"><img src="../raw/${p.source}" style="width:${w}px;height:${H*scale}px;top:${-crop*scale}px"></div>`+
+`<div class="footer"><span>Actual app screens · Sample data</span><span>${p.n} / 08</span></div>`;
+await document.fonts.ready;await Promise.all([...document.images].map(x=>x.decode()));document.body.dataset.ready='true';})().catch(e=>{document.body.dataset.error=e.message;document.body.textContent='ERROR '+e.message;throw e});
+</script></body></html>

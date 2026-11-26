@@ -1,0 +1,6 @@
+runtime=com.apple.CoreSimulator.SimRuntime.iOS-26-5
+device=iPhone 16 Pro (simulator)
+xcode=Xcode 26.6 Build version 17F113 
+runnerImage=macos26 20261117.0516.1
+maestro=2.12.1
+runId=45850150051
