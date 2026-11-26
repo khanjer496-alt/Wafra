@@ -1,0 +1,10 @@
+[
+  {"id": "01-home", "source": "01-home-light.png", "cropTop": 186, "theme": "ink", "headline": ["Money,", "in clear view."], "sub": "Spending, income and net for the month."},
+  {"id": "02-add-entry", "source": "02-add-light.png", "cropTop": 186, "theme": "ochre", "headline": ["Add an entry", "in seconds."], "sub": "Type it by hand, or paste a bank alert you choose."},
+  {"id": "03-statement-import", "source": "03-statement-light.png", "cropTop": 186, "theme": "slate", "headline": ["Bring in", "past months."], "sub": "Add PDF, CSV or TSV statements. No bank login."},
+  {"id": "04-bills-subscriptions", "source": "04-bills-light.png", "cropTop": 186, "theme": "ink", "headline": ["Know what's", "due next."], "sub": "Bills and subscriptions together, with price changes."},
+  {"id": "05-card-dues", "source": "05-card-dues-light.png", "cropTop": 186, "theme": "indigo", "headline": ["Card dues,", "without surprises."], "sub": "What's left on each statement, and when it's due."},
+  {"id": "06-spending", "source": "06-spending-dark.png", "cropTop": 186, "theme": "cream", "headline": ["See where", "your money goes."], "sub": "Category totals, with the detail behind them."},
+  {"id": "07-savings", "source": "07-savings-light.png", "cropTop": 186, "theme": "slate", "headline": ["Save toward", "what matters."], "sub": "Set a goal and see what's left to save."},
+  {"id": "08-privacy", "source": "08-privacy-light.png", "cropTop": 200, "theme": "indigo", "headline": ["Privacy,", "you control."], "sub": "No bank login. Optional App Lock. Backups you keep."}
+]

@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Wafra App Store contact sheet</title><style>
+@font-face{font-family:Geist;src:url('../../../../../public/fonts/Geist-Medium.ttf');font-weight:500}
+html,body{margin:0;width:1404px;height:1560px;background:#e9e4d8;font-family:Geist,sans-serif;color:#191b17}
+h1{margin:0;position:absolute;left:40px;top:28px;font-size:26px;font-weight:500;letter-spacing:-.3px}
+.grid{position:absolute;left:40px;top:84px;display:grid;grid-template-columns:repeat(4,301.5px);gap:36px 39px}
+figure{margin:0}figure img{display:block;width:301.5px;height:655.5px;border-radius:10px;box-shadow:0 0 0 1px rgba(0,0,0,.18)}
+figcaption{font-size:17px;margin-top:9px;color:#4c4e48}
+</style></head><body><h1>Wafra 1.0 (195) · App Store en-US · 1206 × 2622 · for approval, not uploaded</h1><div class="grid" id="g"></div><script>
+(async()=>{const n=['01','02','03','04','05','06','07','08'];const g=document.querySelector('#g');
+g.innerHTML=n.map(i=>`<figure><img src="../../appstore-6.3-en-${i}.png?v=${Date.now()}"><figcaption>appstore-6.3-en-${i}.png</figcaption></figure>`).join('');
+await document.fonts.ready;await Promise.all([...document.images].map(x=>x.decode()));document.body.dataset.ready='true';})();
+</script></body></html>
