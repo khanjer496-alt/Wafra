@@ -12,7 +12,17 @@ appId: app.wafra.ios
 - swipe: {start: "200,600", end: "200,140", duration: 1500}
 - waitForAnimationToEnd: {timeout: 5000}
 - extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
-- takeScreenshot: 07-budgets-light
+- takeScreenshot: alt-07-budgets-light
+- tapOn: {point: "329,822"}
+- waitForAnimationToEnd: {timeout: 5000}
+- scrollUntilVisible: {element: "Emergency fund.*", direction: DOWN}
+- tapOn: "Emergency fund.*"
+- extendedWaitUntil: {visible: "Left to save", timeout: 15000}
+- waitForAnimationToEnd: {timeout: 5000}
+- extendedWaitUntil: {visible: "__pause__", timeout: 2500, optional: true}
+- takeScreenshot: 07-savings-light
+- tapOn: "Back"
+- waitForAnimationToEnd: {timeout: 3000}
 - tapOn: {point: "72,822"}
 - extendedWaitUntil: {visible: "Settings", timeout: 15000}
 - tapOn: "Settings"
