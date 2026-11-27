@@ -11,12 +11,13 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BandTextField } from '@/components/add-band-field';
-import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BAND_GUTTER, BandScaffold } from '@/components/ui/band-scaffold';
 import { BandChip } from '@/components/ui/band/band-chip';
 import { BandSegmented } from '@/components/ui/band/band-segmented';
 import { EButton } from '@/components/ui/band/e-button';
@@ -32,7 +33,7 @@ import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledge
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Fonts, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
@@ -118,6 +119,7 @@ function defaultReviewTitle(item: ReviewAlert): string {
 export default function AddTransactionScreen() {
   const { categoryLabel, getCategory, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
+  const { width, height, fontScale } = useWindowDimensions();
   // Design language E: adding is a capture flow and wears the green band.
   const band = useBand('flow');
   const router = useRouter();
@@ -410,13 +412,15 @@ export default function AddTransactionScreen() {
     const selected = state.accounts.find((a) => a.id === accountId) ?? null;
     const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
     const chip = variant === 'chip';
+    // The chip is a hand-entered transaction's; only a review is an alert.
+    const chooseAccount = chip ? copy.manualEntryChooseAccount : tUi('reviewAlertChooseAccount');
     return (
       <View
         ref={accountRef}
         collapsable={false}
         accessibilityLabel={tUi('account')}
         accessibilityLabelledBy={accountLabelId}
-        accessibilityHint={tUi('reviewAlertChooseAccount')}
+        accessibilityHint={chooseAccount}
         {...(Platform.OS === 'web' ? accountWebAriaProps : {})}
         style={chip ? styles.chipGroup : styles.fieldBlock}>
         <ThemedText type={chip ? 'meta' : 'small'} themeColor="textSecondary" nativeID={accountLabelId}>
@@ -428,8 +432,8 @@ export default function AddTransactionScreen() {
             accessibilityRole="button"
             accessibilityLabel={selected
               ? chip ? copy.accountChipSpoken(accountDisplayName(selected)) : `${tUi('account')}: ${accountDisplayName(selected)}`
-              : tUi('reviewAlertChooseAccount')}
-            accessibilityHint={tUi('reviewAlertChooseAccount')}
+              : chooseAccount}
+            accessibilityHint={chooseAccount}
             onPress={() => setAccountPickerOpen(true)}
             style={({ pressed }) => [
               chip ? styles.chip : styles.accountTrigger,
@@ -446,7 +450,7 @@ export default function AddTransactionScreen() {
                 {accountDisplayName(selected)}
               </ThemedText>
             </> : <ThemedText type="small" themeColor="textSecondary" style={chip ? styles.chipText : styles.accountTriggerName}>
-              {chip ? copy.accountChoose : tUi('reviewAlertChooseAccount')}
+              {chip ? copy.accountChoose : chooseAccount}
             </ThemedText>}
             <Icon name="chevron-down" size={16} color={theme.textSecondary} />
           </Pressable>
@@ -852,8 +856,9 @@ export default function AddTransactionScreen() {
   }
 
   // Manual entry in design language E: the green band holds what is being
-  // written (Expense / Income, the amount as it is keyed, the merchant and
-  // the suggested categories); the sheet holds the detail chips and keypad.
+  // written (Expense / Income, the merchant and suggested categories).
+  // The amount sits beside its keypad; on a very short scaled viewport it
+  // stays with the pinned Save action while the keys can scroll.
   // A captured alert keeps its review on the sheet.
   const bandWords = everydayBandCopy(state.language);
   // The same wording as the entry sheet's "What is this?", by direction.
@@ -861,30 +866,35 @@ export default function AddTransactionScreen() {
   const ownAccountLabel = type === 'income' ? ownAccountAnswers.in.own : ownAccountAnswers.out.own;
   const arabic = state.language === 'ar';
   const entryCurrency = foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—';
+  // Accessibility text needs independent space for the keys and any error.
+  const pinKeypadAmount = !reviewItem && !typingAmount &&
+    (fontScale >= 1.6 || height / Math.max(fontScale, 1) < 220);
+  const amountError = amountInvalid ? (foreignSpec
+    ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined;
+  const keypadAmount = !reviewItem && !typingAmount ? <View style={styles.bandAmount}>
+    {!pinKeypadAmount ? <ThemedText type="small" style={{ color: theme.textSecondary }}>{bandWords.amountLabel}</ThemedText> : null}
+    <KeypadAmountDisplay
+      // The same ref the typed field uses, so the protected
+      // focusFirstInvalid() reaches the amount in either mode.
+      ref={amountRef}
+      testID="amount-display"
+      currency={entryCurrency}
+      text={amountShown}
+      empty={keypadText === ''}
+      fadeKey={keyFade}
+      animate={!reducedMotion}
+      fitWidth={Math.max(1, Math.min(width, MaxContentWidth) - 2 * BAND_GUTTER)}
+      fontScale={fontScale}
+      invalid={amountInvalid}
+      spokenLabel={keypadText === '' ? copy.amountEmptySpoken
+        : copy.amountSpoken(foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '', amountShown)}
+      errorText={pinKeypadAmount ? undefined : amountError}
+    />
+  </View> : null;
   const manualBand = reviewItem ? undefined : <View style={styles.band}>
     <BandSegmented palette={band} label={bandWords.entryType} value={type} onChange={switchType} testID="add-type"
       segments={[{ value: 'expense', label: tUi('expenseLabel'), testID: 'add-type-expense' },
         { value: 'income', label: tUi('incomeLabel'), testID: 'add-type-income' }]} />
-    {typingAmount ? null : <View style={styles.bandAmount}>
-      <ThemedText type="small" style={{ color: band.onBandSecondary }}>{bandWords.amountLabel}</ThemedText>
-      <KeypadAmountDisplay
-        // The same ref the typed field uses, so the protected
-        // focusFirstInvalid() reaches the amount in either mode.
-        ref={amountRef}
-        testID="amount-display"
-        palette={band}
-        currency={entryCurrency}
-        text={amountShown}
-        empty={keypadText === ''}
-        fadeKey={keyFade}
-        animate={!reducedMotion}
-        invalid={amountInvalid}
-        spokenLabel={keypadText === '' ? copy.amountEmptySpoken
-          : copy.amountSpoken(foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '', amountShown)}
-        errorText={amountInvalid ? (foreignSpec
-          ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
-      />
-    </View>}
     <View style={styles.amountTools}>
       {state.ledgerMoney ? (
         <Pressable
@@ -958,6 +968,7 @@ export default function AddTransactionScreen() {
       bandContent={manualBand}
       footer={(
         <View>
+          {pinKeypadAmount ? <View testID="pinned-keypad-amount" style={{ paddingBottom: Spacing.two }}>{keypadAmount}</View> : null}
           {genericItem?.shareShape && sharesAlertFormats(state) ? (
             <View testID="share-format-notice" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center',
               gap: 6, paddingBottom: Spacing.two }}>
@@ -975,6 +986,7 @@ export default function AddTransactionScreen() {
           ) : null}
           <EButton
             palette={band}
+            size={pinKeypadAmount ? 'compact' : 'regular'}
             label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
             onPress={onSavePress}
             // save() gives the commit haptic itself.
@@ -1167,7 +1179,7 @@ export default function AddTransactionScreen() {
           collapsable={false}
           accessibilityLabel={tUi('category')}
           accessibilityLabelledBy={categoryLabelId}
-          accessibilityHint={tUi('reviewAlertChooseCategory')}
+          accessibilityHint={copy.manualEntryChooseCategory}
           {...(Platform.OS === 'web' ? categoryWebAriaProps : {})}
           style={styles.chipGroup}>
           <ThemedText type="meta" themeColor="textSecondary" nativeID={categoryLabelId}>
@@ -1216,7 +1228,7 @@ export default function AddTransactionScreen() {
             nativeID={categoryErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-            {tUi('reviewAlertChooseCategory')}
+            {copy.manualEntryChooseCategory}
           </ThemedText>
         )}
         {accountInvalid && (
@@ -1226,7 +1238,7 @@ export default function AddTransactionScreen() {
             nativeID={accountErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-            {tUi('reviewAlertChooseAccount')}
+            {copy.manualEntryChooseAccount}
           </ThemedText>
         )}
         {state.accounts.length === 0 && (
@@ -1246,14 +1258,19 @@ export default function AddTransactionScreen() {
       {reviewItem && showAccountGroup ? accountGroup('field') : null}
 
       {!reviewItem && !typingAmount ? (
-        <AmountKeypad
-          palette={band}
-          exponent={entrySpec?.exponent ?? 2}
-          decimalMark={conventions.decimal}
-          disabled={!entrySpec}
-          onKey={pressKey}
-          labels={{ keypad: copy.keypadLabel, decimal: copy.keypadDecimal, backspace: copy.keypadDelete }}
-        />
+        <View testID="manual-amount-keypad" style={styles.keypadEntry}>
+          {pinKeypadAmount && amountError ? <ThemedText testID="keypad-amount-error" type="meta"
+            themeColor="expense" accessibilityRole="alert" accessibilityLiveRegion="polite">{amountError}</ThemedText> : null}
+          {!pinKeypadAmount ? keypadAmount : null}
+          <AmountKeypad
+            palette={band}
+            exponent={entrySpec?.exponent ?? 2}
+            decimalMark={conventions.decimal}
+            disabled={!entrySpec}
+            onKey={pressKey}
+            labels={{ keypad: copy.keypadLabel, decimal: copy.keypadDecimal, backspace: copy.keypadDelete }}
+          />
+        </View>
       ) : null}
 
 
@@ -1473,6 +1490,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     justifyContent: 'center',
   },
+  keypadEntry: { gap: Spacing.three },
   amountTools: {
     flexDirection: 'row',
     alignItems: 'center',

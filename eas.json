@@ -1,11 +1,14 @@
 {
   "cli": {
     "version": ">=22.4.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "base": {
       "node": "22.22.3",
+      "ios": {
+        "autoIncrement": false
+      },
       "env": {
         "EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO": "0",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",

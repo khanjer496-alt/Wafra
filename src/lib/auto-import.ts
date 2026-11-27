@@ -1,7 +1,9 @@
+import { canReviewCreditRefusal, completedDebitBesideCredit as splitDebitBesideCredit, hasUnsettledCreditToken, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
 import { requestConsent } from '@/lib/consent-prompt';
+import { withAndroidCaptureConsent } from '@/lib/android-capture-disclosure';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -24,8 +26,13 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, statedBalanceInText, type CaptureChannel } from '@/lib/dedupe';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
+  completedDebitBesideCredit,
+  debitBesideRefusedCreditNote,
+  hasOwnMovementStatusSentence,
   nonPostingReason,
+  hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
   parseSms,
   PARSER_VERSION,
@@ -34,9 +41,11 @@ import {
 } from '@/lib/sms-parser';
 import {
   createLaunchAlertSession,
+  hasPersonalMessagePrefix,
   hasBankAlertMoneyHint,
   hasGenericBankAlertContext,
   inspectGenericBankEventForReview,
+  inspectSupplementaryReversal,
   isHeldLaunchCredit,
   isUnaccountableLaunchSender,
   type LaunchAlertSession,
@@ -63,9 +72,9 @@ import {
 } from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, isSafeCardRepaymentReviewSource, isNotAutoPostableMoney } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import { missingUniversalField, type UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import { isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
 import { latamOwnTransferTitle, latamPolicySource } from '@/lib/latam-alert-templates';
@@ -81,7 +90,7 @@ const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
 
-export interface AndroidNotificationImportDiagnostics {
+interface AndroidNotificationImportDiagnostics {
   attemptedAt: number;
   captured: number;
   autoParsed: number;
@@ -209,7 +218,7 @@ export const CARRIER_DUPLICATE_DATETIME_RE =
  * figure counts (currency code or two decimals), and never "balance
  * transfer", so an offer footer that is identical on every alert does not.
  */
-export const CARRIER_DUPLICATE_BALANCE_RE =
+const CARRIER_DUPLICATE_BALANCE_RE =
   /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
 
 /** Whether an identical copy of [body] can only be the same posting. */
@@ -380,11 +389,19 @@ export function hasBankNotificationSystemAccess(): boolean {
 }
 
 /** Open Android's Notification access screen. The user must approve this system permission. */
-export async function openBankNotificationAccessSettings(): Promise<boolean> {
-  if (Platform.OS !== 'android' || !NotificationReader ||
-    !isBankNotificationCaptureAvailable(NotificationReader.isAvailable?.() === true)) return false;
+export async function openBankNotificationAccessSettings(options: {
+  onAccepted?: () => Promise<boolean>;
+  skipSettingsIfGranted?: boolean;
+} = {}): Promise<boolean> {
+  const reader = NotificationReader;
+  if (Platform.OS !== 'android' || !reader ||
+    !isBankNotificationCaptureAvailable(reader.isAvailable?.() === true)) return false;
   try {
-    return NotificationReader.openSettings?.() === true;
+    return await withAndroidCaptureConsent('bank-notifications', async () => {
+      if (options.onAccepted && !await options.onAccepted()) return false;
+      if (options.skipSettingsIfGranted && hasBankNotificationSystemAccess()) return true;
+      return reader.openSettings?.() === true;
+    });
   } catch {
     return false;
   }
@@ -397,9 +414,23 @@ export function subscribeInboxChanges(listener: () => void): () => void {
   return () => subscription?.remove();
 }
 
-export async function hasSmsPermission(): Promise<boolean> {
+const SMS_HISTORY_DISCLOSURE_KEY = 'wafra.android.sms-history-disclosure.v1';
+const SMS_HISTORY_DISCLOSURE_VERSION = '1';
+
+/** OS permission alone is not evidence that this installation saw the disclosure. */
+async function hasSmsSystemPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+}
+
+/** Effective app access requires both the OS grant and this disclosure version. */
+export async function hasSmsPermission(): Promise<boolean> {
+  if (!await hasSmsSystemPermission()) return false;
+  try {
+    return await SecureStore.getItemAsync(SMS_HISTORY_DISCLOSURE_KEY) === SMS_HISTORY_DISCLOSURE_VERSION;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -414,18 +445,36 @@ export async function hasSmsDeliveryPermission(): Promise<boolean> {
     PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
 }
 
-export async function requestSmsPermission(): Promise<boolean> {
+export async function requestSmsPermission(options: { onDisclosureDeclined?: () => void } = {}): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   if (await hasSmsPermission()) return true;
   // Foreground history and live delivery have separate consent.
-  const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
-  return result === PermissionsAndroid.RESULTS.GRANTED;
+  let accepted = false;
+  const granted = await withAndroidCaptureConsent('sms-history', async () => {
+    accepted = true;
+    await SecureStore.setItemAsync(SMS_HISTORY_DISCLOSURE_KEY, SMS_HISTORY_DISCLOSURE_VERSION);
+    // Upgrades/manual system grants still need the disclosure, but no redundant OS prompt.
+    if (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS)) return true;
+    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  });
+  if (!accepted) options.onDisclosureDeclined?.();
+  return granted;
 }
 
 /** Open Wafra's Android app-details page, including restricted-access controls. */
 export async function openSmsPermissionSettings(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await Linking.openSettings();
+  await withAndroidCaptureConsent('sms-history', async () => {
+    await SecureStore.setItemAsync(SMS_HISTORY_DISCLOSURE_KEY, SMS_HISTORY_DISCLOSURE_VERSION);
+    await Linking.openSettings();
+    return true;
+  });
+}
+
+/** Withdrawal never requires accepting a grant disclosure. This does not read SMS. */
+export async function openSmsRevocationSettings(): Promise<void> {
+  if (Platform.OS === 'android') await Linking.openSettings();
 }
 
 /** Stable native error boundary; never inspect or expose platform error text. */
@@ -447,6 +496,7 @@ export async function requestSmsDeliveryPermission(
   // A previous OS grant may have been revoked. Clear stale consent before any fresh choice.
   if (SmsReader.hasLiveSmsConsent?.() && !SmsReader.setLiveSmsConsent(false)) return false;
   const accepted = await requestConsent({
+    androidCapture: 'sms-live',
     question: translate('instantSmsDisclosureTitle'),
     body: translate('instantSmsDisclosureBody'),
     cancelLabel: translate('cancel'),
@@ -464,12 +514,12 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
-export interface InboxScanCursor {
+interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
 }
 
-export interface ScanInboxOptions {
+interface ScanInboxOptions {
   /** Ready local formats advise Review only; parser-version repair always disables them. */
   privateFormatReview?: PrivateAlertFormatSessionOptions;
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
@@ -559,7 +609,7 @@ export interface ScanResult {
 }
 
 /** One transaction a running scan has just parsed, as display facts only. */
-export interface ScanFoundPreview {
+interface ScanFoundPreview {
   merchant: string;
   category: import('@/lib/types').CategoryId;
   type: import('@/lib/types').TransactionType;
@@ -593,6 +643,7 @@ const NOOP_SCAN_COMMIT = async () => {};
 export async function countInboxMessages(sinceMs: number, atOrAfterMs = 0): Promise<number | null> {
   if (Platform.OS !== 'android' || typeof SmsReader?.getInboxCount !== 'function') return null;
   try {
+    if (!await hasSmsPermission()) return null;
     const count = await SmsReader.getInboxCount(sinceMs, atOrAfterMs);
     return Number.isSafeInteger(count) && count >= 0 ? count : null;
   } catch {
@@ -623,13 +674,28 @@ class ReviewIdentityError extends Error {
 type ExpoDigest = {
   CryptoDigestAlgorithm: { SHA256: unknown };
   digestStringAsync(algorithm: unknown, data: string): Promise<string>;
+  digest?(algorithm: unknown, data: Uint8Array): Promise<ArrayBuffer>;
 };
 
-const sha256 = (data: string): Promise<string> => {
+const sha256 = async (data: string): Promise<string> => {
   // The test harness intentionally stubs only Crypto's random-byte surface.
   // Cast at this private seam while production calls Expo SDK 55's documented
-  // digestStringAsync/CryptoDigestAlgorithm pair directly.
+  // digest/digestStringAsync/CryptoDigestAlgorithm API directly.
   const digest = Crypto as unknown as ExpoDigest;
+  // Android hashes BYTES. expo-modules-core (SDK 55) converts every String
+  // argument on Android with env->NewStringUTF(utf8.c_str()), which stops at
+  // the first NUL, and the review identity joins its fields with U+0000: on a
+  // device every Android review hashed only its constant domain prefix, so all
+  // reviews got ONE id and the tray refused all but the first (Android RC 396
+  // F1). A typed array crosses the bridge intact, and SHA-256 of the UTF-8
+  // bytes is exactly what digestStringAsync computes where strings survive, so
+  // the identity is the documented one and iOS keeps its existing path.
+  if (Platform.OS === 'android' && typeof digest.digest === 'function' && typeof TextEncoder === 'function') {
+    const bytes = new Uint8Array(await digest.digest(digest.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(data)));
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+  }
   return digest.digestStringAsync(digest.CryptoDigestAlgorithm.SHA256, data);
 };
 
@@ -720,17 +786,17 @@ async function bindProviderReviewIdentity(
   };
 }
 
-export type SourceFreeReviewCandidate =
+type SourceFreeReviewCandidate =
   | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
   | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
 
-export interface SourceFreeReviewIdentity {
+interface SourceFreeReviewIdentity {
   id: string;
   sourceKey: string;
   templateKey?: string;
 }
 
-export type SourceFreeRefusedAlertDecision =
+type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
@@ -924,7 +990,7 @@ function parsedUniversalPosting(
  * capture. Source and sender are consumed only while inspecting; neither can
  * appear in the returned decision.
  */
-export function inspectSourceFreeRefusedAlert(input: {
+function inspectSourceFreeRefusedAlertCore(input: {
   source: string;
   sender: string;
   observedAt: number;
@@ -933,20 +999,98 @@ export function inspectSourceFreeRefusedAlert(input: {
   existingInspection?: UniversalAlertReview | null;
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
+  /** Internal collector context: the primary debit is already accepted. Never authorizes it. */
+  acceptedExpense?: ParsedSms;
 }): SourceFreeRefusedAlertDecision {
+  // A footer made of link WORDS only ("If not you, tap here to block your card") names no address, so it cannot be a
+  // phishing link; the debit above it must reach Review, never be dropped. It is blanked for this inspection only:
+  // posting still refuses the original text, and a footer that names a real URL stays refused.
+  const source = blankWordLinkPrompts(input.source);
   // BNPL provider restatement (see bnpl-providers.ts): the bank's
   // card alert is the transaction, so this source never earns a Review card.
   if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
-  const reason = nonPostingReason(input.source);
+  // An explicit non-credit/future balance claim must not acquire actionable
+  // money through an unparsed-template fallback. This is no ledger deletion.
+  if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
+  const reason = nonPostingReason(source);
+  // A debit whose own decline, failure, cancellation or reversal is a separate sentence did not stand. As for "… was
+  // declined" in one sentence there is nothing to review; another refusal reason keeps its own outcome.
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') && hasOwnMovementStatusSentence(input.source)) {
+    return { kind: 'declined', reason: 'declined' };
+  }
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
+    completedDebitBesideCredit(input.source, { sender: input.sender }) && !/https?:\/\/|www\./iu.test(input.source)) {
+    const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
+    const pair = completedDebitBesideCredit(input.source, { sender: input.sender })!;
+    const note = inspectSupplementaryReversal(input.source, input.sender);
+    let event = accepted ? note : note ? inspectGenericBankEventForReview(pair.debit, input.sender) : null;
+    if (!accepted && event) event = { ...event, decision: 'review', status: 'informational', direction: 'debit',
+      issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
+    const review = event ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  // #238 (oracle D1): a purchase beside a refund note of another figure, which the pair proof above cannot read, reaches
+  // Review as that purchase (its figure and direction) instead of an amount-free credit or nothing. Retention, not
+  // authority: like the unaccepted pair above it is informational, so it is never posted, never income and never booked by
+  // one tap. UAE/Saudi: the regional parser's facts for the debit sentence; elsewhere the generic reading of it.
+  if (reason === null && !/https?:\/\/|www\./iu.test(input.source) && !hasPersonalMessagePrefix(input.source, input.sender)) {
+    const besideNoteMarket = detectLaunchMarketFromAlert(source, input.sender);
+    let debit: UniversalBankEvent | null = null;
+    if (besideNoteMarket) {
+      const parsed = withMarketPackForParsing(besideNoteMarket, () =>
+        debitBesideRefusedCreditNote(input.source, { sender: input.sender, observedAt: input.observedAt }));
+      debit = parsed ? parsedTransactionReviewEvent(parsed) : null;
+    } else {
+      const read = (clause: string) => inspectGenericBankEventForReview(clause, input.sender);
+      const postedDebit = (event: UniversalBankEvent | null) => event?.direction === 'debit' && event.status === 'posted' &&
+        event.amount.evidence === 'explicit' ? event : null;
+      const letters = (text: string) => text.replace(/[^\p{L}]/gu, '');
+      const pair = splitDebitBesideCredit(input.source, clause => !!postedDebit(read(clause)));
+      const event = pair ? postedDebit(read(pair.debit)) : null;
+      const note = pair ? read(pair.credit) : null;
+      // Every other part is the note, about other money: no dropped status sentence, no recap of this purchase.
+      if (pair && event && note?.amount.evidence === 'explicit' && note.amount.value?.minorUnits !== event.amount.value?.minorUnits &&
+        letters(input.source.replace(pair.debit, ' ')) === letters(pair.credit) &&
+        !/\b(?:this|the|your)\s+(?:transaction|purchase|payment)\b/iu.test(pair.credit)) debit = event;
+    }
+    const review = debit?.direction === 'debit' && debit.amount.evidence === 'explicit' ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001', observedAt: input.observedAt, channel: input.channel,
+      event: { ...debit, decision: 'review', status: 'informational',
+        issues: [...new Set([...debit.issues, 'unsettled-credit-not-posting'])] } }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  // An unsettled credit is financial evidence, not confirmation authority.
+  // Prefer its typed informational Review before the legacy refusal/template path.
+  if (canReviewCreditRefusal(source, reason) && hasBankAlertMoneyHint(source) &&
+    !(input.channel === 'push' && isPromotionalBankPush(source))) {
+    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    const heldMoney = event?.issues.includes('unsettled-credit-not-posting') || hasOnlyUnsettledCredit(input.source) ||
+      hasUnsettledCreditToken(input.source) || mentionsCredit(input.source);
+    const review = heldMoney && event?.decision === 'review' && event.status === 'informational' ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;
   // never turn a bank-app offer into an actionable spending review.
-  if (input.channel === 'push' && isPromotionalBankPush(input.source)) {
+  if (input.channel === 'push' && isPromotionalBankPush(source)) {
     return { kind: 'ignored', reason: 'promotion' };
   }
-  if (!hasBankAlertMoneyHint(input.source) &&
-    !hasGenericBankAlertContext(input.source, input.sender)) {
+  if (!hasBankAlertMoneyHint(source) &&
+    !hasGenericBankAlertContext(source, input.sender)) {
     return { kind: 'ignored', reason: 'non-financial' };
   }
 
@@ -954,9 +1098,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
   // rate converts it at promotion. It is never dropped, even when the
   // worldwide fallback below is skipped or cannot read the template.
-  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const launchMarket = detectLaunchMarketFromAlert(source, input.sender);
   const awaitingRate = launchMarket
-    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(source, undefined, {
         sender: input.sender, observedAt: input.observedAt,
       }))
     : null;
@@ -966,22 +1110,36 @@ export function inspectSourceFreeRefusedAlert(input: {
     if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
-  // A UAE/Saudi credit the sender-trust rule held back (blank, phone, e-mail
-  // or generic sender; no own account or card tail; no scam wording) waits in
-  // Review with its amount filled in. It is never dropped: a genuine incoming
+  // A UAE/Saudi credit held for a phone, e-mail or generic sender, or a blank
+  // sender without an own tail, waits in Review with its amount filled in.
+  // Scam wording is still refused. It is never dropped: a genuine incoming
   // transfer read from iPhone History has no sender at all.
   if (launchMarket && isUnaccountableLaunchSender(input.sender)) {
-    const credit = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+    const credit = withMarketPackForParsing(launchMarket, () => parseSms(source, undefined, {
       sender: input.sender, observedAt: input.observedAt,
     }));
-    if (credit && isHeldLaunchCredit(input.source, input.sender, credit)) {
+    if (credit && isHeldLaunchCredit(source, input.sender, credit)) {
       const { raw: _raw, ...facts } = credit;
       const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
       if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
     }
   }
 
-  const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
+  // Prefer typed settlement Review over a generic purchase/income draft. No
+  // amount, direction or card identity is invented; missing fields stay open.
+  if (isSafeCardRepaymentReviewSource(source) ||
+    (isCompletedCardBalanceReceipt(source) && !isNotAutoPostableMoney(source))) {
+    const event = inspectGenericBankEventForReview(source, input.sender);
+    const review = event?.family === 'card-payment' && (event.status === 'posted' || event.status === 'unknown') ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt, channel: input.channel, event,
+    }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  const inspection = input.existingInspection ?? input.session.inspect(source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({
         id: 'capture_probe_id_0001',
@@ -994,7 +1152,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // A globally routed or ambiguous result has already been judged by the
   // global inspector. The launch fallback is only for alerts with no route.
   const launchReview = inspection === null
-    ? inspectUnparsedLaunchAlert(input.source, input.sender)
+    ? inspectUnparsedLaunchAlert(source, input.sender)
     : null;
   const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
     ? prepareLaunchReviewAlert({
@@ -1013,11 +1171,11 @@ export function inspectSourceFreeRefusedAlert(input: {
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
     // A Gulf-neighbour route reads its own currency spellings for the amount.
-    const event = inspectGenericBankEventForReview(input.source, input.sender,
+    const event = inspectGenericBankEventForReview(source, input.sender,
       inspection?.route.decision === 'single' ? inspection.route.market : null);
     // The only place the text and the generic reading meet: keep a value-free
     // shape (never the text) so confirming the reading unchanged can share it.
-    const share = event ? buildCandidateShareShape(input.source, input.sender, event) : null;
+    const share = event ? buildCandidateShareShape(source, input.sender, event) : null;
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
       sourceKey: 'capture_probe_key_001',
@@ -1037,6 +1195,37 @@ export function inspectSourceFreeRefusedAlert(input: {
     ...candidate
   } = reviewPrepared;
   return { kind: 'review', candidate };
+}
+
+/** Last-line authority guard also covers registered templates and enrichment. */
+function guardIncomingReview(source: string, decision: SourceFreeRefusedAlertDecision, hold: boolean): SourceFreeRefusedAlertDecision {
+  if (decision.kind !== 'review' || !hold) return decision;
+  const candidate = decision.candidate;
+  if (candidate.kind === 'universal') {
+    if (candidate.event.direction !== 'credit' && !(candidate.event.direction === 'unknown' && mentionsCredit(source))) return decision;
+    return { kind: 'review', candidate: { ...candidate, event: informationalCreditReview(source, candidate.event) } };
+  }
+  if (candidate.direction !== 'credit') return decision;
+  const amount = { value: candidate.amount, evidence: 'explicit' as const, spans: [], alternatives: [], issues: [] };
+  const event: UniversalBankEvent = { version: 1, decision: 'review', family: candidate.family,
+    status: 'informational', direction: 'credit', amount,
+    statementTotal: missingUniversalField(), minimumDue: missingUniversalField(), balance: missingUniversalField(),
+    creditLimit: missingUniversalField(), merchant: missingUniversalField(), transactionDate: missingUniversalField(),
+    dueDate: missingUniversalField(), statementDate: missingUniversalField(), instrument: candidate.instrument
+      ? { value: candidate.instrument, evidence: 'explicit', spans: [], alternatives: [], issues: [] } : missingUniversalField(),
+    observations: [{ role: 'transaction', field: amount }], issues: ['unsettled-credit-not-posting'] };
+  const prepared = prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
+    observedAt: candidate.observedAt, channel: candidate.channel, event });
+  if (!prepared) return { kind: 'ignored', reason: 'unrecognized' };
+  const { id: _id, sourceKey: _sourceKey, ...free } = prepared;
+  return { kind: 'review', candidate: free };
+}
+
+export function inspectSourceFreeRefusedAlert(
+  input: Parameters<typeof inspectSourceFreeRefusedAlertCore>[0],
+): SourceFreeRefusedAlertDecision {
+  const hold = hasUnsettledCreditToken(input.source) || hasOnlyUnsettledCredit(input.source);
+  return guardIncomingReview(input.source, inspectSourceFreeRefusedAlertCore(input), hold);
 }
 
 /** Attach an opaque identity only after review admission has removed source. */
@@ -1184,7 +1373,9 @@ export async function scanInbox(
     notificationId?: string,
     /** The parser read an obligation that this transport may only review. */
     preferParsedFallback = false,
+    acceptedExpense?: ParsedSms,
   ): Promise<SourceFreeRefusedAlertDecision> => {
+    const holdIncomingOriginal = hasUnsettledCreditToken(body) || hasOnlyUnsettledCredit(body);
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
@@ -1193,6 +1384,7 @@ export async function scanInbox(
       session: launchSession,
       existingInspection,
       skipUniversalFallback,
+      acceptedExpense,
     });
     if (preferParsedFallback && parsedFallback && decision.kind === 'review') {
       decision = { kind: 'review', candidate: parsedFallback };
@@ -1226,6 +1418,7 @@ export async function scanInbox(
         } else decision = { kind: 'review', candidate: aiCandidate };
       }
     }
+    decision = guardIncomingReview(body, decision, holdIncomingOriginal);
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
     // came from a business sender ID. Letters in the sender mark an
@@ -1447,12 +1640,14 @@ export async function scanInbox(
         const shadowInspection = inspectGenericBankEventForReview(sms.body, sms.address);
         if (shadowInspection) queueLocalSemanticParserShadow(sms.body, shadowInspection);
       }
-      const reviewDecision = p && shouldReviewParsedIncome(p)
+      const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
+      const reviewDecision = p && (shouldReviewParsedIncome(p) || supplementary)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
+            undefined, undefined, false, false, undefined, false, supplementary ? p : undefined,
           )
         : null;
-      const reviewed = reviewDecision?.kind === 'review';
+      const reviewed = !supplementary && reviewDecision?.kind === 'review';
       if (p && !reviewed) {
         // A parser improvement can turn an old review into a normal parsed
         // row. Attest its old identity before planning, but do no extra source
@@ -1564,11 +1759,12 @@ export async function scanInbox(
           const heldPayment = p?.kind === 'cardPayment' && p.bestEffort ? p : null;
           const obligation = heldPayment ? parsedFinancialCandidateReview(heldPayment, sms.date) : null;
           const deliveryFallback = obligation ? { ...obligation, channel: 'delivery' as const } : null;
-          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p))
+          const supplementary = p?.kind === 'transaction' && p.type === 'expense' && !!completedDebitBesideCredit(sms.body, { sender: sms.address });
+          const reviewDecision = p && (heldPayment || shouldReviewParsedIncome(p) || supplementary)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide,
-                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment)
+                undefined, undefined, deliveryFallback, false, false, undefined, !!heldPayment, supplementary ? p : undefined)
             : null;
-          const reviewed = reviewDecision?.kind === 'review';
+          const reviewed = !supplementary && reviewDecision?.kind === 'review';
           if (p && !reviewed && !heldPayment) {
             parsed.push({
               ...p,
@@ -1840,14 +2036,15 @@ export async function scanInbox(
           ? universalEventReviewCandidate(universalEvent, n.ts)
           : null;
         const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
-        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
+        const supplementary = p?.kind === 'transaction' && p.type === 'expense' && autoAuthorized && !!completedDebitBesideCredit(source, { sender });
+        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized || supplementary)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
               reviewFallback, skipKnownLaunchUniversal,
-              false, n.id,
+              false, n.id, false, supplementary ? p : undefined,
             )
           : null;
-        const reviewed = refusal?.kind === 'review';
+        const reviewed = !supplementary && refusal?.kind === 'review';
         let handled = false;
         if (p && autoAuthorized && !reviewed) {
           parsed.push({

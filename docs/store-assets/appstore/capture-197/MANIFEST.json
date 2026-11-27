@@ -1,0 +1,257 @@
+{
+  "kind": "App Store en-US replacement frame 8 and optional alternates 5 and 7 for approval (not uploaded)",
+  "created": "2026-11-26",
+  "app": {
+    "name": "Wafra",
+    "version": "1.0.0",
+    "buildNumber": "197",
+    "bundleId": "app.wafra.ios",
+    "sourceCommit": "c75d4ba9a81dffb09d2214fed6aabd69afdcbf6e",
+    "sourcePr": 292,
+    "note": "Build 197 candidate source; no App Store IPA for 197 existed when these were made."
+  },
+  "capturedBinary": {
+    "description": "Release configuration built for the iOS Simulator from the same source commit with the eas.json production profile environment; ad-hoc simulator signature. Not a signed App Store IPA.",
+    "buildConfiguration": "Release",
+    "sdk": "iphonesimulator",
+    "arch": "arm64",
+    "profileEnvironment": "production",
+    "otaUpdates": "EXUpdatesCheckOnLaunch=NEVER",
+    "buildWorkflow": ".github/workflows/appstore-shots-sim-build-197.yml on branch capture/appstore-sim-build-195",
+    "buildRun": 45841868014,
+    "xcode": "Xcode 26.6 (17F113)",
+    "appZipSha256": "9522f16e6e4251c8a21ec13d5a54a9185afd9b52bb9c76d05b6a0753b3ce6f3e",
+    "mainJsbundleSha256": "9b0e684e4f90b23f23f086c2890c1eab9e668c189f7560ca92afa2ad4b491cab"
+  },
+  "capture": {
+    "route": "GitHub Actions macos-26 runner: iOS Simulator, Release build",
+    "device": "iPhone 16 Pro (simulator)",
+    "deviceModel": "iPhone 16 Pro (402x874 pt @3x)",
+    "os": "iOS 26.5 (com.apple.CoreSimulator.SimRuntime.iOS-26-5), Xcode 26.6 (17F113)",
+    "language": "en-US (Arabic and Larger Text passes for verification only)",
+    "region": "United States",
+    "appearance": "light",
+    "captureTool": "Maestro 2.12.1 takeScreenshot",
+    "run": 45850150051,
+    "captureWorkflow": ".github/workflows/appstore-shots-sim-capture-197.yml + .maestro/appstore-197/ on branch capture/appstore-sim-build-195",
+    "phonesUsed": "none",
+    "sampleData": {
+      "synthetic": true,
+      "currency": "USD",
+      "file": "capture-195/sample-ledger/wafra-sample-backup-usd.json",
+      "sha256": "369ec45e47b1a19a604e08021dbc6b7c0231ce0ae8d3e430391d846b6cf833bc",
+      "loadedVia": "the app's own Welcome > Restore from a backup flow"
+    }
+  },
+  "presentation": {
+    "method": "capture-197/presentation/index.html (identical to capture-195/presentation/index.html except the footer number comes from frames.json) rendered by headless Chrome at 1206x2622, re-encoded as opaque RGB PNG.",
+    "captionsMatch": "Frame 8 caption, theme and crop are identical to the approved appstore-6.3-en-08.png; alternate 5 reuses the approved frame-5 caption; alternate 7 uses the budgets caption."
+  },
+  "frames": [
+    {
+      "file": "appstore-6.3-en-08.png",
+      "slot": "08",
+      "replaces": "appstore-6.3-en-08.png",
+      "surface": "Settings, Privacy and security section (App Lock row) and Data and help entry",
+      "appearance": "light",
+      "headline": "Privacy, you control.",
+      "sub": "No bank login. Optional App Lock. Backups you keep.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "1e303ffb2ea24bf42ee5380c40f75faf59dee09c8a4a1a5b14361d47622a6136",
+      "raw": {
+        "file": "raw/v-settings-privacy.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "7cbccb7c6b14e2e2369685b775a95f8a93a47bf97641a79f914090e1dccdd2eb",
+        "statusBarCropPx": 200
+      }
+    },
+    {
+      "file": "alt-appstore-6.3-en-05-accounts.png",
+      "slot": "05",
+      "alternateFor": "appstore-6.3-en-05.png",
+      "surface": "Accounts tab (balances, credit card owed and statement left, cash)",
+      "appearance": "light",
+      "headline": "Card dues, without surprises.",
+      "sub": "What's left on each statement, and when it's due.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "b01de409115b9cc55744bbc808f6bcd8ca970030a36f95ec832571e4b25afa4d",
+      "raw": {
+        "file": "raw/v-accounts-default.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "37852a33a64d298b02333fa35ca1c0e3dff300c6823c3e91f7149d34597da567",
+        "statusBarCropPx": 186
+      }
+    },
+    {
+      "file": "alt-appstore-6.3-en-07-budgets.png",
+      "slot": "07",
+      "alternateFor": "appstore-6.3-en-07.png",
+      "surface": "Spending tab, Where it went, With limits (category budgets)",
+      "appearance": "light",
+      "headline": "Give each category a limit.",
+      "sub": "See how much of each limit you've used.",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "sha256": "74a10cfbde1dc21b72872e73b58f68d366132df27d2220dc59a883f310ebb05f",
+      "raw": {
+        "file": "raw/v-limits-default.png",
+        "width": 1206,
+        "height": 2622,
+        "pngColorType": 2,
+        "sha256": "18382cac5655ba4faae5b3c624e8b9ca6fb7edf30287db55cb4b481dd3788e19",
+        "statusBarCropPx": 186
+      }
+    }
+  ],
+  "verification": [
+    {
+      "file": "raw/v-accounts-default.png",
+      "result": "pass: amounts on one line ($24,681, $853.86, owed USD 1,748.75)",
+      "sha256": "37852a33a64d298b02333fa35ca1c0e3dff300c6823c3e91f7149d34597da567",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-default-lower.png",
+      "result": "pass",
+      "sha256": "37852a33a64d298b02333fa35ca1c0e3dff300c6823c3e91f7149d34597da567",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-default.png",
+      "result": "pass: every amount on one line",
+      "sha256": "18382cac5655ba4faae5b3c624e8b9ca6fb7edf30287db55cb4b481dd3788e19",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-settings-privacy.png",
+      "result": "pass: App Lock subtitle \"Face ID, Touch ID, or your passcode\"",
+      "sha256": "7cbccb7c6b14e2e2369685b775a95f8a93a47bf97641a79f914090e1dccdd2eb",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-privacy-sheet.png",
+      "result": "pass: iPhone-only wording",
+      "sha256": "9f68b16c8edfe9a15f9d9de774ac57ada6d3eb75c9b925e5d7485f5acd60594d",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-transfers-default.png",
+      "result": "pass: wrapCurrency tiles whole, nothing clipped",
+      "sha256": "499a3806f4cce580984db5df76a46846a5b4763db74f2a7a5c11add14177b189",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-transfers-default-lower.png",
+      "result": "pass",
+      "sha256": "499a3806f4cce580984db5df76a46846a5b4763db74f2a7a5c11add14177b189",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-extra-extra-extra-large.png",
+      "result": "rows pass; hero BandFigure stacks $ above the figure (accepted Larger Text rule for 1.0)",
+      "sha256": "7db9a996332c4a455e64eb682b4757ad7709c9192036289d42f991667cbd60a8",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-extra-extra-extra-large-lower.png",
+      "result": "pass",
+      "sha256": "95bf9547e9c9d2b4f7ed752a0e45bfaadf944133f473d16ca0cd873857491aca",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-accessibility-medium.png",
+      "result": "rows pass; hero BandFigure stacks $ above the figure (accepted Larger Text rule for 1.0)",
+      "sha256": "90dd033bec244b1987783d3d793da7e6e5e7a6aef47b6d9fc6d48e3eeefafc5d",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-accessibility-medium-lower.png",
+      "result": "pass",
+      "sha256": "9b7ddf668cab1a3046a24c6f4313ef6ffebe7f7d76223c9ee38688eafd17d5a4",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-extra-extra-extra-large.png",
+      "result": "pass",
+      "sha256": "1a6f74a15bcd84268bf41f12b4d58d6e35c3ec96562ff535a3f48d29a6ad8a72",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-extra-extra-extra-large-lower.png",
+      "result": "pass",
+      "sha256": "ad2cd472072e2f114e5ffcef5f60193a5ecde1f9370c1618522cb832526d59ee",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-accessibility-medium.png",
+      "result": "pass",
+      "sha256": "e9a45a27cf0d970e21b1a6fcc567a2f083596b40feeced7a985bc579b487bdc1",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-accessibility-medium-lower.png",
+      "result": "pass",
+      "sha256": "eb312404dd1c2f980cc14192377658c37a3f6bda97406b9ccd50c0459ea92e42",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-accounts-ar.png",
+      "result": "pass: number-then-code (24,681 USD)",
+      "sha256": "fd63d23fae5c57626baef2f72ec293f02773b57e0959c20839bfd492d8c67d0b",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    },
+    {
+      "file": "raw/v-limits-ar.png",
+      "result": "pass: number-then-code",
+      "sha256": "a4519afa5e41e2722c5f855d809feb4c110edfefec2e16f1cadad4b5263c115d",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2
+    }
+  ],
+  "beforeAfterSheet": {
+    "file": "before-after.png",
+    "sha256": "468595482df84da9d6024e73228aea219aca1476d6d8c53b45c127dd3da83f35"
+  }
+}

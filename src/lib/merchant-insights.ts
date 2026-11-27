@@ -28,9 +28,9 @@ export function rankMerchants(stats: readonly MerchantStat[], sort: MerchantSort
 }
 
 /** History that starts less than this many days before the period is too thin to call a shop new. */
-export const NEW_MERCHANT_MIN_HISTORY_DAYS = 28;
+const NEW_MERCHANT_MIN_HISTORY_DAYS = 28;
 
-export type NewMerchantResult =
+type NewMerchantResult =
   | { available: true; keys: Set<string> }
   | { available: false; reason: 'all-time' | 'no-history' | 'history-too-short'; keys: Set<string> };
 
@@ -76,7 +76,7 @@ export function newMerchantKeys(
 
 /* ── One merchant, month by month ──────────────────────────────────────── */
 
-export interface MerchantMonth {
+interface MerchantMonth {
   key: string;
   fils: number;
   count: number;
@@ -86,7 +86,7 @@ export interface MerchantMonth {
 
 /** At most a year of bars; a single-month period shows this many months of context. */
 export const MERCHANT_SERIES_MAX_MONTHS = 12;
-export const MERCHANT_SERIES_MIN_MONTHS = 6;
+const MERCHANT_SERIES_MIN_MONTHS = 6;
 
 const monthDiff = (a: string, b: string): number =>
   (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7));

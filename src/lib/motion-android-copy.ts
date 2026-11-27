@@ -47,6 +47,8 @@ const en = {
   amountSpoken: (currency: string, amount: string) => `Amount, ${currency} ${amount}`,
   suggestedCategories: 'Suggested categories',
   suggestedCategorySpoken: (label: string) => `Suggested category, ${label}`,
+  manualEntryChooseCategory: 'Choose the category before adding this transaction.',
+  manualEntryChooseAccount: 'Choose the account this transaction belongs to.',
   categoryChipSpoken: (label: string) => `Category, ${label}. Change category`,
   dateChipSpoken: (label: string) => `Date, ${label}. Change date`,
   accountChipSpoken: (label: string) => `Account, ${label}. Change account`,
@@ -79,6 +81,8 @@ const ar: typeof en = {
   amountSpoken: (currency, amount) => `المبلغ، ${currency} ${amount}`,
   suggestedCategories: 'فئات مقترحة',
   suggestedCategorySpoken: (label) => `فئة مقترحة، ${label}`,
+  manualEntryChooseCategory: 'اختر التصنيف قبل إضافة هذه المعاملة.',
+  manualEntryChooseAccount: 'اختر الحساب الذي تنتمي إليه هذه المعاملة.',
   categoryChipSpoken: (label) => `الفئة، ${label}. تغيير الفئة`,
   dateChipSpoken: (label) => `التاريخ، ${label}. تغيير التاريخ`,
   accountChipSpoken: (label) => `الحساب، ${label}. تغيير الحساب`,
@@ -97,7 +101,7 @@ const ar: typeof en = {
 
 export const motionAndroidCopyTables = { en, ar } as const;
 
-export type MotionAndroidCopy = typeof en;
+type MotionAndroidCopy = typeof en;
 
 /** The table for `language`, read at render time (never at import time). */
 export const motionAndroidCopy = (language: string = getLanguage()): MotionAndroidCopy =>

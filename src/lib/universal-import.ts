@@ -15,7 +15,7 @@ import type { UniversalBankEvent, UniversalField, UniversalInstrument, Universal
  * The host must bind these choices, sourceKey and observedAt to the same
  * immutable captured source that produced the reviewed UniversalBankEvent.
  */
-export interface UniversalImportConfirmation {
+interface UniversalImportConfirmation {
   confirmed: true;
   postingStatus: 'posted';
   amount: UniversalMoney;
@@ -41,7 +41,7 @@ export type UniversalImportRefusal =
   /** Foreign money with no dated reference rate yet: stays in Review, nothing posts. */
   | 'fx-rate-unavailable';
 
-export type ConfirmedUniversalImportPlan =
+type ConfirmedUniversalImportPlan =
   | { outcome: 'ready'; batch: ImportBatchInput }
   | { outcome: 'duplicate'; transactionId: string }
   | { outcome: 'refused'; reason: UniversalImportRefusal };
@@ -129,7 +129,8 @@ export function planConfirmedUniversalImport(
   if (!event || event.version !== 1 || !['review', 'ignore'].includes(event.decision)) return refuse('invalid-event');
   if (event.decision === 'ignore') return refuse('ignored-event');
   if (!transactionFamilies.has(event.family)) return refuse('unsupported-event');
-  if (event.status !== 'posted' && event.status !== 'unknown') return refuse('not-posted');
+  if ((Array.isArray(event.issues) && event.issues.some(issue => issue === 'unsettled-credit-not-posting' || issue === 'supplementary-reversal-info')) ||
+    (event.status !== 'posted' && event.status !== 'unknown')) return refuse('not-posted');
   if (!['debit', 'credit'].includes(confirmation.direction)) return refuse('confirmation-required');
   if (event.direction !== 'unknown' && event.direction !== confirmation.direction) return refuse('direction-conflict');
 

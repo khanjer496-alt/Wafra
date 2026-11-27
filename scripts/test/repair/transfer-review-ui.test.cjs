@@ -1135,13 +1135,13 @@ test('Home and the question card reach this one page; nothing routes to the old 
   assert.match(transfers, /testID="transfer-question-unnamed"[^>]*?onPress=\{startSelecting\}/, 'and so does the unnamed row');
   assert.match(transfers, /back: \(\) => \{ if \(router\.canGoBack\(\)\) router\.back\(\);/);
   // Every entry point (rows, groups, Home, Transactions, Accounts, Spending, entry sheets, links) lands on
-  // Transfers or the entry's own "What is this?": no source names the old address except the redirect itself
-  // and the route list, and the old sheet's words are gone from the app.
+  // Transfers or the entry's own "What is this?": no source names the old address except the redirect itself,
+  // and the old sheet's words are gone from the app.
   for (const dir of ['src/app', 'src/components', 'src/screens', 'src/lib', 'src/hooks']) {
     for (const file of fs.readdirSync(path.join(root, dir), { recursive: true })) {
       if (!/\.tsx?$/.test(file)) continue;
       const source = fs.readFileSync(path.join(root, dir, file), 'utf8');
-      if (!['src/app/review-transfers.tsx', 'src/lib/routes.ts'].includes(`${dir}/${file}`)) {
+      if (`${dir}/${file}` !== 'src/app/review-transfers.tsx') {
         assert.doesNotMatch(source, /['"`]\/review-transfers/, `${dir}/${file}`);
       }
       const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');

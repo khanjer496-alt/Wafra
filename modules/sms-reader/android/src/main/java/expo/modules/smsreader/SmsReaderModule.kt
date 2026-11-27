@@ -313,6 +313,12 @@ class SmsReaderModule : Module() {
       BuildConfig.WAFRA_SMS_CORPUS_EXPORT
     }
 
+    // The compiled native corpus gate as a marker string, which the release
+    // workflow reads back from the packaged dex.
+    Function("buildFlags") {
+      mapOf("smsCorpusNative" to BuildConfig.WAFRA_BUILD_FLAG_SMS_CORPUS_NATIVE)
+    }
+
     AsyncFunction("getInboxCorpusPage") {
         beforeDateMs: Double,
         beforeId: Double,

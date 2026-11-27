@@ -28,7 +28,7 @@ import { ASSISTANT_TOOL_CATALOG, isAssistantToolRequest } from '@/lib/wafra-assi
  */
 
 /** Tools a model may choose. Obligation status needs locally resolved identifiers. */
-export const ON_DEVICE_ASK_TOOLS: readonly AssistantTool[] = ASSISTANT_TOOL_CATALOG
+const ON_DEVICE_ASK_TOOLS: readonly AssistantTool[] = ASSISTANT_TOOL_CATALOG
   .map((entry) => entry.tool)
   .filter((tool) => tool !== 'help' && tool !== 'obligation-status');
 // credit-card-settlement-summary is offered without a month only: its
@@ -231,7 +231,7 @@ export function isExactPlainHelp(request: AssistantToolRequest): boolean {
   return (request as { unrecognized?: unknown }).unrecognized === true && keys.every((key) => UNRECOGNIZED_HELP_KEYS.has(key));
 }
 
-export type OnDeviceAskOutcome =
+type OnDeviceAskOutcome =
   | { source: 'on-device-ai'; request: AssistantToolRequest }
   | { source: 'deterministic'; request: AssistantToolRequest; reason: string };
 

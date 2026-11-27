@@ -25,7 +25,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { tapped } from '@/lib/haptics';
 
 /** The row tile's size: the boards draw 36pt tiles on 60pt rows. */
-export const SETTINGS_TILE = 36;
+const SETTINGS_TILE = 36;
 
 /** Sheet palette for these rows. Every band shares the sheet tokens. */
 function useRowPalette(palette?: BandPalette): BandPalette {

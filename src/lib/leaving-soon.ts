@@ -18,7 +18,7 @@ import {
 } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
-export type OutgoingKind = 'card' | 'bill' | 'subscription';
+type OutgoingKind = 'card' | 'bill' | 'subscription';
 
 export interface Outgoing {
   id: string;

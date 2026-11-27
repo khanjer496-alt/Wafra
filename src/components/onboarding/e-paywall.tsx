@@ -11,7 +11,7 @@
  * Plans come from the real billing layer (Superwall via useWafraBilling):
  * the storefront's own price strings, the same purchase call, legal-link and
  * outcome handling as the Pro screen. A plan the store did not return is
- * shown as unavailable, never at a guessed price. "Start the free N days"
+ * shown as unavailable, never at a guessed price. "Start N days of free automatic capture"
  * is always there and never needs the store.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -34,6 +34,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { t, tf } from '@/lib/i18n';
 import { trialTimeline } from '@/lib/onboarding-e';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 import { configuredPublicUrl } from '@/lib/public-links';
@@ -49,7 +50,7 @@ export function paywallBackdropOpacity(scheme: 'light' | 'dark'): number {
 /** The backdrop's top, under the safe area: just below the header's 52pt row. */
 export const PAYWALL_BACKDROP_TOP = 56;
 
-type Notice = { title: string; body: string } | null;
+type Notice = { title: string; body: string; tone?: 'neutral' } | null;
 
 /**
  * The Pro screen's purchase rules, for onboarding: refuse before the store is
@@ -59,6 +60,7 @@ type Notice = { title: string; body: string } | null;
  */
 function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
   const billing = useWafraBilling();
+  const store = billingStore();
   const billingRef = useRef(billing);
   billingRef.current = billing;
   const checkoutReady = billing.available && billing.configured;
@@ -96,7 +98,7 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
     setNotice(null);
     if (!legalReady) { setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') }); return; }
     if (!checkoutReady) {
-      setNotice({ title: t('purchaseUnavailable'), body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody') });
+      setNotice({ title: t('purchaseUnavailable'), body: billing.configurationError ? t('purchaseFailedBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody') });
       return;
     }
     if (!selected) { setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') }); return; }
@@ -111,10 +113,10 @@ function useOnboardingCheckout(enabled: boolean, onPurchased: () => void) {
       latch.current = false;
       setBusy(null);
     }
-    if (outcome === 'cancelled') return;
+    if (outcome === 'cancelled') { setNotice({ title: '', body: t('purchaseNotCompleted'), tone: 'neutral' }); return; }
     if (outcome === 'purchased') { onPurchased(); return; }
     if (outcome === 'pending') { setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') }); return; }
-    if (outcome === 'unavailable') { setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') }); return; }
+    if (outcome === 'unavailable') { setNotice({ title: t('purchaseUnavailable'), body: t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody') }); return; }
     setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
   };
 
@@ -316,7 +318,7 @@ function useBackdropSettle(fromPattern: boolean, dim: number) {
   }), [dim, settle, settling]);
 }
 
-export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, captureOn, onFinish, onBack, onClose, preview, finishing,
+export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, trialStartTs = 0, captureOn, onFinish, onBack, onClose, preview, finishing,
   arrivedFrom = null }: {
   tiles: readonly PatternTile[];
   /** The first watched category's name, if they set a limit. */
@@ -325,6 +327,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   remindersOn: boolean;
   /** Whole free days left (trialDaysLeft), 0 when the trial is over. */
   trialDays: number;
+  trialStartTs?: number;
   /** Whether automatic capture is actually on for this person right now. */
   captureOn: boolean;
   /** Leave onboarding: after a purchase, a restore, or the free days. */
@@ -342,7 +345,8 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
    */
   arrivedFrom?: string | null;
 }) {
-  const words = onboardingECopy(useLanguage());
+  const language = useLanguage();
+  const words = onboardingECopy(language);
   const band = useBand('home');
   const largeText = useLargeTextLayout();
   const tile = fitPatternTile(useWindowDimensions().width, 52);
@@ -358,6 +362,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   const dim = paywallBackdropOpacity(band.scheme);
   const backdrop_ = useBackdropSettle(arrivedFrom === 'pattern', dim);
   const timeline = trialTimeline(trialDays);
+  const freePeriod = freeCaptureCopy(trialStartTs, language);
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsUrl = configuredPublicUrl('termsOfUseUrl');
@@ -398,6 +403,9 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           label={checkout.busy === 'purchase' ? t('purchaseInProgress') : words.continuePro}
           onPress={() => void checkout.purchase()} disabled={busy || preview || !checkout.selected} busy={checkout.busy === 'purchase'}
           testID="onboarding-paywall-pro" /> : null}
+        {proShown && checkout.notice?.tone === 'neutral' ? <ThemedText type="meta" testID="onboarding-paywall-purchase-note"
+          accessibilityLiveRegion="polite" style={[styles.purchaseNote, { color: band.onBandSecondary }]}>
+          {checkout.notice.body}</ThemedText> : null}
         {proShown ? <ETextAction palette={band} label={freeLabel} onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />
           : <EButton palette={band} color={{ fill: band.accent, text: band.onAccent }} label={freeLabel}
             onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />}
@@ -405,17 +413,17 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           onPress={() => void checkout.restore()} disabled={busy} testID="onboarding-paywall-restore" /> : null}
       </>}>
       <EHeadline palette={band} size={42}>{words.paywallTitle}</EHeadline>
-      <EBody palette={band}>{words.paywallBody(watchedCategory, remindersOn)}</EBody>
+      <EBody palette={band}>{`${words.paywallBody(watchedCategory, remindersOn)}\n${freePeriod.status}${timeline.length === 0 ? `\n${freePeriod.after}` : ''}`}</EBody>
       {timeline.length > 0 ? <View style={[styles.timeline, largeText && styles.stacked]} accessible
-        accessibilityLabel={`${words.trialTimelineLabel}. ${words.trialToday}: ${captureOn ? words.trialTodayBody : words.trialTodayBodyOff} ${words.trialEnd(timeline[1]!.day)}: ${words.trialEndBody}`}
+        accessibilityLabel={`${words.trialTimelineLabel}. ${words.trialToday}: ${captureOn ? words.trialTodayBody : words.trialTodayBodyOff} ${freePeriod.endLabel ?? words.trialEnd(timeline[1]!.day)}: ${freePeriod.after}`}
         testID="onboarding-trial-timeline">
         <View style={[styles.stage, { backgroundColor: band.tile }]}>
           <ThemedText type="smallBold" style={{ color: band.accentOnBand }}>{words.trialToday}</ThemedText>
           <ThemedText type="meta" style={{ color: band.onBand }}>{captureOn ? words.trialTodayBody : words.trialTodayBodyOff}</ThemedText>
         </View>
         <View style={[styles.stage, { backgroundColor: band.tile }]}>
-          <ThemedText type="smallBold" style={{ color: band.onBand }}>{words.trialEnd(timeline[1]!.day)}</ThemedText>
-          <ThemedText type="meta" style={{ color: band.onBand }}>{words.trialEndBody}</ThemedText>
+          <ThemedText type="smallBold" style={{ color: band.onBand }}>{freePeriod.endLabel ?? words.trialEnd(timeline[1]!.day)}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{freePeriod.after}</ThemedText>
         </View>
       </View> : null}
       {checkout.state === 'loading' ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{t('priceLoading')}</ThemedText>
@@ -432,12 +440,12 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
           </ThemedText> : null}
         </> : <View testID="onboarding-plans-unavailable">
           <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
-            {checkout.checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+            {checkout.checkoutReady ? t('priceUnavailableBody') : t(store === 'appStore' ? 'playOnlyBodyIos' : 'playOnlyBody')}
           </ThemedText>
           {checkout.checkoutReady ? <ETextAction palette={band} label={t('retryPrices')}
             onPress={() => void checkout.load()} disabled={busy || preview} testID="onboarding-plans-retry" /> : null}
         </View>}
-      {checkout.notice ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
+      {checkout.notice && checkout.notice.tone !== 'neutral' ? <View accessibilityRole="alert" accessibilityLiveRegion="polite"
         style={[styles.notice, { backgroundColor: band.sheet }]} testID="onboarding-paywall-notice">
         <ThemedText type="smallBold" style={{ color: band.text }}>{checkout.notice.title}</ThemedText>
         <ThemedText type="meta" style={{ color: band.textSecondary }}>{checkout.notice.body}</ThemedText>
@@ -476,6 +484,7 @@ const styles = StyleSheet.create({
   plan: { width: '100%', minHeight: 112, borderRadius: 20, padding: 14, gap: 4, borderWidth: 1.5 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
+  purchaseNote: { textAlign: 'center' },
   notice: { borderRadius: 16, padding: 14, gap: 4 },
   legal: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
   legalLink: { minHeight: 44, maxWidth: '100%', flexShrink: 1, justifyContent: 'center' },

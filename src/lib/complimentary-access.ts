@@ -10,10 +10,10 @@ export function complimentaryAccessUntil(issuedAt: number | undefined, now = Dat
 }
 
 type Verification = 'granted' | 'denied' | 'unavailable';
-export type ComplimentaryResult =
+type ComplimentaryResult =
   | { status: 'granted'; issuedAt: number }
   | { status: 'denied' | 'unavailable' | 'absent' | 'superseded' };
-export interface ComplimentaryDeviceIO {
+interface ComplimentaryDeviceIO {
   read(): Promise<string | null>;
   store(code: string): Promise<void>;
   remove(): Promise<void>;

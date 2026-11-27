@@ -27,7 +27,6 @@ import {
   Alert,
   AppState as RNAppState,
   I18nManager,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -73,10 +72,12 @@ import {
   hasSmsPermission,
   isSmsScanningAvailable,
   openSmsPermissionSettings,
+  openSmsRevocationSettings,
+  openBankNotificationAccessSettings,
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
-import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
+import { APP_LOCK_AUTH_OPTIONS, appLockOwnerPrompt, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
 import { tapped } from '@/lib/haptics';
 import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
@@ -111,6 +112,7 @@ import { settingsCopy } from '@/lib/settings-copy';
 import { settingsECopy } from '@/lib/settings-e-copy';
 import { settingsSectionScrollY } from '@/lib/settings-layout';
 import { widgetsCopy } from '@/lib/widgets-copy';
+import { freeCaptureCopy } from '@/lib/free-capture-copy';
 import {
   iosCaptureManageIntent,
   iosCaptureSwitchIntent,
@@ -152,6 +154,7 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
+    setPrivacyPreferences,
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
@@ -335,14 +338,15 @@ export default function SettingsScreen() {
   /* ── Privacy ────────────────────────────────────────────────────────── */
 
   const toggleAppLock = async (enabled: boolean) => {
-    if (!enabled) {
-      setAppLock(false);
-      return;
-    }
     if (Platform.OS === 'web') {
-      Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
+      // The web build has no native lock to confirm: switching off only clears the preference.
+      if (!enabled) await setAppLock(false).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
+      else Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
       return;
     }
+    // Turning the lock off asks for the same owner authentication as turning
+    // it on, or anyone holding the unlocked phone could switch it off. A
+    // failed or cancelled prompt leaves the setting as it was.
     // Any owner authentication will do — a passcode-only phone included. The
     // gate accepts the passcode (app-lock.ts), so refusing to turn the lock
     // on without biometrics would only be inconsistent.
@@ -354,18 +358,31 @@ export default function SettingsScreen() {
     }
     if (level === 'none') {
       Alert.alert(
-        t('noScreenLock'),
-        t('noScreenLockBody'),
+        t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
+        t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'),
       );
       return;
     }
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: t('confirmAppLock'),
-      ...APP_LOCK_AUTH_OPTIONS,
-    });
+    // While the lock is on, the gate's re-lock listener is live: tell it this
+    // sheet is the owner answering (lock-gate.tsx), not the app being left.
+    appLockOwnerPrompt.begin();
+    let result: LocalAuthentication.LocalAuthenticationResult;
+    try {
+      result = await LocalAuthentication.authenticateAsync({
+        promptMessage: t(enabled ? 'confirmAppLock' : 'confirmDisableAppLock'),
+        ...APP_LOCK_AUTH_OPTIONS,
+      });
+    } finally {
+      appLockOwnerPrompt.end();
+    }
     const outcome = unlockOutcome(result);
-    if (outcome === 'unlocked') setAppLock(true);
-    else if (outcome === 'unavailable') Alert.alert(t('noScreenLock'), t('noScreenLockBody'));
+    if (outcome === 'unlocked') {
+      appLockOwnerPrompt.confirmed();
+      await setAppLock(enabled).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed')));
+    } else if (outcome === 'unavailable') {
+      Alert.alert(t(Platform.OS === 'ios' ? 'noScreenLockIos' : 'noScreenLock'),
+        t(Platform.OS === 'ios' ? 'noScreenLockBodyIos' : 'noScreenLockBody'));
+    }
   };
 
   // Older versions offered a global local-only opt-out. Preserve that saved
@@ -405,7 +422,8 @@ export default function SettingsScreen() {
         body: t('smsRevokeHint'),
         confirmLabel: t('openPhoneSettings'),
         onConfirm: () => {
-          void Linking.openSettings().catch(() => {});
+          // Withdrawing access must never depend on accepting a grant disclosure.
+          void openSmsRevocationSettings().catch(() => {});
         },
       });
       return;
@@ -684,20 +702,12 @@ export default function SettingsScreen() {
       Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
-    setConfirmation({
-      question: t('bankAppNotifsTitle'),
-      body: t('notifAccessFull'),
-      confirmLabel: notifEnabled ? t('openSettings') : t('enableAction'),
-      onConfirm: () => {
-        try {
-          pendingNotificationConsent.current = true;
-          pendingNotificationConsent.current = reader.openSettings() === true;
-          if (!pendingNotificationConsent.current) Alert.alert(t('capturePreferenceFailed'));
-        } catch {
-          pendingNotificationConsent.current = false;
-          Alert.alert(t('capturePreferenceFailed'));
-        }
-      },
+    void (async () => {
+      pendingNotificationConsent.current = false;
+      pendingNotificationConsent.current = await openBankNotificationAccessSettings();
+    })().catch(() => {
+      pendingNotificationConsent.current = false;
+      Alert.alert(t('capturePreferenceFailed'));
     });
   };
 
@@ -887,13 +897,12 @@ export default function SettingsScreen() {
     [state.transactions],
   );
   const lockTitle = biometricKind ? copy.lockTitle[biometricKind] : t('appLockTitle');
+  const freePeriod = freeCaptureCopy(state.trialStartTs, language);
   const proSubtitle = state.founderPro
     ? t('founderProActive')
     : hasNonTrialAccess(state)
       ? t('activeOnThisDevice')
-      : trial > 0
-        ? copy.proTrialBody(trial)
-        : t('trialEndedBanner');
+      : `${freePeriod.status}\n${freePeriod.after}`;
   const proTitle = !hasNonTrialAccess(state) && trial > 0 ? copy.proTrialTitle : copy.proTitle;
   const proActionLabel = hasNonTrialAccess(state) ? eWords.proDetails : eWords.seePlans;
 
@@ -1190,13 +1199,7 @@ export default function SettingsScreen() {
             widgetWords.settingsTitle,
             widgetWords.settingsDetail(Platform.OS === 'ios' ? 'ios' : 'android'),
             () => router.push('/widgets'),
-            { icon: 'home', testID: 'settings-widgets' },
-          )}
-          {Platform.OS !== 'web' && linkRow(
-            t('settingsViewOnboarding'),
-            t('settingsViewOnboardingDetail'),
-            () => router.setParams({ onboarding: 'preview' }),
-            { icon: 'play', last: true },
+            { icon: 'home', testID: 'settings-widgets', last: true },
           )}
         </View>
 
@@ -1237,12 +1240,20 @@ export default function SettingsScreen() {
           <SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />
           <SettingsSwitchRow
             title={lockTitle}
-            subtitle={(biometricKind && copy.lockDetail[biometricKind]) || t('appLockDetail')}
+            subtitle={(biometricKind && copy.lockDetail[biometricKind]) || t(Platform.OS === 'ios' ? 'appLockDetailIos' : 'appLockDetail')}
             value={state.appLock}
             onChange={toggleAppLock}
             testID="settings-app-lock"
             palette={band}
             glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
+          />
+          <SettingsSwitchRow
+            title={t('hideLockedWidgetAmountsTitle')}
+            subtitle={t('hideLockedWidgetAmountsDetail')}
+            value={state.hideWidgetAmountsWhenLocked !== false}
+            onChange={(enabled) => { void setPrivacyPreferences({ hideWidgetAmountsWhenLocked: enabled }).catch(() => Alert.alert(t('notAvailable'), t('privacyPreferenceFailed'))); }}
+            testID="settings-hide-widget-amounts"
+            palette={band}
           />
           {Platform.OS !== 'web' && linkRow(
             copy.trustedRow,
@@ -1277,7 +1288,12 @@ export default function SettingsScreen() {
             reviewed paragraph leads with its first sentence, and every other
             sentence is one line under it. None is dropped or reworded. */}
         <View style={styles.privacySheet} testID="settings-privacy-sheet">
-          {[t('privacyBuiltInBody'), t('privacyRetentionExact'), t('privacySecurityExact'), t('privacyLogosBody')].map((body) => {
+          {/* iOS names only iPhone (App Store Review Guideline 2.3.10). */}
+          {[
+            t(Platform.OS === 'ios' ? 'privacyBuiltInBodyIos' : 'privacyBuiltInBody'),
+            t('privacyRetentionExact'),
+            t(Platform.OS === 'ios' ? 'privacySecurityExactIos' : 'privacySecurityExact'),
+          ].map((body) => {
             const [lead, ...points] = privacySentences(body);
             return <View key={lead} style={styles.privacySection}>
               <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{lead}</ThemedText>

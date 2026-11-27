@@ -15,8 +15,8 @@ const browser = await chromium.launch();
 const results = [];
 const minor = value => {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
-    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const number = normalized.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/);
+    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.').replace(/[\u2066-\u2069]/g, '');
+  const number = normalized.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/) || normalized.match(/(\d[\d,]*(?:\.\d+)?)\s*AED\b/);
   assert.ok(number, `Missing displayed amount: ${normalized}`);
   return Math.round(Number(number[1].replaceAll(',', '')) * 100);
 };

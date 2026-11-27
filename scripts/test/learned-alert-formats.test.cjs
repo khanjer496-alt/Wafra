@@ -268,3 +268,14 @@ test('a taught template with a dispute-link footer keeps learning and matching',
   assert.equal(hit.kind, 'prefill');
   assert.equal(hit.fields.amountMinor, 710);
 });
+
+test('a dispute footer cannot hide original non-completion from private teaching', () => {
+  for (const movement of ['will be charged', 'has not been charged', "hasn't been charged", 'would soon be charged', 'is currently being charged', 'was credited subject to approval']) {
+    const source = `Sample Bank: Card 4421 ${movement} USD 24.86 at NORTH STAR MARKET on 09/03/2026. Report Dispute https://bit.ly/sample1 To dispute this charge visit bit.ly/sample-help`;
+    const result = L.recordLearnedConfirmation(L.emptyLearnedFormatStore(), { source, sender: 'SAMPLEBANK',
+      confirmed: usd(2486, { direction: movement.includes('credited') ? 'credit' : 'debit', merchant: 'NORTH STAR MARKET', date: '2026-09-03' }),
+      context: { country: 'US' }, now: NOW });
+    assert.equal(result.ok, false, source);
+    assert.equal(result.reason, 'non-completed-wording', source);
+  }
+});

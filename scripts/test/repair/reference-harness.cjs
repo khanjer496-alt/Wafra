@@ -18,7 +18,8 @@ function createHarness(options = {}) {
   const jsx = (type, props={}, key) => typeof type==='function' ? type(props) : ({type,props,key});
   const runtime={jsx,jsxs:jsx,Fragment:'Fragment'};
   const amount=(fils, opts={})=>(fils/100).toLocaleString(lang==='ar'?'ar-AE':'en-AE', {minimumFractionDigits:opts.decimals===false?0:2,maximumFractionDigits:opts.decimals===false?0:2});
-  const formatAED=(fils,opts)=>`${lang==='ar'?'د.إ':'AED'} ${amount(fils,opts)}`;
+  const { moneyCodeRun } = load(path.join(root, 'src/lib/money-code-run.ts'));
+  const formatAED=(fils,opts)=>moneyCodeRun(amount(fils,opts),lang==='ar'?'د.إ':'AED',lang);
   const i18n=load(path.join(root,'src/lib/i18n.ts'));i18n.setLanguage(lang);
   const assistantCopy=load(path.join(root,'src/lib/assistant-copy.ts'));
   const parseAmountWithMoneySpec=(value,spec)=>{
@@ -170,9 +171,11 @@ function createHarness(options = {}) {
   deps['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   local('@/lib/transfer-reconciliation','src/lib/transfer-reconciliation.ts');
   local('@/lib/transfer-activity','src/lib/transfer-activity.ts');
+  local('@/lib/transfer-separation','src/lib/transfer-separation.ts');
   local('@/lib/transfer-people','src/lib/transfer-people.ts');
   local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
+  local('@/lib/ui-money-text','src/lib/ui-money-text.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
   // Accounts/Bills redesign: pure figures and their copy, real source.
   local('@/lib/money-places-copy','src/lib/money-places-copy.ts');local('@/lib/money-places','src/lib/money-places.ts');
@@ -209,7 +212,7 @@ function createHarness(options = {}) {
   deps['@/components/ui/tile']={AccountTile:({account,size=32})=>jsx('AccountIcon',{account,size}),CategoryTile:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/action-icon-button']={ActionIconButton:p=>jsx('Pressable',{...p,children:deps['@/components/ui/icon'].Icon({name:p.icon,size:20,color:theme.text})})};
   local('@/components/ui/segmented-control');local('@/components/ui/controls');local('@/components/ui/progress-bar');local('@/components/ui/text-field');
-  deps['@/components/ui/charts']={CategoryDonut:p=>jsx('CategoryDonut',{...p,children:[p.centerLabel,p.centerValue,p.centerMeta]}),useRamp:()=>['#1F6B52','#488269','#779E89','#A7BFAC','#C8D8C9'],useCategoricalPalette:()=>['#1F6B52','#B4503C','#A07B2A','#3B7A8C','#7A4E76'],ProgressBar:deps['@/components/ui/progress-bar'].ProgressBar,CompositionBar:p=>jsx('CompositionBar',p),PairedBars:p=>jsx('PairedBars',p),TrendCurve:p=>jsx('TrendCurve',p),HistoryStrip:p=>jsx('HistoryStrip',p)};
+  deps['@/components/ui/charts']={useRamp:()=>['#1F6B52','#488269','#779E89','#A7BFAC','#C8D8C9'],ProgressBar:deps['@/components/ui/progress-bar'].ProgressBar};
   deps['@/components/ui/period-pill']={SectionHeader:p=>jsx('SectionHeader',p)};
   for(const [module,name] of [['period-sheet','PeriodSheet'],['entry-detail-sheet','EntryDetailSheet'],['card-payment-sheet','CardPaymentSheet'],['bill-detail-sheet','BillDetailSheet'],
     ['card-detail-sheet','CardDetailSheet'],['transaction-filter-sheet','TransactionFilterSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
@@ -260,7 +263,6 @@ function createHarness(options = {}) {
   // Bills and Accounts in language E: the band pieces they use, their pure
   // layout figures and the band's own copy run from source.
   local('@/lib/money-places-band','src/lib/money-places-band.ts');
-  for(const name of ['pin-timeline'])local(`@/components/ui/band/${name}`);
   local('@/components/money-places/key-value-rows');local('@/components/bills/bill-history-tiles');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');

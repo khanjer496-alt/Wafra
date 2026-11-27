@@ -23,7 +23,7 @@ function useSetupTheme(palette?: BandPalette) {
  * pieces render the real flow and its web design preview.
  */
 
-export interface StepProgressProps {
+interface StepProgressProps {
   palette?: BandPalette;
   /** 1-based index of the current step; `total + 1` means every step is done. */
   current: number;
@@ -73,7 +73,7 @@ export function StepProgress({ current, labels, template, palette }: StepProgres
 }
 
 /** Apple's own on-screen words, in the order they are tapped. */
-export function GuideChips({ labels, spokenPrefix, palette }: { labels: readonly string[]; spokenPrefix?: string; palette?: BandPalette }) {
+function GuideChips({ labels, spokenPrefix, palette }: { labels: readonly string[]; spokenPrefix?: string; palette?: BandPalette }) {
   const theme = useSetupTheme(palette);
   if (labels.length === 0) return null;
   const spoken = `${spokenPrefix ? `${spokenPrefix}: ` : ''}${labels.join(', ')}`;
@@ -92,7 +92,7 @@ export function GuideChips({ labels, spokenPrefix, palette }: { labels: readonly
   );
 }
 
-export interface SetupResultProps {
+interface SetupResultProps {
   palette?: BandPalette;
   tone: 'pass' | 'fail' | 'info';
   title: string;
@@ -126,7 +126,7 @@ export function SetupResult({ tone, title, body, palette }: SetupResultProps) {
   );
 }
 
-export interface SetupStepProps {
+interface SetupStepProps {
   palette?: BandPalette;
   /** Short visible marker such as "1" or "3.2". */
   badge: string;

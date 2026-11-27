@@ -1,10 +1,10 @@
 import type { HistoryImportProgress } from '@/lib/history-import';
 
-export const MONEY_PICTURE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MONEY_PICTURE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type MoneyPictureState = 'building' | 'saved' | 'attention' | 'starting';
+type MoneyPictureState = 'building' | 'saved' | 'attention' | 'starting';
 
-export interface MoneyPictureProgressInput {
+interface MoneyPictureProgressInput {
   nowMs: number;
   trialStartTs: number;
   history: HistoryImportProgress | null;

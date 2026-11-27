@@ -5,9 +5,9 @@ import type { Period } from '@/lib/period';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { AssistantTool, AssistantToolRequest } from '@/lib/wafra-assistant';
 
-export type LocalSemanticDomain = 'assistant-intent' | 'parser-family';
+type LocalSemanticDomain = 'assistant-intent' | 'parser-family';
 
-export type LocalSemanticFieldKind =
+type LocalSemanticFieldKind =
   | 'money'
   | 'merchant'
   | 'instrument'
@@ -15,7 +15,7 @@ export type LocalSemanticFieldKind =
   | 'reference'
   | 'field';
 
-export type LocalSemanticMerchantHint = 'fee' | 'refund' | 'atm';
+type LocalSemanticMerchantHint = 'fee' | 'refund' | 'atm';
 
 export interface LocalSemanticSensitiveSpan extends SourceSpan {
   /**
@@ -47,7 +47,7 @@ export interface LocalOnnxInt8TextEncoder {
   encode(text: string, options?: import('./local-semantic-scheduler').LocalSemanticEncodeOptions): Promise<ArrayLike<number>>;
 }
 
-export interface LocalSemanticPrototypeVector {
+interface LocalSemanticPrototypeVector {
   id: string;
   domain: LocalSemanticDomain;
   vector: ArrayLike<number>;
@@ -63,7 +63,7 @@ export interface LocalSemanticPrototypeIndex {
   prototypes: readonly LocalSemanticPrototypeVector[];
 }
 
-export interface LocalSemanticCandidate {
+interface LocalSemanticCandidate {
   v: 1;
   prototypeId: string;
   score: number;
@@ -96,29 +96,29 @@ export interface LocalParserFamilyLinearHead {
   }>;
 }
 
-export interface LocalParserFamilyHeadCandidate {
+interface LocalParserFamilyHeadCandidate {
   v: 1;
   family: LocalParserFamily;
   probability: number;
   runnerUpProbability: number;
 }
 
-export interface LocalParserFamilyClassifier {
+interface LocalParserFamilyClassifier {
   readonly manifest: Readonly<LocalOnnxInt8ModelManifest>;
   classify(text: string, cancelled?: () => boolean): Promise<LocalParserFamilyHeadCandidate | null>;
 }
 
-export interface LocalParserFamilyHeadThresholds {
+interface LocalParserFamilyHeadThresholds {
   minimumProbability: number;
   minimumMargin: number;
 }
 
-export interface LocalSemanticThresholds {
+interface LocalSemanticThresholds {
   minimumScore: number;
   minimumMargin: number;
 }
 
-export const LOCAL_SEMANTIC_THRESHOLDS: Readonly<Record<LocalSemanticDomain, LocalSemanticThresholds>> =
+const LOCAL_SEMANTIC_THRESHOLDS: Readonly<Record<LocalSemanticDomain, LocalSemanticThresholds>> =
   Object.freeze({
     'assistant-intent': Object.freeze({ minimumScore: 0.72, minimumMargin: 0.08 }),
     'parser-family': Object.freeze({ minimumScore: 0.78, minimumMargin: 0.1 }),
@@ -202,15 +202,13 @@ export const LOCAL_SEMANTIC_REGISTRY: Readonly<Record<string, LocalSemanticProto
   'parser.family.card-payment': Object.freeze({ kind: 'parser-family', family: 'card-payment' }),
 });
 
-export const LOCAL_SEMANTIC_PROTOTYPE_IDS = Object.freeze(Object.keys(LOCAL_SEMANTIC_REGISTRY));
-
-export type LocalSemanticGateReason =
+type LocalSemanticGateReason =
   | 'malformed-candidate'
   | 'unknown-or-invalid-prototype'
   | 'low-score'
   | 'low-margin';
 
-export type LocalSemanticFallbackReason =
+type LocalSemanticFallbackReason =
   | LocalSemanticGateReason
   | 'deterministic-plan-authoritative'
   | 'conversation-context-present'
@@ -566,7 +564,7 @@ const freezeCompiledAssistantRequest = (request: AssistantToolRequest): Assistan
   return Object.freeze(request);
 };
 
-export type LocalSemanticAssistantPlan =
+type LocalSemanticAssistantPlan =
   | {
       source: 'deterministic';
       request: AssistantToolRequest;

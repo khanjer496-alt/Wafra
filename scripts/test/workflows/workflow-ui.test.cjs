@@ -205,10 +205,6 @@ test('import progress labels only the supplied current step',()=>{
  assert.ok(labels.some(label=>label.includes(words.source)&&label.includes(words.stepComplete)));
  assert.deepEqual(h.events,[]);
 });
-test('decorative setup illustration is hidden from assistive reading',()=>{
- const h=createWorkflowHarness(),tree=h.deps['@/components/workflows/workflow-surfaces'].SetupIllustration();
- assert.equal(tree.props.accessible,false);assert.equal(tree.props.importantForAccessibility,'no-hide-descendants');
-});
 
 test('feedback displays the exact source payload before Send and does not send on render',()=>{
  const h=createWorkflowHarness({states:{0:'The category label is hard to read.'}}),tree=h.renderScreen('feedback');

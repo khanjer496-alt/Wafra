@@ -1,4 +1,14 @@
 /**
+ * Every automatic iPhone capture path (bank texts, notifications, Apple Pay)
+ * runs through App Intents, which arrived in iOS 16. Parsed as the native
+ * module gate parses it (capture.ts): a whole-number major, unknown is 0.
+ */
+export function iosSupportsLiveCapture(version: unknown): boolean {
+  const major = typeof version === 'number' ? Math.trunc(version) : Number.parseInt(String(version), 10);
+  return Number.isFinite(major) && major >= 16;
+}
+
+/**
  * Product exposure only: older captured Apple Pay records remain valid.
  * Wallet Transaction automations arrived in iOS 17; before iOS 27 the owner
  * builds a personal automation that runs the bundled Shortcut.

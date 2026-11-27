@@ -626,19 +626,17 @@ ok(
     /onboardAlertsReachFuture/.test(aliveScenesSource),
 );
 ok(
-  'Settings can replay the latest name-personalized onboarding without mutating app state',
-  /settingsViewOnboarding/.test(settingsSource) &&
-    /router\.setParams\(\{ onboarding: 'preview' \}\)/.test(settingsSource) &&
-    /const previewMode = state\.onboarded && params\.onboarding === 'preview'/.test(gateSource) &&
+  'Settings has no onboarding replay row, and the replay mode is development-only',
+  !/settingsViewOnboarding/.test(settingsSource) &&
+    !/onboarding: 'preview'/.test(settingsSource) &&
+    /const previewMode = isDevelopmentBuild\(\) && state\.onboarded && params\.onboarding === 'preview'/.test(gateSource) &&
+    /isDevelopmentBuild = \(\) => typeof __DEV__ !== 'undefined' && __DEV__ === true/.test(gateSource) &&
     /if \(previewMode\) return;[\s\S]{0,120}setOnboardingProfile/.test(gateSource) &&
     /if \(previewMode\) \{[\s\S]{0,160}setAndroidSmsReady\(true\)/.test(gateSource) &&
     /const openWafra = async[\s\S]*?if \(previewMode\) \{[\s\S]{0,120}closePreview\(\);[\s\S]{0,80}return;/.test(gateSource) &&
     /const openWafra = async[\s\S]*?setOnboarded\(\)/.test(gateSource) &&
     /if \(!previewMode\) trackGrowthEvent\(\.\.\.args\)/.test(gateSource),
 );
-eq('Settings explains onboarding replay is read-only',
-  i18n.t('settingsViewOnboardingDetail', 'en'),
-  'Replay the welcome flow without changing your data or settings');
 ok(
   // Design language E: the name is step 1 of 5, and the first tile of the pattern.
   'name personalization is step 1, saved on this device before the journey moves on',
@@ -691,7 +689,7 @@ ok(
     !/setUiLanguage|I18nManager|onboarding-language-switch/.test(gateSource + stepSource('e-welcome')) &&
     /WafraMark/.test(aliveScenesSource) &&
     /onboardingBankRegion/.test(aliveScenesSource) &&
-    /verifiedLogoUrl/.test(aliveScenesSource) &&
+    !/verifiedLogoUrl|expo-image/.test(aliveScenesSource) &&
     /US:[\s\S]*GB:[\s\S]*FR:[\s\S]*DE:[\s\S]*IN:[\s\S]*QA:[\s\S]*KW:/.test(onboardingBankExamplesSource) &&
     !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(aliveScenesSource) &&
     !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
@@ -730,8 +728,9 @@ ok(
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
   /\{Platform\.OS === 'android' \? <>/.test(gateSource) &&
-    /\{Platform\.OS !== 'web' && !previewMode \? <SourceRow palette=\{stepBand\} icon="upload"/.test(gateSource) &&
-    /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(gateSource) &&
+    // On iOS 15 the statements row becomes step 5's primary action instead.
+    /\{Platform\.OS !== 'web' && !previewMode && \(!iosCaptureUnsupported \|\| iosImported\) \? <SourceRow palette=\{stepBand\} icon="upload"/.test(gateSource) &&
+    /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}[\s\S]{0,300}runSetupAction\(continueManually\)/.test(gateSource) &&
     /Platform\.OS === 'android' \? words\.captureBodyAndroid : words\.captureBodyWeb/.test(gateSource),
 );
 ok(
@@ -808,7 +807,7 @@ ok(
   'iOS setup offers live capture with one primary action, statements and by-hand beside it, details behind How it works',
   /label=\{t\('onboardLiveAction'\)\}\s*onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
     /icon="upload" title=\{words\.importStatements\}[\s\S]{0,160}onPress=\{openStatementImport\}/.test(gateSource) &&
-    /icon="plus" title=\{words\.addByHand\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(gateSource) &&
+    /icon="plus" title=\{words\.addByHand\}[\s\S]{0,300}runSetupAction\(continueManually\)/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle[\s\S]*?onboardCaptureLearnMorePrivacy/.test(gateSource) &&
     /label=\{t\('onboardHowItWorks'\)\}\s*onPress=\{\(\) => setLearnMoreVisible\(true\)\}/.test(gateSource) &&
     // The setup preview's intro step keeps its one primary and one ghost.

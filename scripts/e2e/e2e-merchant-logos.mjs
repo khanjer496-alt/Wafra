@@ -6,142 +6,60 @@ import { chromium } from 'playwright';
 const base = process.env.BASE || 'http://127.0.0.1:8126';
 const out = path.resolve(process.env.LOGO_EVIDENCE || 'artifacts/e2e-merchant-logos');
 await mkdir(out, { recursive: true });
-const results = [];
 const browser = await chromium.launch();
-const externalImages = [];
+const requests = [];
+const results = [];
 const errors = [];
-const selector = '[data-testid^="merchant-logo-"]';
-
-async function check(name, action) {
-  await action();
-  results.push({ name, passed: true });
-  console.log('PASS ' + name);
-}
-async function decoded(scope) {
-  const images = scope.locator(selector + ' img');
-  // Tab content mounts after the press resolves. Wait for a real image rather
-  // than sampling count() on the preceding React commit.
-  await images.first().waitFor({ state: 'attached' });
-  assert.ok(await images.count() > 0, 'Expected at least one real merchant logo');
-  await images.first().evaluate(image => image.decode());
-  const sources = await images.evaluateAll(nodes => nodes.map(node => ({
-    url: node.currentSrc || node.src, width: node.naturalWidth, height: node.naturalHeight,
-  })));
-  for (const image of sources) {
-    assert.equal(new URL(image.url).origin, new URL(base).origin, 'Logo is a bundled same-origin asset');
-    // Decode every image, including rows outside the viewport, before checking.
-  }
-  await images.evaluateAll(nodes => Promise.all(nodes.map(node => node.decode())));
-  assert.ok(await images.evaluateAll(nodes => nodes.every(node => node.naturalWidth === 128 && node.naturalHeight === 128)));
-}
-
 try {
-  // Build the normal demo fixture once with every external request blocked,
-  // then exercise bundled/offline artwork with the saved local-only preference.
-  // Online BankAvatar requests are intentional and belong to separate coverage.
-  const bootstrap = await browser.newContext();
-  await bootstrap.route('**/*', route => route.request().url().startsWith(base + '/')
-    ? route.continue() : route.abort());
-  const seedPage = await bootstrap.newPage();
-  await seedPage.goto(base + '/', { waitUntil: 'networkidle' });
-  await seedPage.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
-  await seedPage.waitForFunction(() => localStorage.getItem('wafra/state/v1') !== null);
-  const localOnlySeed = await seedPage.evaluate(() => {
-    const stateKey = 'wafra/state/v1';
-    const state = JSON.parse(localStorage.getItem(stateKey));
-    if (!state?.onboarded) throw new Error('Expected a persisted synthetic demo before setting local-only mode');
-    localStorage.setItem(stateKey, JSON.stringify({ ...state, privateMode: true }));
-    return Object.entries(localStorage);
-  });
-  await bootstrap.close();
   for (const mode of ['light', 'dark']) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: mode, reducedMotion: 'reduce' });
-    await context.addInitScript(entries => {
-      for (const [key, value] of entries) localStorage.setItem(key, value);
-    }, localOnlySeed);
-    const page = await context.newPage();
-    page.setDefaultTimeout(12000);
-    page.on('pageerror', error => errors.push(String(error)));
-    // The demo stays local. In particular, no logo provider may receive a request.
-    await context.route('**/*', route => {
-      const request = route.request();
-      const url = request.url();
-      const local = url.startsWith(base + '/') || url.startsWith('data:') || url.startsWith('blob:');
-      if (!local && request.resourceType() === 'image') externalImages.push(url);
-      return local ? route.continue() : route.abort();
+    context.on('request', request => {
+      const url = new URL(request.url());
+      const logoHost = /(?:brandfetch\.io|logo\.clearbit\.com|logo\.url|logos\.world)/i.test(url.hostname);
+      const externalImage = request.resourceType() === 'image' && url.origin !== new URL(base).origin
+        && !['data:', 'blob:'].includes(url.protocol);
+      if (logoHost || externalImage) requests.push(request.url());
     });
+    // Do not abort logo requests: a mistaken request must be observed and fail.
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(String(error)));
     await page.goto(base + '/', { waitUntil: 'networkidle' });
     await page.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1')).privateMode), true,
-      'Bundled/offline logo verification uses the saved local-only preference');
-    await check(`Home ${mode}: bundled logos decode`, () => decoded(page));
-    await page.screenshot({ path: path.join(out, `home-${mode}.png`) });
-
-    await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
-    const activity = page.getByTestId('spending-activity');
-    await activity.waitFor({ state: 'visible' });
-    await check(`Activity ${mode}: real logos replace category icons`, () => decoded(activity));
-    const tile = activity.locator(selector).first();
-    const identity = await tile.getAttribute('data-testid');
-    const row = tile.locator('xpath=ancestor::*[@data-testid="merchant-transaction-row"]').getByTestId('transaction-details-link');
-    const merchant = (await row.getAttribute('aria-label')).split(', ')[0];
-    const search = page.getByRole('textbox', { name: 'Search spending', exact: true });
-    await search.fill(merchant);
-    await activity.getByTestId(identity).first().waitFor({ state: 'visible' });
-    await page.screenshot({ path: path.join(out, `activity-${mode}.png`) });
-    await activity.getByTestId(identity).first().locator('xpath=ancestor::*[@data-testid="merchant-transaction-row"]').getByTestId('transaction-details-link').click();
-    const dialog = page.locator('[role="dialog"]:visible').last();
-    await dialog.waitFor({ state: 'visible' });
-    await check(`Detail ${mode}: same identity as its transaction row`, async () => {
-      await dialog.getByTestId(identity).waitFor({ state: 'visible' });
-      await decoded(dialog);
-      const size = await dialog.getByTestId(identity).boundingBox();
-      // The compact transaction sheet draws the merchant tile at 44pt.
-      assert.equal(size.width, 44); assert.equal(size.height, 44);
+    await page.waitForFunction(() => localStorage.getItem('wafra/state/v1') !== null);
+    // Upgrade fixture: previously granted iPhone consent must not restore artwork.
+    await page.evaluate(() => {
+      const key = 'wafra/state/v1';
+      localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key)), onlineLogosEnabled: true, privateMode: false }));
     });
-    await page.screenshot({ path: path.join(out, `detail-${mode}.png`) });
-    await page.keyboard.press('Escape');
-    await dialog.waitFor({ state: 'hidden' });
-    await search.fill('');
-
-    await page.getByRole('tab', { name: 'Compare', exact: true }).click();
-    const trends = page.getByTestId('spending-trends');
-    await trends.waitFor({ state: 'visible' });
-    await check(`Trends ${mode}: top merchants have logos`, () => decoded(trends));
-    await trends.locator(selector).first().scrollIntoViewIfNeeded();
-    await page.screenshot({ path: path.join(out, `trends-${mode}.png`) });
-
-    await page.getByRole('tab', { name: 'Bills', exact: true }).click();
-    const agenda = page.getByTestId('payment-agenda');
-    await agenda.first().waitFor({ state: 'visible' });
-    await check(`Bills ${mode}: payment agenda has logos`, () => decoded(agenda));
-    await page.getByRole('tab', { name: 'All', exact: true }).click();
-    await check(`Bills ${mode}: newly added subscription logo decodes`, async () => {
-      // Fitness First is a recurring subscription in every demo month. Salik
-      // is transport, so it need not be classified into the payment agenda.
-      const logo = agenda.getByTestId('merchant-logo-fitnessfirst').first();
-      await logo.waitFor({ state: 'attached' });
-      await logo.locator('img').evaluate(image => image.decode());
-      assert.equal(await logo.locator('img').evaluate(image => image.naturalWidth), 128);
-    });
-    await page.screenshot({ path: path.join(out, `bills-${mode}.png`) });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
+    assert.ok(await page.getByTestId('monogram-avatar').count() > 0, 'Home shows local merchant initials');
+    for (const tab of ['Spending', 'Accounts', 'Bills']) {
+      await page.getByRole('tab', { name: tab, exact: true }).click();
+      await page.screenshot({ path: path.join(out, `${tab.toLowerCase()}-${mode}.png`) });
+      assert.equal(await page.locator('[data-testid^="merchant-logo-"], [data-testid^="bank-logo-"]').count(), 0, 'no brand image tiles');
+      assert.equal(await page.getByTestId('settings-online-logos').count(), 0, 'no online-logo switch');
+    }
+    await page.getByRole('tab', { name: 'Home', exact: true }).click();
+    await page.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByTestId('settings-privacy').waitFor();
+    assert.equal(await page.getByTestId('settings-online-logos').count(), 0);
+    await page.getByRole('button', { name: 'Back', exact: true }).last().click();
     await context.setOffline(true);
-    await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
-    await check(`Offline ${mode}: previously displayed logos remain available`, () => decoded(activity));
+    await page.getByRole('tab', { name: 'Home', exact: true }).click();
+    assert.ok(await page.getByTestId('monogram-avatar').count() > 0, 'initials still render offline');
+    results.push({ name: `${mode}: upgraded consent, Home/Spending/Accounts/Bills/Settings and offline monograms`, passed: true });
     await context.close();
   }
-  await check('No external image requests', async () => assert.deepEqual(externalImages, []));
-  await check('No JavaScript page errors', async () => assert.deepEqual(errors, []));
+  assert.deepEqual(requests, [], 'store export never requests Brandfetch search or logo CDN artwork');
+  assert.deepEqual(errors, []);
+  console.log('PASS production store export: no logo provider/CDN requests, no brand assets, no online-logo toggle');
 } catch (error) {
   results.push({ name: 'Run failure', passed: false, error: String(error) });
-  for (const context of browser.contexts()) {
-    for (const page of context.pages()) await page.screenshot({ path: path.join(out, 'failure.png') }).catch(() => {});
-  }
   process.exitCode = 1;
   console.error(error);
 } finally {
   await browser.close();
-  await writeFile(path.join(out, 'results.json'), JSON.stringify({ results, externalImages, errors }, null, 2) + '\n');
+  await writeFile(path.join(out, 'results.json'), JSON.stringify({ results, requests, errors }, null, 2) + '\n');
 }

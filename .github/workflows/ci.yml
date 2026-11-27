@@ -8,6 +8,9 @@ on:
   push:
     branches:
       - main
+      # Every release-line merge commit gets its own run, so the TestFlight
+      # exact-source CI gate (ios-testflight.yml) never depends on a PR's run.
+      - release/1.0.0-rc1-reconciled
 
 concurrency:
   # Every push to `main` gets its OWN group, keyed on the commit, so no main run
@@ -35,8 +38,11 @@ concurrency:
   #
   # The cost is that rapid pushes to main each pay for a full run. That is the
   # right trade against a silent regression.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  #
+  # The same applies to the release line: its merge commits are what the
+  # TestFlight exact-source gate looks up, so they get per-commit groups too.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/1.0.0-rc1-reconciled') && github.sha || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/release/1.0.0-rc1-reconciled' }}
 
 permissions:
   contents: read
@@ -62,6 +68,14 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'modules/wafra-message-history/**'
               - 'modules/wafra-live-capture/**'
+              # App Lock privacy cover and widget snapshot gate (native-ios typecheck).
+              - 'modules/wafra-widgets/ios/**'
+              - 'scripts/test/native-app-privacy-typecheck.sh'
+              # iOS app icon (Icon Composer document, compiled by native-ios).
+              - 'assets/wafra.icon/**'
+              - 'scripts/render-ios-icon-mark.mjs'
+              - 'scripts/test/ios-app-icon.sh'
+              - 'src/components/wafra-logo.tsx'
               # The native parser closure is resolved from these shipping
               # modules; new pure dependencies must also trigger native checks.
               - 'src/lib/**'
@@ -141,10 +155,23 @@ jobs:
       - name: Install the SQLite CLI required by schema tests
         run: sudo apt-get update && sudo apt-get install -y sqlite3
 
-      - name: Generate and check the shipping iOS background parser
+      # Read-only on purpose: regenerating first would make a stale committed
+      # bundle pass. A branch whose parser sources changed without a regenerated
+      # bundle fails here until `node scripts/generate-ios-background-parser.cjs`
+      # is run and the result committed.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
+
+      # The refund-matrix gap file may only shrink for rows the base already
+      # had: a fix to one row that breaks another in the same class keeps every
+      # CEILING count, so the matrix test alone would not see it.
+      - name: Refund matrix gap file only shrinks against the base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          node scripts/test/repair/refund-gaps-no-growth.cjs "$BASE_SHA"
 
       - name: Typecheck
         run: npm run typecheck
@@ -158,8 +185,65 @@ jobs:
       - name: Generate native iOS contract fixtures
         run: npx expo prebuild --platform ios --no-install
 
+      # The native Play-billing test needs four small public jars (scripts/test/wafra-play-billing-deps.json:
+      # pinned SHA-256, two mirrors each). Maven Central rate-limits shared runners (429) and has answered 404
+      # for a jar it serves, so the jars are cached under a key made ONLY of their names and pinned hashes:
+      # editing the test or a mirror URL keeps the cache, changing a pin replaces it. The test verifies every
+      # cached or downloaded byte against its pin before use, and only verified files reach the cache.
+      - name: Key native billing test dependencies by their pinned SHA-256
+        id: billing-deps
+        run: |
+          key=$(node -e "const d=require('./scripts/test/wafra-play-billing-deps.json');process.stdout.write(require('crypto').createHash('sha256').update(d.map(x=>x.name+'@'+x.sha256).sort().join('\\n')).digest('hex').slice(0,32))")
+          echo "key=wafra-play-billing-libs-v2-$key" >> "$GITHUB_OUTPUT"
+      - name: Restore native billing test dependencies
+        id: billing-deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/wafra-play-billing-libs
+          key: ${{ steps.billing-deps.outputs.key }}
+
+      # NO SECRETS IN THIS JOB: the summary artifact below is downloadable and GitHub masks log views, not artifacts.
+      # The raw log stays on the runner. What leaves it is a small JSON report with the failing test names
+      # and no terminal control bytes (scripts/ci/summarize-app-tests.cjs), uploaded as an artifact below.
+      # The real test exit code is preserved: the summary is evidence, never a replacement gate.
       - name: Test
-        run: npm test
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/wafra-app-test.log"
+          TEST_STATUS=${PIPESTATUS[0]}
+          mkdir -p artifacts/app-tests
+          TEST_EXIT="$TEST_STATUS" node scripts/ci/summarize-app-tests.cjs \
+            "$RUNNER_TEMP/wafra-app-test.log" > artifacts/app-tests/summary.json
+          exit "$TEST_STATUS"
+        env:
+          WAFRA_PLAY_BILLING_TEST_LIBS: ${{ runner.temp }}/wafra-play-billing-libs
+
+      # Saved even when an unrelated test fails, so one good download serves later runs. Only when all four
+      # files are present AND match their pinned SHA-256 (a file cut short by a cancelled job is never saved).
+      - name: Check native billing test dependencies are complete
+        id: billing-deps-complete
+        if: always() && steps.billing-deps-cache.outputs.cache-hit != 'true'
+        env:
+          LIBS: ${{ runner.temp }}/wafra-play-billing-libs
+        run: |
+          count=$(node -e "const fs=require('fs'),c=require('crypto');const d=require('./scripts/test/wafra-play-billing-deps.json');const ok=x=>{try{return c.createHash('sha256').update(fs.readFileSync(process.env.LIBS+'/'+x.name)).digest('hex')===x.sha256}catch{return false}};process.stdout.write(String(d.filter(ok).length)+'/'+d.length)")
+          echo "native billing test dependencies cached: $count"
+          if [ "${count%/*}" = "${count#*/}" ]; then echo "complete=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Save native billing test dependencies
+        if: always() && steps.billing-deps-complete.outputs.complete == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/wafra-play-billing-libs
+          key: ${{ steps.billing-deps.outputs.key }}
+      - name: Preserve structured app test result
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-result-${{ github.sha }}
+          path: artifacts/app-tests/summary.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Relay typecheck
         working-directory: server
@@ -206,9 +290,18 @@ jobs:
           set -euo pipefail
           swiftc -warnings-as-errors -parse-as-library \
             modules/wafra-message-history/ios/WafraMessageHistoryStore.swift \
+            modules/wafra-message-history/ios/WafraPreparedHistoryStore.swift \
+            modules/wafra-message-history/ios/WafraMessageHistoryImporter.swift \
             scripts/test/native-history-protection-probe.swift \
             -o "$RUNNER_TEMP/wafra-protection-probe"
           "$RUNNER_TEMP/wafra-protection-probe"
+
+      # App Lock's privacy cover and widget-snapshot gate (WafraPrivacyCover.swift),
+      # typechecked against the runner's real UIKit/Foundation iOS SDK. Only the
+      # Expo subscriber boundary and the widgets module are stubbed, so this is a
+      # compile check, not a device lifecycle test.
+      - name: Typecheck the iOS privacy cover against the real UIKit SDK
+        run: bash scripts/test/native-app-privacy-typecheck.sh
 
       - name: Require the approved Claude design baseline
         run: node scripts/check-design-baseline.mjs
@@ -221,10 +314,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate and check the shipping iOS background parser
-        run: |
-          node scripts/generate-ios-background-parser.cjs
-          node scripts/generate-ios-background-parser.cjs --check
+      # Read-only on purpose: regenerating first would make a stale committed
+      # bundle pass. A branch whose parser sources changed without a regenerated
+      # bundle fails here until `node scripts/generate-ios-background-parser.cjs`
+      # is run and the result committed.
+      - name: Check the committed iOS background parser is fresh
+        run: node scripts/generate-ios-background-parser.cjs --check
 
       - name: Verify protected parser context and the actual JavaScriptCore runtime
         run: |
@@ -233,6 +328,21 @@ jobs:
 
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install
+
+      # Build 193's TestFlight icon was a filled wedge with a stray line: its
+      # Icon Composer layer was an open stroked path. Compile the prebuilt
+      # icon with actool, require a 1024 px rendition, and keep renders.
+      - name: Compile and render the iOS app icon
+        run: bash scripts/test/ios-app-icon.sh "$RUNNER_TEMP/ios-app-icon"
+
+      - name: Keep the iOS app icon renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-icon-${{ github.sha }}
+          path: ${{ runner.temp }}/ios-app-icon
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Install CocoaPods dependencies
         run: npx pod-install
@@ -289,7 +399,8 @@ jobs:
             artifacts/e2e-merchant-entrypoints/
             artifacts/e2e-transaction-ui/
             artifacts/e2e-diagnostic-export/
+            artifacts/e2e-smoke/
             /tmp/wafra-onboarding-e2e/
             /tmp/wafra-transfer-review-e2e/
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 3

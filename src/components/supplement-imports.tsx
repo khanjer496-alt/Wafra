@@ -14,6 +14,7 @@ import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useAppActive } from '@/hooks/use-app-active';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
+import { importProcessingDisclosure } from '@/lib/import-processing-disclosure';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
@@ -50,6 +51,7 @@ import { alreadyInWafra, countPhrase, nextUploadDelay } from '@/lib/statement-ba
 import { drainStatementQueue, holdsStatementRows, newStatementRange } from '@/lib/statement-import-flow';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
+import { requestStoreReviewIfDue } from '@/lib/store-review';
 
 type CoverageRange = { item: StatementImportCoverage | null; format: 'pdf' | 'csv' };
 
@@ -160,14 +162,14 @@ export interface SupplementImportsPreview {
 }
 
 /** The two parts of the importer, for a screen that puts one on its band. */
-export interface SupplementImportsParts {
+interface SupplementImportsParts {
   /** The plain line, the upload disclosure and the choose-file control. */
   band: React.ReactNode;
   /** Files, results, the password step, what to download and the date note. */
   sheet: React.ReactNode;
 }
 
-export interface SupplementImportsProps {
+interface SupplementImportsProps {
   /** First-run setup: a footer to move on, with or without a statement. */
   onboarding?: { onContinue(): void };
   preview?: SupplementImportsPreview;
@@ -188,9 +190,13 @@ export interface SupplementImportsProps {
 export function SupplementImports({ onboarding, preview, frame, incomingStatement }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
-  const copy = SUPPLEMENT_COPY[language];
+  const copy = useMemo(() => ({ ...SUPPLEMENT_COPY[language],
+    uploadDisclosure: importProcessingDisclosure(language, Platform.OS),
+  }), [language]);
   const band = useBand('settings');
   const largeText = useLargeTextLayout();
+  /** First-run setup ("Bring in your past spending") or the design preview. */
+  const fromSetup = !!onboarding || !!preview;
   const {
     state,
     getStateSnapshot,
@@ -272,6 +278,18 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
   useEffect(() => {
     privacyGateRef.current = privacyGateCleared;
   }, [privacyGateCleared]);
+  // A finished import that added rows is a good moment for the OS rating
+  // prompt (never from first-run setup or the design preview). It waits until
+  // nothing else is asked or wrong: no file still sending or filing, no
+  // error, no password step.
+  const importAddedRowsRef = useRef(false);
+  useEffect(() => {
+    if (!importAddedRowsRef.current || busy !== null || error !== null || pendingPdfs.length > 0) return;
+    importAddedRowsRef.current = false;
+    const ledger = getStateSnapshot();
+    void requestStoreReviewIfDue({ onboarded: ledger.onboarded, ledgerRows: ledger.transactions.length,
+      privacyGateCleared: privacyGateRef.current });
+  }, [busy, error, getStateSnapshot, pendingPdfs.length, status, summary]);
   const coverage = useMemo(
     () => summarizeCoverage(state.statementCoverage ?? [], language, undefined, displayRegion()),
     [language, state.statementCoverage],
@@ -528,6 +546,9 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
         if (generation !== getStateGeneration() || !aliveRef.current) return false;
         queuedRetryNeededRef.current = false;
         queuedRetryContextRef.current = null;
+        // Marked before the result is shown, so the render that shows it
+        // (also on a background retry, when nothing is busy) runs the effect.
+        if (imported > 0 && !fromSetup) importAddedRowsRef.current = true;
         setError(null);
         setStatus(files > 0 ? batchSummary({ files, accepted, rejected: totalRejected, alreadyProcessed, already }, imported) : copy.queueFiled);
         committed();
@@ -545,7 +566,7 @@ export function SupplementImports({ onboarding, preview, frame, incomingStatemen
       alreadyProcessed, ranges, generation, reportedImported: imported, totalRejected, reportedOther: other };
     failed();
     return false;
-  }, [batchSummary, copy, ensureDurable, getStateGeneration, rememberCoverage, syncFailureReason, syncQueued]);
+  }, [batchSummary, copy, ensureDurable, fromSetup, getStateGeneration, rememberCoverage, syncFailureReason, syncQueued]);
 
   useEffect(() => {
     if (!cfg || state.privateMode) return;

@@ -50,7 +50,7 @@ function forEachInDateWindow(
   }
 }
 
-export interface DailySummary {
+interface DailySummary {
   /** Total spent on the day, in fils. Always > 0 — see `buildDailySummary`. */
   totalFils: number;
   /** How many rows that total is made of. */

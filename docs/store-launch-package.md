@@ -125,9 +125,11 @@ read-back sample is JPY / USD / KWD).
 
 ### Apple
 
-Use a final release-like iPhone build. The preferred repository target is the
-accepted 6.9-inch portrait size **1320×2868**, with no alpha channel. Apple
-accepts one to ten screenshots and currently accepts several 6.9-inch sizes:
+Use the final cleared candidate 195 on iPhone 16 Pro. The approved 1.0 target is
+eight **1206×2622** en-US portrait frames, with no alpha channel, for Apple's
+required Dynamic Island medium slot (`IPHONE_61` in asc 4.4.2). New files use
+`appstore-6.3-en-`; the older sets are excluded from checking and packaging.
+Apple accepts one to ten screenshots per display set:
 
 https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications
 

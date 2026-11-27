@@ -195,5 +195,5 @@ test('iOS caps Dynamic Type, keeps figures whole and tints only tiles and initia
   assert.match(tile, /\.fill\(band\.tile\)\s+\.widgetAccentable\(\)/);
   assert.match(tile, /Text\(initial\)[\s\S]{0,140}\.widgetAccentable\(\)/);
   assert.equal((tile.match(/\.widgetAccentable\(\)/g) || []).length, 2, 'only the tile shape and the initial');
-  assert.match(tile, /#available\(iOS 18\.0, \*\)[\s\S]{0,200}\.widgetAccentedRenderingMode\(\.accentedDesaturated\)/);
+  assert.doesNotMatch(tile, /Image\("|WafraFullColorLogo|widgetAccentedRenderingMode/, 'no brand artwork is drawn in either widget rendering mode');
 });

@@ -1,0 +1,40 @@
+name: Synthetic iOS sealing fixture (no app build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  seal-fixture:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Fetch only the immutable baseline sealing source for comparison
+        run: git fetch --no-tags --depth=1 origin 41d371a69462e4df29abd3e5466d3dfe1ad19a33
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.13'
+      - name: Default CLI full-seal and archive fixtures (public certificate only)
+        env:
+          SEAL_FIXTURE_REPORT: ${{ runner.temp }}/seal-fixture-default.json
+        run: python3 -I scripts/test/ios-device-seal.test.py
+      - name: System CLI fixture comparison (no decryption or private key)
+        if: always()
+        env:
+          PYTHON_BIN: ${{ steps.python.outputs.python-path }}
+          SEAL_FIXTURE_REPORT: ${{ runner.temp }}/seal-fixture-system.json
+        run: PATH=/usr/bin:/bin "$PYTHON_BIN" -I scripts/test/ios-device-seal.test.py
+      - name: Preserve only fixed-field synthetic fixture results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-seal-fixture-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/seal-fixture-default.json
+            ${{ runner.temp }}/seal-fixture-system.json
+          if-no-files-found: error
+          retention-days: 1

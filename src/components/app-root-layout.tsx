@@ -19,13 +19,14 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { startMotionPreference } from '@/hooks/use-reduced-motion';
 import { PeriodProvider } from '@/lib/period-context';
 import { StoreProvider, useStore } from '@/lib/store';
+import { freezeCoveredScreens } from '@/lib/covered-screen-freeze';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
 // index.js registers both tasks before Router for screenless native wakes.
 // These cached imports also retain registration when this layout is mounted
 // directly by a development or test harness.
 import '@/lib/background-relay';
-import '@/lib/android-live-background';
+import '@/lib/native-background-tasks';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { loadHomeWidgetPreferences } from '@/lib/home-widgets';
 import { markLaunchPhase } from '@/lib/launch-performance';
@@ -37,6 +38,7 @@ import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
 import { getLocalSemanticEncoder, purgeLocalSemanticArtifacts } from '@/lib/local-semantic-runtime';
 import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
+import { startStoreReviewUseDays } from '@/lib/store-review';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
@@ -196,6 +198,9 @@ export default function RootLayout() {
   // the difference between Home appearing and Home appearing after a beat.
   useEffect(() => startMotionPreference(), []);
 
+  // Days of use, for the OS rating prompt's "used on three separate days" rule.
+  useEffect(() => startStoreReviewUseDays(), []);
+
   useEffect(() => {
     if (!ready) return;
     markLaunchPhase('fonts-ready');
@@ -243,8 +248,11 @@ export default function RootLayout() {
           <ConsentPromptHost />
           <SuperwallOnboarding>
           <ToastProvider>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
+          {/* Pushed screens pause while another screen covers them (Android only, see
+              covered-screen-freeze.ts). The exempt routes stay live: (tabs) hosts capture and
+              History, import-sms / ios-setup / teach-bank-format show long-running work. */}
+          <Stack screenOptions={{ headerShown: false, freezeOnBlur: freezeCoveredScreens(Platform.OS) }}>
+            <Stack.Screen name="(tabs)" options={{ freezeOnBlur: false }} />
             <Stack.Screen
               name="add-transaction"
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
@@ -253,7 +261,7 @@ export default function RootLayout() {
             <Stack.Screen name="transfers" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="recap" options={{ animation: 'fade' }} />
-            <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right', freezeOnBlur: false }} />
             {/* Every name below has a file behind it in src/app, and nothing that
                 lacks one is declared. That is the whole rule for this block: a
                 `bills` entry survived here after src/app/bills.tsx became a tab,
@@ -276,7 +284,9 @@ export default function RootLayout() {
                 iphone-setup.tsx was deleted along with its line here — leaving
                 a Stack.Screen for a deleted file is exactly the fileless-name
                 bug described above. */}
-            <Stack.Screen name="ios-setup" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="ios-setup" options={{ animation: 'slide_from_right', freezeOnBlur: false }} />
+            {/* Declared only to opt out of the covered-screen freeze; it keeps the default animation. */}
+            <Stack.Screen name="teach-bank-format" options={{ freezeOnBlur: false }} />
             {/* Home Screen widgets: previews and how to add them (Settings, Home's hint). */}
             <Stack.Screen name="widgets" options={{ animation: 'slide_from_right' }} />
             {/* Reachable only from a hand-typed deep link; it must still look

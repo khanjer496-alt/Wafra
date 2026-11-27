@@ -116,4 +116,4 @@ jobs:
           name: ios-public-testflight-${{ inputs.build_number }}-${{ github.run_id }}
           path: ios-release-evidence/public-beta.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7

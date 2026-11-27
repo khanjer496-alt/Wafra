@@ -41,9 +41,10 @@ function liveHarness(records, ai, onStage, pageSize = 50) {
     async acknowledgeRecords(ids) { acknowledgements.push(...ids); queue = queue.filter(record => !ids.includes(JSON.parse(record).id)); } };
   const ledger = { getState: () => state, getStateGeneration: () => generation, async ensureDurable() {},
     importBatch() { writes++; throw Error('AI Review must never write money'); },
-    stageReviewAlerts(items) { onStage?.(items, lastPage); let admitted = 0;
-      for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime()); state.reviewTray = result.state; admitted += result.outcome === 'admitted'; }
-      return { admitted, durable: Promise.resolve() }; } };
+    stageReviewAlerts(items, _qualifications, _bindings, mode) { onStage?.(items, lastPage); let admitted = 0;
+      for (const item of items) { const result = tray.admitPreparedReviewAlert(state.reviewTray, item, now.getTime(), mode); state.reviewTray = result.state; admitted += result.outcome === 'admitted'; }
+      return { admitted, durable: Promise.resolve(),
+        retention: () => tray.reviewRetentionReceipts(state.reviewTray, items, now.getTime()) }; } };
   return { state, acknowledgements, writes: () => writes, replace: () => generation++, coordinator: createIosLocalCaptureCoordinator({ native, ledger, now: () => now.getTime(), aiReview: options(ai), retireShortcutCapture: async () => 'not-needed' }) };
 }
 test('live unknown-format AI Review preserves Message identity, capture date and existing source facts', async () => {

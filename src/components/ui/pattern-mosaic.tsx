@@ -68,10 +68,13 @@ function Shape({ tile, size, fill, mark, compact }: { tile: PatternTile; size: n
   }
 }
 
-/** One tile's pop-in: scale from nothing with a quarter turn, once. */
-function PopIn({ order, animate, children }: { order: number; animate: boolean; children: React.ReactNode }) {
+/**
+ * One tile's pop-in: scale from nothing with a quarter turn, once. Only an
+ * `animate` mosaic mounts it; the spring settles at 1 and nothing repeats.
+ */
+function PopIn({ order, children }: { order: number; children: React.ReactNode }) {
   const { ready, reducedMotion } = useMotionPreference();
-  const moving = animate && !reducedMotion && Platform.OS !== 'android';
+  const moving = !reducedMotion && Platform.OS !== 'android';
   const progress = useSharedValue(moving ? 0 : 1);
   const shown = useRef(!moving);
   useEffect(() => {
@@ -93,6 +96,9 @@ function PopIn({ order, animate, children }: { order: number; animate: boolean; 
  * never money. `tile` scales it (Home's header draws it at 26). Static by
  * default; `animate` pops the tiles in 70ms apart on first appearance, which
  * Reduce Motion, a screen reader and Android all show as a still picture.
+ * A still mosaic (Home's greeting, the lock screen, the recap cover) draws
+ * plain views with no animated style or shared value attached, so it can
+ * never keep a screen drawing frames while it sits idle.
  * The grid mirrors under RTL with the rest of the layout. `wrapTile` (opt-in,
  * none by default) lets onboarding's reveal wrap each drawn tile in its own
  * motion; the drawing, the grid and the spoken image are unchanged by it.
@@ -124,9 +130,8 @@ export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, a
     {Array.from({ length: layout.rows }, (_row, row) => <View key={row} style={[styles.row, { gap: spacing }]}>
       {Array.from({ length: layout.columns }, (_col, col) => {
         const item = byCell.get(`${col}:${row}`);
-        const drawn = item ? <PopIn order={item.order} animate={animate}>
-          <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} compact={compact} />
-        </PopIn> : null;
+        const shape = item ? <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} compact={compact} /> : null;
+        const drawn = item && shape && animate ? <PopIn order={item.order}>{shape}</PopIn> : shape;
         return <View key={col} style={{ width: tile, height: tile }}>
           {item && drawn && wrapTile ? wrapTile(item, drawn) : drawn}
         </View>;

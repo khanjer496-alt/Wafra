@@ -100,7 +100,7 @@ export function widgetCoinOffsets(widths: readonly number[], available: number,
 /** Coming up's strip: the next 30 days, small tiles on their dates, the next one lifted. */
 export const WIDGET_STRIP = { days: 30, tile: 20, lift: 6, height: 30 } as const;
 
-/** Where a pin sits along the strip, as a share of its width (pin-timeline.tsx pinPosition). */
+/** Where a pin sits along the strip, as a share of its width (the strip's pin placement). */
 export function widgetPinPosition(dayOffset: number, days: number = WIDGET_STRIP.days): number {
   const clamped = Math.max(0, Math.min(days, dayOffset));
   return 3 + (94 * clamped) / Math.max(1, days);

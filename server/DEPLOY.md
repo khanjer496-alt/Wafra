@@ -1,5 +1,39 @@
 # Deploying the relay
 
+## Reviewed logging-only rollout
+
+For a change limited to `wrangler.toml` observability, deploy only those settings
+after independent review. The normal `npm run deploy` below also runs D1 schema
+migrations and uploads Worker code; neither is needed for a logging-only change.
+
+Use the authenticated Cloudflare Worker Script Settings API for the existing
+`wafra-relay` script: GET its current `/script-settings`, then PATCH
+`/accounts/{account_id}/workers/scripts/wafra-relay/script-settings` with a JSON
+body containing only the fully merged `observability` object. Preserve all existing
+observability values except the reviewed overrides:
+
+```json
+{
+  "redact_query_string": true,
+  "logs": {
+    "invocation_logs": false,
+    "persist": false
+  }
+}
+```
+
+Merge the nested overrides into the current object before submitting; this
+snippet is not a replacement for the entire observability object. Do not send
+bindings, variables, code, secrets, migrations or other provider settings.
+Read `/script-settings` back and compare; also GET `/settings` and deployments
+before/after to verify bindings and deployed version remain unchanged: the three reviewed fields must match,
+and all unrelated fields must remain unchanged. Retain only non-secret evidence.
+Preserve any existing writable message/tag annotations; automatic read-only
+version-origin metadata is not a user configuration field. If the API cannot
+preserve unrelated configuration, stop rather than upload a full older Worker.
+This stops future persistence; it does not delete already retained provider logs.
+Normal code/schema releases still use the guarded sequence below.
+
 The iOS half of Wafra does not work until this is done. Android never touches
 it. There is exactly one thing to deploy — a Cloudflare Worker plus the one D1
 database it binds to — and it needs a Cloudflare account, which is why it

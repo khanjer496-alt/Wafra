@@ -219,7 +219,9 @@ const styles = StyleSheet.create({
   rowLarge: { flexDirection: 'column', alignItems: 'stretch', paddingVertical: 10 },
   firstRow: { borderTopWidth: 0 },
   copy: { flex: 1, minWidth: 0, gap: 1 },
-  copyLarge: { flex: 0, alignSelf: 'stretch' },
+  // Once the row stacks vertically, reserve the text's full measured height.
+  // flex: 0 becomes a zero flex basis on web and lets the controls cover it.
+  copyLarge: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'stretch' },
   rowTitle: { fontFamily: Fonts.sansSemi, fontSize: 16, lineHeight: 21 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 2 },
   // The switch's visible track is 44×26; its target is the full 48pt square.

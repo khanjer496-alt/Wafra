@@ -6,8 +6,10 @@ const load = require('../repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const historyInstallUrl = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
-const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
-  accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
+// One clock read, as the native store does: two reads can straddle a runner
+// stall and break the parser's exact 24 h lifetime check.
+const session = (createdAtMs = Date.now() - 5000) => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
+  accepted: 44, skipped: 6, createdAtMs, expiresAtMs: createdAtMs + 86400000 });
 async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false, pageFailure = false, bundled = false, failing = false, storageFails = false } = {}) {
   const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [], erased = [];
   const shared = [];

@@ -10,8 +10,8 @@ await mkdir(out, { recursive: true });
 const results = []; const errors = []; const browser = await chromium.launch();
 const minor = value => {
   const text = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
-    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const match = text.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/); assert.ok(match, `Missing money: ${text}`);
+    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.').replace(/[\u2066-\u2069]/g, '');
+  const match = text.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/) || text.match(/(\d[\d,]*(?:\.\d+)?)\s*AED\b/); assert.ok(match, `Missing money: ${text}`);
   return Math.round(Number(match[1].replace(/,/g, '')) * 100);
 };
 async function seed(page, language) {

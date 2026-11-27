@@ -50,7 +50,7 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /** The strongest fill a tile ever takes: the busiest day. */
-export const MAX_TILE_ALPHA = 0.92;
+const MAX_TILE_ALPHA = 0.92;
 
 /**
  * The weakest fill at which the dark ink still reads at 4.5:1 on this band.
@@ -65,7 +65,7 @@ export function minTileAlpha(palette: BandPalette): number {
   return MAX_TILE_ALPHA;
 }
 
-export interface CalendarTileColors {
+interface CalendarTileColors {
   /** Null for a day with nothing spent: the band shows through. */
   background: string | null;
   text: string;

@@ -9,14 +9,5 @@
  *    and exact merchant/date quotes. Deterministic source readers own money,
  *    currency, direction and completion. Never a ledger row.
  *    EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL=1 explicitly enables experimental Review.
- *  - AUTO-POST (default OFF): EXPO_PUBLIC_WAFRA_AI_ALERT_AUTOPOST=1 lets the
- *    legacy gate return 'post'; per-language gates are still all OFF. The
- *    platform-model reader never calls that gate or wires a post outcome; see
- *    docs/universal-parser-rollout.md.
- *  - VERIFIER (default OFF): EXPO_PUBLIC_WAFRA_AI_ALERT_VERIFIER=1 would run
- *    the model as a second opinion on rows the rules DID parse
- *    (ai-alert-verifier.ts). Measurement only in this build.
  */
 export const AI_ALERT_PREFILL_ENABLED: boolean = process.env.EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL === '1';
-export const AI_ALERT_AUTOPOST_ENABLED: boolean = process.env.EXPO_PUBLIC_WAFRA_AI_ALERT_AUTOPOST === '1';
-export const AI_ALERT_VERIFIER_ENABLED: boolean = process.env.EXPO_PUBLIC_WAFRA_AI_ALERT_VERIFIER === '1';

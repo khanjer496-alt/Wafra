@@ -9,7 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { readPaceMemory, type PaceMemory } from '@/lib/home-hero';
 
-export const HOME_PACE_NUDGE_KEY = 'wafra/ui/home-pace-nudge/v1';
+const HOME_PACE_NUDGE_KEY = 'wafra/ui/home-pace-nudge/v1';
 
 export async function loadPaceMemory(): Promise<PaceMemory | null> {
   try {

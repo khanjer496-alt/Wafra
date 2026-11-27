@@ -66,6 +66,27 @@ export type StorageOp =
   | 'write'
   | 'remove'
   | 'destroy'
+  /**
+   * Erase all data, one step each, so a failed erase names its step. The
+   * ledger reset: deleting the SQLCipher file, deleting its key, closing the
+   * handle.
+   */
+  | 'destroy:sqlite'
+  | 'destroy:securestore'
+  | 'destroy:close'
+  /** The cleanup after the reset, in the order the erase runs it. */
+  | 'destroy:complimentary'
+  | 'destroy:private-format-key'
+  | 'destroy:sharing-credential'
+  /** Any capture-queue cleanup failure that no step below named. */
+  | 'destroy:capture-queue'
+  | 'destroy:capture'
+  | 'destroy:history'
+  | 'destroy:message-setup'
+  | 'destroy:background'
+  | 'destroy:sms'
+  | 'destroy:notifications'
+  | 'destroy:exports'
   | 'migrate'
   /** A ROLLBACK that itself failed, leaving the connection poisoned. */
   | 'rollback';
@@ -78,7 +99,7 @@ export type StorageOp =
  * Anything unrecognised is `unknown` — deliberately useless rather than
  * accidentally revealing.
  */
-export type StorageCategory =
+type StorageCategory =
   /** The key in SecureStore does not open this file. Retrying cannot help. */
   | 'key-mismatch'
   /** Page-level damage. */
@@ -324,20 +345,6 @@ function ensureLoaded(): void {
     recent = loadFromDisk();
   } catch {
     recent = [];
-  }
-}
-
-/**
- * Read the bounded, source-free storage failure ring for an explicit support
- * report. The returned rows contain only the closed vocabularies documented in
- * {@link StorageFailure}; arbitrary native error text never reaches this API.
- */
-export function getStorageFailures(): StorageFailure[] {
-  try {
-    ensureLoaded();
-    return recent.map((failure) => ({ ...failure }));
-  } catch {
-    return [];
   }
 }
 

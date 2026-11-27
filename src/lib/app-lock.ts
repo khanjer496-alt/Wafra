@@ -20,14 +20,14 @@
  */
 
 /** expo-local-authentication's `SecurityLevel` values (SDK 55). */
-export const SECURITY_LEVEL = {
+const SECURITY_LEVEL = {
   NONE: 0,
   SECRET: 1,
   BIOMETRIC_WEAK: 2,
   BIOMETRIC_STRONG: 3,
 } as const;
 
-export type DeviceLockLevel = 'none' | 'passcode' | 'biometric';
+type DeviceLockLevel = 'none' | 'passcode' | 'biometric';
 
 export function deviceLockLevel(securityLevel: number | null | undefined): DeviceLockLevel {
   if (securityLevel === SECURITY_LEVEL.SECRET) return 'passcode';
@@ -44,7 +44,7 @@ export function deviceLockLevel(securityLevel: number | null | undefined): Devic
  */
 export const APP_LOCK_AUTH_OPTIONS = { disableDeviceFallback: false } as const;
 
-export type UnlockOutcome = 'unlocked' | 'failed' | 'unavailable';
+type UnlockOutcome = 'unlocked' | 'failed' | 'unavailable';
 
 /**
  * What an `authenticateAsync` result means for the gate. Only the two errors
@@ -56,4 +56,67 @@ export function unlockOutcome(result: { success: boolean; error?: string }): Unl
   if (result.success) return 'unlocked';
   if (result.error === 'not_enrolled' || result.error === 'passcode_not_set') return 'unavailable';
   return 'failed';
+}
+
+/**
+ * Whether this process has been unlocked, kept OUTSIDE React state.
+ *
+ * A language change deliberately remounts the whole navigator subtree
+ * (app-root-layout.tsx) so compiled text is evaluated again, and the gate sits
+ * inside that subtree: its `useState(false)` reset to locked and asked for Face
+ * ID again right after the user changed language in Settings. The gate now
+ * reads its starting value from here and writes every change back, so a remount
+ * keeps the unlock and only a real re-lock (the app leaving the foreground past
+ * the grace period) or a new process locks again.
+ *
+ * Memory only: nothing is persisted, so a cold start always begins locked.
+ */
+export function createUnlockSession(): {
+  isUnlocked(): boolean;
+  setUnlocked(unlocked: boolean): void;
+  /** When the app left the foreground (epoch ms), or 0: kept here so a remount cannot forget a long absence. */
+  leftAt(): number;
+  setLeftAt(at: number): void;
+  /**
+   * Settings is showing its own owner prompt (turning App Lock on or off).
+   * The passcode sheet makes iOS 'inactive' while the owner answers it; the
+   * gate must not count that as leaving the app.
+   */
+  prompting(): boolean;
+  setPrompting(prompting: boolean): void;
+} {
+  let unlocked = false;
+  let leftAt = 0;
+  let prompting = false;
+  return {
+    isUnlocked: () => unlocked,
+    setUnlocked: (next) => { unlocked = next; },
+    leftAt: () => leftAt,
+    setLeftAt: (at) => { leftAt = at; },
+    prompting: () => prompting,
+    setPrompting: (next) => { prompting = next; },
+  };
+}
+
+/** The one session of this process, shared by every mount of the gate. */
+export const appLockSession = createUnlockSession();
+
+/**
+ * All Settings may touch of the session while it asks the owner to turn App
+ * Lock on or off: that its prompt is up, and that the owner just confirmed
+ * (no earlier absence is then left to re-lock for). It cannot unlock the app.
+ */
+export const appLockOwnerPrompt = {
+  begin: (): void => { appLockSession.setPrompting(true); },
+  end: (): void => { appLockSession.setPrompting(false); },
+  confirmed: (): void => { appLockSession.setLeftAt(0); },
+} as const;
+
+/**
+ * Whether the app was away long enough to re-lock: `leftAt` is when it left the foreground
+ * (0 when it did not), `graceMs` the short trips that must not re-lock (permission sheets).
+ */
+export function shouldRelockAfterAbsence(leftAt: number, now: number, graceMs: number): boolean {
+  // A clock set BACK while the app was away (now < leftAt) cannot prove a short absence: fail closed.
+  return leftAt > 0 && (now < leftAt || now - leftAt > graceMs);
 }

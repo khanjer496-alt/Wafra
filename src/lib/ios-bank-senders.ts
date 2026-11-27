@@ -1,6 +1,6 @@
 import { IOS_BANK_SENDER_ALIASES } from '@/lib/ios-bank-senders.generated';
 
-export interface IosBankSenderAlias {
+interface IosBankSenderAlias {
   alias: string;
   market: 'AE' | 'SA';
   bankId: string;

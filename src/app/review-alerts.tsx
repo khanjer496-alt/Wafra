@@ -57,12 +57,9 @@ function institutionLabel(value: string): string {
     .join(' ');
 }
 
+/** The alert's own currency and minor units, grouped like the ledger rows ("AED 12,345.67"). */
 function amountLabel(item: ReviewAlert): string {
-  const { currency, minorUnits, exponent } = item.amount;
-  if (exponent === 0) return `${currency} ${minorUnits}`;
-  const padded = minorUnits.padStart(exponent + 1, '0');
-  const split = padded.length - exponent;
-  return `${currency} ${padded.slice(0, split)}.${padded.slice(split)}`;
+  return universalMoneyLabel(item.amount);
 }
 
 function instrumentLabel(instrument: { kind: 'card' | 'account' | 'wallet'; last4: string | null } | null | undefined): string | null {
@@ -425,7 +422,9 @@ export default function ReviewAlertsScreen() {
   // Durable, source-free counts of money reviews a full lane could not keep.
   const evicted = recentlyLostReviewCount(state.reviewTray, now, 'evicted');
   const currencyEvicted = recentlyLostReviewCount(state.reviewTray, now, 'currency-evicted');
-  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 ||
+  // Possible Apple Pay duplicates posted because even their own lane was full.
+  const duplicatesPosted = recentlyLostReviewCount(state.reviewTray, now, 'duplicate-posted');
+  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 || duplicatesPosted > 0 ||
     backlog.currencyConflicts > 0 || autoAdded > 0 ? (
     <View style={styles.notices} testID="review-alerts-notices" accessibilityLiveRegion="polite">
       {autoAdded > 0 ? <Pressable testID="review-alerts-auto-added" accessibilityRole="button"
@@ -447,6 +446,9 @@ export default function ReviewAlertsScreen() {
       </ThemedText> : null}
       {currencyEvicted > 0 ? <ThemedText testID="review-alerts-currency-evicted" type="small" style={{ color: band.textSecondary }}>
         {tf('reviewAlertsCurrencyEvictedCount', { count: currencyEvicted })}
+      </ThemedText> : null}
+      {duplicatesPosted > 0 ? <ThemedText testID="review-alerts-duplicate-posted" type="small" style={{ color: band.textSecondary }}>
+        {tf('reviewAlertsDuplicatePostedCount', { count: duplicatesPosted })}
       </ThemedText> : null}
       {backlog.currencyConflicts > 0 ? <ThemedText testID="review-alerts-currency" type="small" style={{ color: band.textSecondary }}>
         {tf('reviewAlertsCurrencySkipped', { count: backlog.currencyConflicts })}

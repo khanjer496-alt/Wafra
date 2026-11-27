@@ -11,7 +11,7 @@ import type { WidgetsCopy } from '@/lib/widgets-copy';
  * Pure; no React.
  */
 
-export const WIDGET_DASH = '—';
+const WIDGET_DASH = '—';
 
 /** "1,234.56" with exactly `exponent` decimals and Latin digits, or null. */
 export function widgetNumber(minor: number, exponent: number): string | null {
@@ -168,10 +168,10 @@ export function widgetWholeMoney(minor: number | null, snapshot: WidgetSnapshot)
 }
 
 /** Opacity of each share-bar segment on the Spending band: three named, the rest quiet. */
-export const WIDGET_SEGMENT_ALPHAS = [0.92, 0.7, 0.5] as const;
+const WIDGET_SEGMENT_ALPHAS = [0.92, 0.7, 0.5] as const;
 export const WIDGET_SEGMENT_REST_ALPHA = 0.24;
 
-export interface WidgetSpendingView {
+interface WidgetSpendingView {
   month: string;
   /** "AED 5,480", or null when hidden. */
   total: string | null;

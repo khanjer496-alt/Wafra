@@ -6,7 +6,7 @@ import { toPeriod, type PeriodLike } from '@/lib/period';
 import { allocationsOf } from '@/lib/splits';
 import type { Transaction } from '@/lib/types';
 
-export interface SpendingDailyView {
+interface SpendingDailyView {
   days: DailySpend[];
   /** The dates drawn on this page; the selected reporting scope stays unchanged. */
   from: string;

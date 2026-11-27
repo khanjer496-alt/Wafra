@@ -81,6 +81,10 @@ function harness(options = {}) {
   };
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
     react, 'expo-router': { useRouter: () => ({}), useFocusEffect: () => {} },
+    // iOS launch and `active` scans are deferred in production (runAfterFirstFrames); this harness
+    // tests the scan itself, so the deferral runs it at once, as it did before.
+    '@/lib/after-first-frames': { runAfterFirstFrames: (run) => { run(); return { cancel() {} }; } },
+    '@/lib/deferred-scan': load(path.join(root, 'src/lib/deferred-scan.ts')),
     'react-native': { AppState: appState, Platform: { OS: 'ios' } },
     '@/components/ui/toast': { useToast: () => ({ show: () => {} }) },
     // The capture toast names nothing while App Lock is up; these runs have no lock.
@@ -94,7 +98,7 @@ function harness(options = {}) {
     '@/lib/capture': { getIosCaptureNativeModule: () => native, isCaptureAvailable: () => true,
       publishIosCaptureStatusRefresh: () => {}, subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({}) },
-    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
+    '@/lib/android-live-background-api': { installAndroidLiveCaptureLedger: () => () => {} },
     '../../modules/notification-reader': { __esModule: true, default: {} },
     '../../modules/sms-reader': { __esModule: true, default: {} },
     '@/lib/haptics': {}, '@/lib/i18n': {}, '@/lib/capture-toast': { captureToastContent: () => null },

@@ -52,9 +52,15 @@ ok('review candidates infer safe defaults and still expose genuinely ambiguous a
     /!reviewItem \? <View[\s\S]{0,200}categoryRef/.test(add));
 ok('a review-only cash event defaults to the cash-withdrawal category',
   /reviewFamily === 'cash-withdrawal'[\s\S]{0,80}\? 'cash-withdrawal'/.test(add));
+// Review rows share the ledger rows' grouping (#263) through one label: an
+// integer reaches the formatter only when it is a safe integer; anything
+// larger keeps the exact digit string.
 ok('review amounts stay exact instead of crossing floating point',
-  /minorUnits\.padStart/.test(route) &&
-    !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route));
+  /return universalMoneyLabel\(item\.amount\);/.test(route) &&
+    !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route) &&
+    /Number\.isSafeInteger\(minor\)/.test(reviewFields) && /formatMinorUnits\(minor, spec/.test(reviewFields) &&
+    /unsigned\.padStart/.test(reviewFields) &&
+    !/parseFloat|parseInt/.test(reviewFields));
 // Design language E: the green band scaffold owns the safe areas; the full
 // list is still one virtualized FlatList that clears the home indicator.
 ok('review list follows the band safe-area and scalable-list conventions',
@@ -100,8 +106,9 @@ ok('capacity, expiry and currency-skip notices are localized and counted, never 
 
 // Design language E: "I'll add by hand" sits beside every automatic source on
 // the first-payment step, and says there is no message access.
+// iOS 15 has no capture to turn on later, so its row names what stays available.
 ok('SMS access is visibly optional and the no-access path is explicit',
-  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\} body=\{words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
+  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}\s*body=\{iosCaptureUnsupported \? t\('onboardManualIosUnsupportedBody'\) : words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
     /addByHandBody: 'No message access\./.test(read('src/lib/onboarding-e-copy.ts')) &&
     /continueManually/.test(onboarding) &&
     /onboardManualChoiceBody:[\s\S]{0,180}No SMS access/.test(copy) &&

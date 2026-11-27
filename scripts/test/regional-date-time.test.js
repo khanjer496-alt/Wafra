@@ -9,11 +9,22 @@ const ts = require('typescript');
 let language = 'en';
 let omitDateTimeParts = false;
 let ignoreHourCycle = false;
+// Model Hermes on Android (facebook/hermes lib/Platform/Intl/java/.../
+// LocaleMatcher.java, bestFitMatch): a locale is honoured only when Android
+// ICU lists that exact locale. ICU acceptLanguage reports ar_US -> ar as a
+// fallback, which Hermes rejects, so the formatter silently uses the PHONE's
+// default locale and supportedLocalesOf drops the tag. null = desktop ICU.
+let androidListed = null;
+let androidDefault = 'en-US';
+const bareTag = tag => String(tag).split('-u-')[0];
 const nativeDateTimeFormat = Intl.DateTimeFormat;
 // Model an en-US device default; all actual formatting is the real ICU Intl.
 function DeviceDateTimeFormat(locales, options) {
   const effective = options && ignoreHourCycle ? { ...options, hourCycle: undefined } : options;
-  const value = new nativeDateTimeFormat(locales ?? 'en-US', effective);
+  const requested = Array.isArray(locales) ? locales[0] : locales;
+  const resolved = !androidListed ? locales ?? 'en-US'
+    : requested !== undefined && androidListed.has(bareTag(requested)) ? requested : androidDefault;
+  const value = new nativeDateTimeFormat(resolved, effective);
   if (!omitDateTimeParts) return value;
   return new Proxy(value, { get(target, key) {
     if (key === 'formatToParts') return undefined;
@@ -21,7 +32,9 @@ function DeviceDateTimeFormat(locales, options) {
     return typeof result === 'function' ? result.bind(target) : result;
   } });
 }
-DeviceDateTimeFormat.supportedLocalesOf = nativeDateTimeFormat.supportedLocalesOf;
+DeviceDateTimeFormat.supportedLocalesOf = (list, options) => androidListed
+  ? [].concat(list).filter(tag => androidListed.has(bareTag(tag)))
+  : nativeDateTimeFormat.supportedLocalesOf(list, options);
 const deviceIntl = Object.create(Intl);
 deviceIntl.DateTimeFormat = DeviceDateTimeFormat;
 const cache = new Map();
@@ -35,7 +48,7 @@ function load(name) {
     t: (key) => ({ today: language === 'ar' ? 'اليوم' : 'Today', yesterday: language === 'ar' ? 'أمس' : 'Yesterday' }[key] ?? key),
   };
   if (cache.has(name)) return cache.get(name);
-  assert.ok(['format', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
+  assert.ok(['format', 'money-code-run', 'date-time-locale', 'country-names', 'ledger-money', 'currency-metadata', 'arabic-sms'].includes(name), name);
   const filename = path.join(__dirname, '../../src/lib', `${name}.ts`);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename,
@@ -84,9 +97,28 @@ assert.equal(format.monthLabel('2026-11'), '2026年11月');
 assert.equal(format.weekdayName(0), '日曜日');
 assert.equal(format.weekdayShort(0), '日');
 choose('ja-JP', 'JP', true, 'en');
-assert.equal(format.shortDate('2026-11-07'), '11-07', 'English labels never get Japanese suffixes');
-assert.equal(format.fullDateTime({ date: '2026-11-07' }), '2026-11-07', 'regional YMD survives English fallback');
-assert.equal(format.monthLabel('2026-11'), '2026-11');
+// Issue #268: a year-first region keeps month names (never "2026-11") and
+// English labels never get Japanese suffixes or the inherited US order.
+assert.equal(format.shortDate('2026-11-07'), '7 Nov', 'English labels never get Japanese suffixes');
+assert.equal(format.fullDateTime({ date: '2026-11-07' }), '7 Nov 2026', 'year-first region keeps an English month name');
+assert.equal(format.monthLabel('2026-11'), 'November 2026');
+
+// Issue #268: Y-M-D regions (en-CA, sv-SE) showed "Spent in 2026-11" and
+// "2026-11-13". Month labels and transaction dates keep month names.
+for (const [tag, region] of [['en-CA', 'CA'], ['sv-SE', 'SE'], ['fr-CA', 'CA'], ['ko-KR', 'KR'], ['zh-CN', 'CN'], ['hu-HU', 'HU'], ['lt-LT', 'LT']]) {
+  choose(tag, region, true, 'en');
+  assert.equal(format.monthLabel('2026-11'), 'November 2026', `${region}: English month label`);
+  assert.equal(format.monthLabel('2026-11', true), 'Nov 2026', `${region}: English month chip`);
+  assert.equal(format.shortDate('2026-11-13'), '13 Nov', `${region}: English transaction date`);
+  assert.equal(format.shortDateWithYear('2025-11-13', new Date(2026, 0, 1)), '13 Nov 2025', `${region}: dated with year`);
+  assert.equal(format.fullDateTime({ date: '2026-11-13' }), '13 Nov 2026', `${region}: full date`);
+  assert.match(format.friendlyDate('2026-11-07', '2026-11-10'), /^Saturday,? 7 Nov$/, `${region}: friendly date`);
+  choose(tag, region, true, 'ar');
+  assert.equal(normalized(format.monthLabel('2026-11')), 'نوفمبر 2026', `${region}: Arabic month label`);
+  assert.equal(normalized(format.monthLabel('2026-11', true)), 'نوفمبر 2026', `${region}: Arabic month chip`);
+  assert.equal(normalized(format.shortDate('2026-11-13')), '13 نوفمبر', `${region}: Arabic transaction date`);
+  assert.equal(normalized(format.fullDateTime({ date: '2026-11-13' })), '13 نوفمبر 2026', `${region}: Arabic full date`);
+}
 
 choose('ar-AE', 'AE', true, 'ar');
 assert.equal(normalized(format.shortDate('2026-11-07')), '7 نوفمبر');
@@ -95,9 +127,27 @@ assert.equal(format.clockTime({ ts: clock() }), '14:32');
 choose('ar-SA-u-ca-islamic', 'SA', true, 'ar');
 assert.equal(normalized(format.fullDateTime({ date: '2026-11-07' })), '7 نوفمبر 2026', 'stored dates always stay Gregorian');
 choose('ar-US', 'US', false, 'ar');
-assert.equal(normalized(format.shortDate('2026-11-07')), '11/7', 'US regional order with Arabic UI stays unambiguous');
-assert.equal(normalized(format.fullDateTime({ date: '2026-11-07' })), '11/7/2026');
+// Issue #265: Arabic chosen in the app on an English (US) phone. Month names
+// follow the app language, as the date line does, never "11/2026" or English.
+assert.equal(normalized(format.shortDate('2026-11-07')), '7 نوفمبر', 'a named month is unambiguous in any order');
+assert.equal(normalized(format.fullDateTime({ date: '2026-11-07' })), '7 نوفمبر 2026');
 assert.match(normalized(format.clockTime({ ts: clock() })), /^2:32\sم$/);
+for (const tag of ['en-US', 'en-GB', 'de-DE', 'fr-FR']) {
+  const region = tag.slice(3);
+  choose(tag, region, false, 'ar');
+  assert.equal(normalized(format.monthLabel('2026-11')), 'نوفمبر 2026', `English phone ${tag}, in-app Arabic: Home month`);
+  assert.equal(normalized(format.monthLabel('2026-11', true)), 'نوفمبر 2026', `English phone ${tag}, in-app Arabic: month chip`);
+  assert.equal(normalized(format.monthLabel('2026-11').replace(/\s*\d{4}$/, '')), 'نوفمبر', `${tag}: Home strips only the year`);
+  assert.equal(normalized(format.shortDate('2026-11-07')), '7 نوفمبر', `English phone ${tag}, in-app Arabic: row date`);
+}
+// Arabic phone, English chosen in the app.
+for (const [tag, region] of [['ar-AE', 'AE'], ['ar-SA', 'SA'], ['ar-EG', 'EG'], ['ar-AE', null]]) {
+  choose(tag, region, true, 'en');
+  assert.equal(format.monthLabel('2026-11'), 'November 2026', `Arabic phone ${tag}, in-app English: Home month`);
+  assert.equal(format.monthLabel('2026-11', true), 'Nov 2026', `Arabic phone ${tag}, in-app English: month chip`);
+  assert.equal(format.shortDate('2026-11-07'), '7 Nov', `Arabic phone ${tag}, in-app English: row date`);
+  assert.equal(format.fullDateTime({ date: '2026-11-07' }), '7 Nov 2026', `Arabic phone ${tag}, in-app English: full date`);
+}
 
 choose('fr-FR', 'FR', true, 'fr');
 assert.equal(format.shortDate('2026-11-07'), '7 nov.', 'month names follow a future canonical UI language');
@@ -109,7 +159,7 @@ choose('not-a-valid-@@', 'XX', null);
 assert.equal(format.shortDate('2026-11-07'), 'Nov 7', 'invalid preferences safely use Intl device default');
 if (!Intl.DateTimeFormat.supportedLocalesOf(['tvl-TV']).length) {
   choose('en-US', 'TV', true);
-  assert.equal(format.fullDateTime({ date: '2026-11-07' }), '2026-11-07', 'an unavailable regional convention language cannot silently become US ordering');
+  assert.equal(format.fullDateTime({ date: '2026-11-07' }), '7 Nov 2026', 'an unavailable regional convention language cannot silently become US ordering');
 }
 
 for (const invalid of ['999999999999-11-07', '2026-02-30', '0000-01-01', 'not-a-date']) {
@@ -146,10 +196,16 @@ for (const capability of ['without-locale', 'minimal-native-intl', 'locale-witho
     ['en-US', 'US', 'en', 'Nov 7'],
     ['en-US', 'GB', 'en', '7 Nov'],
     ['en-AE', 'AE', 'en', '7 Nov'],
-    ['ja-JP', 'JP', 'en', '11-07'],
+    ['ja-JP', 'JP', 'en', '7 Nov'],
+    ['en-CA', 'CA', 'en', '7 Nov'],
+    ['sv-SE', 'SE', 'en', '7 Nov'],
+    ['en-CA', 'CA', 'ar', '7 نوفمبر'],
+    ['en-US', 'US', 'ar', '7 نوفمبر'],
+    ['ar-SA', 'SA', 'ar', '7 نوفمبر'],
+    ['ar-SA', 'SA', 'en', '7 Nov'],
     ['ja-JP', 'JP', 'ja', '11月7日'],
     ['ar-AE', 'AE', 'ar', '7 نوفمبر'],
-    ['ar-US', 'US', 'ar', '11/7'],
+    ['ar-US', 'US', 'ar', '7 نوفمبر'],
     ['en-GB', null, 'en', '7 Nov'],
     ['en-GB', 'ZZ', 'en', '7 Nov'],
   ]) {
@@ -166,5 +222,66 @@ for (const capability of ['without-locale', 'minimal-native-intl', 'locale-witho
   assert.equal(format.monthLabel('2026-11'), 'نوفمبر 2026', `${capability}: Arabic month preserved`);
   choose('en-US', 'GB', true);
   assert.equal(format.monthLabel('2026-11'), 'November 2026', `${capability}: English month preserved`);
+  choose('en-CA', 'CA', true);
+  assert.equal(format.monthLabel('2026-11'), 'November 2026', `${capability}: year-first region keeps the month name`);
+  choose('en-US', 'US', true, 'ar');
+  assert.equal(normalized(format.monthLabel('2026-11')), 'نوفمبر 2026', `${capability}: Arabic in-app month on an English phone`);
 }
+
+// Issue #265 on Hermes Android: CLDR has no ar-US, ar-GB or en-SA, so the old
+// ar-US/en-SA formatters fell back to the phone's own locale ("الإنفاق في
+// November", "Nov 2026", "6:25 PM" under Arabic; Arabic names under English).
+deviceIntl.Locale = undefined;
+deviceIntl.getCanonicalLocales = Intl.getCanonicalLocales;
+omitDateTimeParts = false;
+ignoreHourCycle = false;
+const ANDROID_ICU = ['en', 'en-001', 'en-150', 'en-US', 'en-GB', 'en-CA', 'en-AE', 'en-SE', 'en-DE', 'ar', 'ar-001', 'ar-AE',
+  'ar-SA', 'ar-EG', 'sv', 'sv-SE', 'ja', 'ja-JP', 'fr', 'fr-FR', 'fr-CA', 'de', 'de-DE'];
+for (const worldForms of [true, false]) {
+  androidListed = new Set(ANDROID_ICU.filter(tag => worldForms || !tag.endsWith('-001')));
+  const android = (tag, region, clock24, ui) => {
+    androidDefault = tag;
+    locale.setDateTimeLocale(null);
+    choose(tag, region, clock24, ui);
+  };
+  const label = worldForms ? 'Android' : 'Android without -001 data';
+  // English phone, Arabic chosen in the app.
+  for (const [tag, region, clock24] of [['en-US', 'US', false], ['en-GB', 'GB', true], ['en-CA', 'CA', false], ['sv-SE', 'SE', true]]) {
+    android(tag, region, clock24, 'ar');
+    assert.equal(normalized(format.monthLabel('2026-11')), 'نوفمبر 2026', `${label} ${tag}, in-app Arabic: Home month`);
+    assert.equal(normalized(format.monthLabel('2026-11', true)), 'نوفمبر 2026', `${label} ${tag}, in-app Arabic: month chip`);
+    assert.equal(normalized(format.shortDate('2026-11-07')), '7 نوفمبر', `${label} ${tag}, in-app Arabic: row date`);
+    assert.equal(format.weekdayName(0), 'الأحد', `${label} ${tag}, in-app Arabic: weekday`);
+    if (!clock24) assert.match(normalized(format.clockTime({ ts: clock() })), /^2:32\sم$/, `${label} ${tag}: Arabic 12-hour marker`);
+  }
+  // Arabic phone, English chosen in the app.
+  for (const [tag, region] of [['ar-SA', 'SA'], ['ar-AE', 'AE'], ['ar-EG', 'EG']]) {
+    android(tag, region, true, 'en');
+    assert.equal(format.monthLabel('2026-11'), 'November 2026', `${label} ${tag}, in-app English: Home month`);
+    assert.equal(format.monthLabel('2026-11', true), 'Nov 2026', `${label} ${tag}, in-app English: month chip`);
+    assert.match(format.shortDate('2026-11-07'), worldForms || region === 'AE' ? /^7 Nov$/ : /^(7 Nov|Nov 7)$/,
+      `${label} ${tag}, in-app English: row date`);
+    assert.equal(format.weekdayName(0), 'Sunday', `${label} ${tag}, in-app English: weekday`);
+  }
+  // Year-first regions and the unchanged launch conventions.
+  android('en-CA', 'CA', false, 'en');
+  assert.equal(format.monthLabel('2026-11'), 'November 2026', `${label}: en-CA month label`);
+  assert.equal(format.shortDate('2026-11-13'), worldForms ? '13 Nov' : 'Nov 13', `${label}: en-CA row date names the month`);
+  android('sv-SE', 'SE', true, 'en');
+  assert.equal(format.monthLabel('2026-11'), 'November 2026', `${label}: sv-SE month label`);
+  assert.equal(format.shortDate('2026-11-13'), '13 Nov', `${label}: sv-SE row date`);
+  android('en-US', 'US', false, 'en');
+  assert.equal(format.shortDate('2026-11-07'), 'Nov 7', `${label}: en-US unchanged`);
+  assert.equal(normalized(format.clockTime({ ts: clock() })), '2:32 PM', `${label}: en-US clock unchanged`);
+  android('en-GB', 'GB', true, 'en');
+  assert.equal(format.shortDate('2026-11-07'), '7 Nov', `${label}: en-GB unchanged`);
+  android('ar-AE', 'AE', true, 'ar');
+  assert.equal(normalized(format.shortDate('2026-11-07')), '7 نوفمبر', `${label}: ar-AE unchanged`);
+  assert.equal(format.monthLabel('2026-11'), 'نوفمبر 2026', `${label}: ar-AE month unchanged`);
+  android('ar-SA-u-ca-islamic', 'SA', true, 'ar');
+  assert.equal(normalized(format.fullDateTime({ date: '2026-11-07' })), '7 نوفمبر 2026', `${label}: ar-SA stays Gregorian`);
+}
+androidListed = null;
+androidDefault = 'en-US';
+locale.setDateTimeLocale(null);
 console.log('✓ regional civil dates, UI-language names, Gregorian calendar, system hour-cycle and timezone safety');

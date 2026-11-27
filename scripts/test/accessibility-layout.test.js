@@ -9,7 +9,7 @@ const ok = (name, condition) => {
 };
 const source = (relative) => fs.readFileSync(path.join(__dirname, '../..', relative), 'utf8');
 
-const home = source('src/screens/ledger-home-screen.tsx');
+const home = source('src/screens/journal-home-screen.tsx');
 const flow = source('src/app/(tabs)/flow.tsx');
 const bills = source('src/app/(tabs)/bills.tsx');
 const wallet = source('src/app/(tabs)/wallet.tsx');
@@ -31,7 +31,6 @@ const onboardingStepFiles = fs.readdirSync(path.join(__dirname, '../../src/compo
 const onboardingFrame = source('src/components/onboarding/e-frame.tsx');
 const onboardingSteps = onboardingStepFiles.map(source).join('\n');
 const eButton = source('src/components/ui/band/e-button.tsx');
-const onboardingExample = source('src/components/onboarding/money-preview.tsx');
 const controls = source('src/components/ui/controls.tsx');
 const addTransaction = source('src/app/add-transaction.tsx');
 const transactionRow = source('src/components/transaction-row.tsx');
@@ -66,7 +65,7 @@ for (const [name, code] of Object.entries({ Home: home, Flow: spendingOverview, 
     /useLargeTextLayout/.test(code) && /large(?:Text)?/.test(code));
 }
 
-ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitLarge/.test(home));
+ok('Home stacks its hero breakdown for large text', /largeText && styles\.stack/.test(source('src/components/home/home-hero.tsx')) && /largeText/.test(home));
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
   /<BillsSegmentControl/.test(bills) && /flexWrap: 'wrap'/.test(billsSegments) &&
@@ -122,8 +121,8 @@ ok('onboarding keeps a one-screen composition but scrolls instead of clipping at
     onboardingStepFiles.filter((file) => /-(welcome|name|goals|watch|reminders|pattern|paywall)\.tsx$/.test(file))
       .every((file) => /<EStepFrame\b/.test(source(file))) &&
     /<BottomSheet/.test(onboardingGate));
-ok('onboarding text and its sample can grow without truncation or a scale ceiling',
-  [onboardingGate, onboardingSteps, onboardingExample].every((code) =>
+ok('onboarding text can grow without truncation or a scale ceiling',
+  [onboardingGate, onboardingSteps].every((code) =>
     !/numberOfLines|maxFontSizeMultiplier|adjustsFontSizeToFit|minimumFontScale/.test(code)));
 ok('every onboarding button permits its localized label to wrap',
   !/<Button\b/.test(onboardingGate + onboardingSteps) &&
@@ -143,7 +142,6 @@ ok('onboarding action targets retain native accessibility size floors',
     declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'stepper', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'remove', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-first-payment.tsx'), 'source', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
 ok('name personalization exposes a labelled optional input and skip action to assistive technology',
   /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{words\.namePlaceholder\}/.test(source('src/components/onboarding/e-name.tsx')) &&
@@ -325,8 +323,7 @@ ok('Flow retains selected month context and always-visible exact figures',
 ok('Flow uses shared shell and Stats redirects into Trends',
  /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',
-  /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
-    /from '@\/components\/ui\/data-viz'/.test(charts));
+  /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts));
 
 ok('Bills uses one band scaffold scroller with a typed nav row',
   /const billsNav: BandNav = \{/.test(bills) &&
@@ -394,12 +391,17 @@ ok('A caller-supplied maxFontSizeMultiplier wins over the ramp cap',
   /rest\.maxFontSizeMultiplier !== undefined\s*\? rest\.maxFontSizeMultiplier : RAMP_CAP\[type\]/.test(themedText) &&
     /\{\.\.\.rest\}\s*maxFontSizeMultiplier=\{maxFontSizeMultiplier\}/.test(themedText));
 // Every figure is kept whole at every text size (not only the accessibility
-// ones): at 1.3x a stat tile split "1,752.6" from "7". Natively one line that
-// shrinks to fit (never below MIN_FIGURE_SCALE, so never an ellipsis on a
-// figure that fits at 60%); on the web, no wrapping.
+// ones): at 1.3x a stat tile split "1,752.6" from "7". Natively the currency
+// and the digits are one line that never wraps (build 195 drew "$" above
+// "24,681"), and the digits shrink to fit (never below MIN_FIGURE_SCALE). A
+// fixed-width tile (Transfers) opts in to wrapping the currency so its digits
+// keep the whole tile width; on the web, no wrapping of the digits.
 ok('Money keeps every figure whole: fitted from the width, never split, full amount labelled',
   /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
+    /const oneLine = Platform\.OS !== 'web' && !wrapCurrency;/.test(money) &&
+    /oneLine: \{ flexWrap: 'nowrap', maxWidth: '100%' \}/.test(money) &&
     /value: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
+    /fit: \{ flexShrink: 1, minWidth: 0 \}/.test(money) &&
     /adjustsFontSizeToFit=\{Platform\.OS !== 'web'\} minimumFontScale=\{MIN_FIGURE_SCALE\}/.test(money) &&
     /Platform\.OS === 'web' && !large && WEB_NO_WRAP/.test(money) &&
     /accessibilityLabel=\{label\}/.test(money));

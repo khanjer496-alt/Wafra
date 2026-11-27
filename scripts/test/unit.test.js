@@ -1842,69 +1842,6 @@ ok('recurring: a single bad parse still does not set the price',
   glitchFound.length === 1 && glitchFound[0].avgAmountFils === 5500,
   JSON.stringify(glitchFound[0] && glitchFound[0].avgAmountFils));
 
-// ── Bundled brand marks ──
-const { brandMarkFor } = require('./build/brand-marks');
-
-// Matched against the title the PARSER produces, not the raw descriptor.
-for (const [title, mark] of [
-  ['Noon', 'n'], ['Tabby', 'tb'], ['YouTube Premium', 'yt'], ['Apple', 'ap'],
-  ['Steam', 'st'], ['Kokoro Qlub', 'ql'], ['Kitopi', 'kt'], ['Capital.com', 'cp'],
-  ['Name.com', 'dn'], ['Claude', 'cl'], ['ChatGPT', 'ai'], ['Exinity Me Ltd', 'ex'],
-  ['Road & Transport Auth', 'rta'], ['% Arabica', '%'], ['Carrefour', 'cf'],
-]) {
-  ok(`brand mark: ${title} → ${mark}`, brandMarkFor(title)?.mark === mark);
-}
-
-// Unknown merchants must fall through to the category glyph, and near-misses
-// must not borrow a brand they only share letters with.
-for (const title of [
-  'Al Nimar Al Abyadh', 'Account debit', 'Pineapple Cafe', 'Dubai Families',
-  'ATM withdrawal', 'Transfer to Khalid Rashid', '',
-]) {
-  ok(`brand mark: "${title}" has none`, brandMarkFor(title) === null);
-}
-
-// Every mark must be short enough for the avatar's three size steps, and no
-// two brands may share a colour AND a mark (they'd be indistinguishable).
-const seenMarks = new Map();
-let markShapeOk = true;
-let markClash = '';
-for (const title of [
-  'Noon', 'Tabby', 'Tamara', 'Amazon', 'AliExpress', 'Shein', 'Temu', 'Namshi',
-  'IKEA', 'Sharaf DG', 'Dubizzle', 'Decathlon', 'Nike', 'Adidas', 'GMG Consumer',
-  'Al Shaya', 'Virgin Megastore', 'Carrefour', 'Lulu', 'Spinneys', 'Union Coop',
-  'Choithram', 'Nesto', 'InstaShop', 'Talabat', 'Deliveroo', 'Kokoro Qlub',
-  'Kitopi', 'Starbucks', 'Tim Hortons', 'Costa', 'McDonalds', 'KFC', 'Pizza Hut',
-  'Dominos', 'Subway', '% Arabica', 'Careem', 'Uber', 'Salik', 'RTA', 'ADNOC',
-  'ENOC', 'Emarat', 'Emirates', 'flydubai', 'Etihad', 'Air Arabia', 'Booking',
-  'Airbnb', 'DragonPass', 'DEWA', 'SEWA', 'Etisalat', 'Du', 'Apple',
-  'YouTube Premium', 'Netflix', 'Spotify', 'Anghami', 'Shahid', 'OSN+', 'Disney+',
-  'Steam', 'PlayStation Plus', 'Xbox Game Pass', 'ChatGPT', 'Claude', 'OpenRouter',
-  'Perplexity', 'Cursor', 'GitHub', 'Notion', 'Canva', 'Adobe', 'Microsoft 365',
-  'LinkedIn', 'Dropbox', 'Fiverr', 'Google One', 'Hetzner', 'Vercel', 'Namecheap',
-  'Kickresume', 'Mailsuite', 'eToro', 'Capital.com', 'Binance', 'Crypto.com',
-  'Exinity', 'Ziina', 'VOX Cinemas', 'Reel Cinemas', 'Novo Cinemas', 'Zomato',
-  'Discord', 'Telegram Premium', 'Audible', 'Real-Debrid', 'AllDebrid',
-]) {
-  const b = brandMarkFor(title);
-  if (!b) { markShapeOk = false; markClash ||= `${title} resolved to nothing`; continue; }
-  if (b.mark.length < 1 || b.mark.length > 3) {
-    markShapeOk = false;
-    markClash ||= `${title} mark "${b.mark}" is not 1-3 chars`;
-  }
-  if (!/^#[0-9A-Fa-f]{6}$/.test(b.color)) {
-    markShapeOk = false;
-    markClash ||= `${title} color "${b.color}" is not a 6-digit hex`;
-  }
-  const key = `${b.mark}|${b.color}`;
-  if (seenMarks.has(key)) {
-    markShapeOk = false;
-    markClash ||= `${title} is indistinguishable from ${seenMarks.get(key)}`;
-  }
-  seenMarks.set(key, title);
-}
-ok(`brand marks: every mark is 1-3 chars, hex-coloured and distinguishable${markClash ? ` (${markClash})` : ''}`, markShapeOk);
-
 // ── leaving soon ──
 // Home used to answer "what leaves next" three times in three orders; this is
 // the single merged list behind it.
@@ -5265,14 +5202,12 @@ eq('analytics: the category trend follows the split too',
       '96,466.44');
   }
 
-  // ── The declared route union, against the files on disk ──
+  // ── Insight destinations, against the files on disk ──
   //
   // routes.test.js checks the routes the app PUSHES to. This checks the
-  // declared `APP_ROUTES` union that the AppRoute type is built from — nothing
-  // else does, and a union entry with no file behind it type-checks perfectly
-  // and lands on "Unmatched Route" at runtime.
+  // destinations the insights point at: a link with no file behind it
+  // lands on "Unmatched Route" at runtime.
   {
-    const routes = require('./build/routes');
     const APP_DIR = path.join(__dirname, '..', '..', 'src', 'app');
 
     /** Every route expo-router will actually serve, read off the filesystem. */
@@ -5294,9 +5229,6 @@ eq('analytics: the category trend follows the split too',
     };
 
     const onDisk = realRoutes();
-    const missing = routes.APP_ROUTES.filter((r) => !onDisk.has(r));
-    ok('routes: every declared route has a screen', missing.length === 0,
-      `missing ${missing.join(', ')}`);
     ok('routes: the analytics screen exists', onDisk.has('/stats'));
 
     // The exact scenario from the bug: the demo seed, and every chevron on it.

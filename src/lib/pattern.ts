@@ -21,7 +21,7 @@
 import type { PatternColor } from '@/constants/theme';
 import type { AppState, CategoryId, GoalId } from '@/lib/types';
 
-export type PatternKind = 'square' | 'circle' | 'quarter' | 'half' | 'ring' | 'dot' | 'bars' | 'glyph' | 'letter';
+type PatternKind = 'square' | 'circle' | 'quarter' | 'half' | 'ring' | 'dot' | 'bars' | 'glyph' | 'letter';
 export type PatternGroup = 'name' | 'goals' | 'watch' | 'remind';
 
 export interface PatternTile {
@@ -47,7 +47,7 @@ export interface PatternTile {
 }
 
 /** Whether each kind of reminder has something to remind about. */
-export interface PatternReminders {
+interface PatternReminders {
   bills: boolean;
   cards: boolean;
   dailySummary: boolean;
@@ -138,7 +138,7 @@ export function buildPattern(input: PatternInput): PatternTile[] {
 }
 
 /** Only the fields the pattern reads. */
-export type PatternStateFields = Pick<AppState, 'userName' | 'wafraGoals' | 'budgets' | 'bills' | 'cardDues' | 'accounts' | 'dailySummary'>;
+type PatternStateFields = Pick<AppState, 'userName' | 'wafraGoals' | 'budgets' | 'bills' | 'cardDues' | 'accounts' | 'dailySummary'>;
 
 /**
  * The input for a ledger: the stored name (never the placeholder), the goals

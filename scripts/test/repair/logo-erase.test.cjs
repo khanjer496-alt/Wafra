@@ -91,12 +91,7 @@ function harness(platform) {
     get databaseDeletes() { return databaseDeletes; },
     get storageReads() { return storageReads; },
     get fetchCalls() { return fetchCalls; },
-    resolvers() {
-      return [
-        { resolve: load('@/lib/merchant-logo-resolver').resolveRemoteMerchantLogo, name: 'Aseer Time', key: MERCHANT_KEY, record: MERCHANT_RECORD, domain: 'aseertime.com' },
-        { resolve: load('@/lib/bank-logo-resolver').resolveBankLogo, name: 'Bank of America', key: BANK_KEY, record: BANK_RECORD, domain: 'bankofamerica.com' },
-      ];
-    },
+
   };
 }
 
@@ -109,67 +104,6 @@ for (const platform of ['web', 'native']) {
     for (const key of ['other-app:key', 'wafra:bank-logo-preference', LEDGER + '-other']) h.data.set(key, 'keep');
     await h.state.destroy(LEDGER);
     assert.deepEqual([...h.data.keys()].sort(), ['other-app:key', 'wafra:bank-logo-preference', LEDGER + '-other'].sort());
-  });
-
-  test(`${platform}: erase invalidates merchant and bank memory entries`, async () => {
-    const h = harness(platform);
-    const resolvers = h.resolvers();
-    for (const entry of resolvers) h.data.set(entry.key, entry.record);
-    for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
-    const reads = h.storageReads;
-    for (const entry of resolvers) await entry.resolve(entry.name);
-    assert.equal(h.storageReads, reads, 'warm identities use memory');
-    await h.state.destroy(LEDGER);
-    for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
-    assert.equal(h.storageReads, reads + 2, 'fresh post-erase identities must not reuse erased memory');
-    assert.equal(h.fetchCalls, 2, 'post-erase lookups search again after their caches are removed');
-  });
-
-  for (const kind of [0, 1]) {
-    for (const cached of [false, true]) {
-      test(`${platform}: pending ${kind ? 'bank' : 'merchant'} ${cached ? 'cached identity' : 'cache miss'} cannot repopulate after erase`, async () => {
-        const h = harness(platform);
-        const entry = h.resolvers()[kind];
-        const read = deferred();
-        h.storage.getItem = () => read.promise;
-        const lookup = entry.resolve(entry.name);
-        await turn();
-        await h.state.destroy(LEDGER);
-        read.resolve(cached ? entry.record : null);
-        assert.equal(await lookup, null, 'an erased lookup must not publish its old result');
-        assert.equal(h.data.has(entry.key), false);
-        assert.equal(h.fetchCalls, 0);
-      });
-    }
-
-    test(`${platform}: erase drains an already-started ${kind ? 'bank' : 'merchant'} write before removing its key`, async () => {
-      const h = harness(platform);
-      const entry = h.resolvers()[kind];
-      const write = deferred();
-      const started = deferred();
-      h.storage.setItem = async (key, value) => { started.resolve(); await write.promise; h.data.set(key, value); };
-      const lookup = entry.resolve(entry.name);
-      await started.promise;
-      const erase = h.state.destroy(LEDGER);
-      await turn();
-      write.resolve();
-      await Promise.all([lookup, erase]);
-      assert.equal(h.data.has(entry.key), false, 'late storage completion must be removed');
-    });
-  }
-
-  test(`${platform}: lookups requested while erase is running never publish artwork`, async () => {
-    const h = harness(platform);
-    const entries = h.resolvers();
-    const keys = deferred();
-    h.storage.getAllKeys = () => keys.promise;
-    const erase = h.state.destroy(LEDGER);
-    await turn();
-    for (const entry of entries) assert.equal(await entry.resolve(entry.name), null);
-    assert.equal(h.fetchCalls, 0);
-    assert.equal(h.storageReads, 0);
-    keys.resolve([]);
-    await erase;
   });
 
   test(`${platform}: a failed cache removal rejects erase before deleting ledger data and supports retry`, async () => {
@@ -189,41 +123,4 @@ for (const platform of ['web', 'native']) {
     assert.equal(h.data.size, 0);
   });
 
-  test(`${platform}: a stale lookup finishing cannot remove a new generation's pending read`, async () => {
-    const h = harness(platform);
-    const entry = h.resolvers()[0];
-    const oldRead = deferred();
-    const newRead = deferred();
-    let reads = 0;
-    h.storage.getItem = () => ++reads === 1 ? oldRead.promise : newRead.promise;
-    const oldLookup = entry.resolve(entry.name);
-    await turn();
-    await h.state.destroy(LEDGER);
-    const newLookup = entry.resolve(entry.name);
-    await turn();
-    oldRead.resolve(entry.record);
-    assert.equal(await oldLookup, null);
-    const sameNewLookup = entry.resolve(entry.name);
-    await turn();
-    assert.equal(reads, 2, 'the new lookup must remain deduplicated');
-    newRead.resolve(null);
-    assert.equal((await newLookup).domain, entry.domain);
-    assert.equal((await sameNewLookup).domain, entry.domain);
-    assert.equal(h.fetchCalls, 1, 'the new generation performs one fresh search after its empty cache read');
-  });
 }
-
-test('Android financial records skip prior cached CDN URLs, known bank domains and name searches', async () => {
-  const h = harness('android');
-  h.data.set(MERCHANT_KEY, MERCHANT_RECORD);
-  h.data.set(BANK_KEY, BANK_RECORD);
-  for (const [module, resolve, name] of [
-    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'Aseer Time'],
-    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'Starbucks'],
-    ['merchant-logo-resolver', 'resolveRemoteMerchantLogo', 'New Merchant'],
-    ['bank-logo-resolver', 'resolveBankLogo', 'Bank of America'],
-    ['bank-logo-resolver', 'resolveBankLogo', 'New Bank'],
-  ]) assert.equal(await h.load('@/lib/' + module)[resolve](name), null);
-  assert.equal(h.storageReads, 0);
-  assert.equal(h.fetchCalls, 0);
-});

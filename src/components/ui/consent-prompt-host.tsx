@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { SmsPermissionExplainer } from '@/components/onboarding/sms-explainer';
+import { View } from 'react-native';
+import { useLanguage } from '@/hooks/use-language';
+import { useBand } from '@/hooks/use-band';
+import { androidCaptureDisclosure } from '@/lib/android-capture-disclosure';
 import { registerConsentPresenter, type ConsentPrompt } from '@/lib/consent-prompt';
 
 type OpenPrompt = { copy: ConsentPrompt; answer: (choice: boolean | null) => void };
@@ -11,6 +17,8 @@ export function ConsentPromptHost() {
 }
 
 function UnlockedConsentPromptHost() {
+  const language = useLanguage();
+  const palette = useBand('settings');
   const [open, setOpen] = useState<OpenPrompt | null>(null);
   useEffect(() => {
     let current: OpenPrompt | null = null;
@@ -35,10 +43,25 @@ function UnlockedConsentPromptHost() {
     };
   }, []);
   if (!open) return null;
+  if (open.copy.androidCapture === 'sms-history') {
+    const answer = (choice: boolean) => {
+      open.answer(choice);
+      setOpen(current => current === open ? null : current);
+    };
+    return <BottomSheet visible title={androidCaptureDisclosure('sms-history', language).question}
+      onClose={() => answer(false)} testID="android-sms-permission-disclosure">
+      <View style={{ backgroundColor: palette.band, padding: 24, borderRadius: 24 }}>
+        <SmsPermissionExplainer language={language} palette={palette} disabled={false}
+          onContinue={() => answer(true)} onNotNow={() => answer(false)} />
+      </View>
+    </BottomSheet>;
+  }
+  const copy = open.copy.androidCapture
+    ? androidCaptureDisclosure(open.copy.androidCapture, language) : open.copy;
   return (
     <ConfirmSheet
       visible
-      {...open.copy}
+      {...copy}
       onClose={() => setOpen(current => current === open ? null : current)}
       onCancel={() => open.answer(false)}
       onConfirm={() => open.answer(true)}

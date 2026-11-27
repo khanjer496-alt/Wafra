@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { writeAppStoreConnectMetadata } from './app-store-connect-package.mjs';
+import { APPLE_SCREENSHOT_TARGET } from './apple-screenshot-target.mjs';
 
 const APPLE_LAUNCH_LOCALES = ['en-US'];
 const GOOGLE_LAUNCH_LOCALES = ['en-US'];
@@ -103,15 +104,17 @@ const copyMatching = async ({ source, destination, predicate }) => {
 };
 
 const copyAppleAssets = async (root, output) => {
-  const source = path.join(root, 'docs', 'store-assets', 'appstore');
-  const locales = { 'en-US': 'appstore-6.9-dark-en-' };
+  const source = path.join(root, APPLE_SCREENSHOT_TARGET.directory);
+  const locales = { 'en-US': APPLE_SCREENSHOT_TARGET.prefix };
   for (const [locale, prefix] of Object.entries(locales)) {
     const count = await copyMatching({
       source,
       destination: path.join(output, 'apple', 'screenshots', locale),
       predicate: (name) => name.startsWith(prefix) && name.endsWith('.png'),
     });
-    if (count !== 8) throw new Error(`Apple ${locale} requires 8 screenshots; found ${count}`);
+    if (count !== APPLE_SCREENSHOT_TARGET.count) {
+      throw new Error(`Apple ${locale} requires ${APPLE_SCREENSHOT_TARGET.count} screenshots; found ${count}`);
+    }
   }
 };
 

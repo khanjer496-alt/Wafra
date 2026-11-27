@@ -392,7 +392,7 @@ export function setActiveMarket(id: string): boolean {
   return true;
 }
 
-const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|(?<![ء-ي])د\.?[إا]\.?(?![ء-ي])|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 // STC Bank glues the code to the figure ("Amount:100SR"). That form is weaker
 // evidence — "Ref 5521SR" is a reference — so it counts only when nothing in
