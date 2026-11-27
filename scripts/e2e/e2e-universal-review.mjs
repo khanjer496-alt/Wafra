@@ -147,7 +147,7 @@ try {
   await scenario('known purchase facts stay compact and save exactly once', 'purchase', async (page, fixture) => {
     await openReview(page);
     await visible(page.getByText('AED 89.50', { exact: true }));
-    assert.equal(await page.getByText('AED 1000.00', { exact: true }).count(), 0,
+    assert.equal(await page.getByText('AED 1,000.00', { exact: true }).count(), 0,
       'secondary balance evidence stays out of the compact posting form');
     assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known merchant is not re-confirmed');
     assert.equal(await field(page, DATE_LABEL).count(), 0, 'known transaction date is not re-confirmed');
@@ -275,7 +275,7 @@ try {
 
   await scenario('Japanese held-out purchase uses the observed date and preserves zero-decimal yen', 'japanesePurchase', async (page, fixture) => {
     await openReview(page);
-    await visible(page.getByText('JPY 2786', { exact: true }));
+    await visible(page.getByText('JPY 2,786', { exact: true }));
     assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known merchant stays compact');
     assert.equal(await field(page, DATE_LABEL).count(), 0, 'missing transaction date falls back to the observed alert date');
     await chooseAccount(page, 'QA Current Account');
@@ -296,7 +296,7 @@ try {
 
   await scenario('Spanish statement keeps total minimum and due date out of transactions', 'spanishStatement', async (page) => {
     await openReview(page);
-    for (const text of ['Statement total', 'MXN 2450.60', 'Minimum payment', 'MXN 180.00', 'Due date', '2026-09-18']) {
+    for (const text of ['Statement total', 'MXN 2,450.60', 'Minimum payment', 'MXN 180.00', 'Due date', '2026-09-18']) {
       await visible(page.getByText(text, { exact: true }));
     }
     assert.equal(await button(page, CONFIRM).count(), 0);
@@ -307,8 +307,8 @@ try {
 
   await scenario('ambiguous JOD statement displays both interpretations without posting', 'jordanStatement', async (page) => {
     await openReview(page);
-    await visible(page.getByText('JOD 180.250 / JOD 180250.000', { exact: true }));
-    await visible(page.getByText('JOD 10.000 / JOD 10000.000', { exact: true }));
+    await visible(page.getByText('JOD 180.250 / JOD 180,250.000', { exact: true }));
+    await visible(page.getByText('JOD 10.000 / JOD 10,000.000', { exact: true }));
     await visible(page.getByText('2026-09-19', { exact: true }));
     assert.equal(await button(page, CONFIRM).count(), 0);
     await remainsPending(page);
