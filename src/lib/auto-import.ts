@@ -1,4 +1,4 @@
-import { canReviewCreditRefusal, hasUnsettledCreditToken, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
+import { canReviewCreditRefusal, completedDebitBesideCredit as splitDebitBesideCredit, hasUnsettledCreditToken, mentionsCredit, informationalCreditReview } from '@/lib/credit-settlement-guards';
 import { createAiAlertReviewSession } from '@/lib/ai-alert-reader';
 import { createPrivateAlertFormatSession, type PrivateAlertFormatSessionOptions } from '@/lib/private-alert-format-runtime';
 import { canEnrichPrivateFormatReview, privateAlertFormatReviewEvent } from '@/lib/private-alert-format-review';
@@ -29,6 +29,8 @@ import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLinkPrompts } from '@/lib/principal-posting-guards';
 import {
   completedDebitBesideCredit,
+  debitBesideRefusedCreditNote,
+  hasOwnMovementStatusSentence,
   nonPostingReason,
   hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
@@ -39,6 +41,7 @@ import {
 } from '@/lib/sms-parser';
 import {
   createLaunchAlertSession,
+  hasPersonalMessagePrefix,
   hasBankAlertMoneyHint,
   hasGenericBankAlertContext,
   inspectGenericBankEventForReview,
@@ -1010,6 +1013,11 @@ function inspectSourceFreeRefusedAlertCore(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
+  // A debit whose own decline, failure, cancellation or reversal is a separate sentence did not stand. As for "… was
+  // declined" in one sentence there is nothing to review; another refusal reason keeps its own outcome.
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') && hasOwnMovementStatusSentence(input.source)) {
+    return { kind: 'declined', reason: 'declined' };
+  }
   if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
     completedDebitBesideCredit(input.source, { sender: input.sender }) && !/https?:\/\/|www\./iu.test(input.source)) {
     const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
@@ -1020,6 +1028,39 @@ function inspectSourceFreeRefusedAlertCore(input: {
       issues: [...new Set([...event.issues, 'unsettled-credit-not-posting'])] };
     const review = event ? prepareUniversalReviewAlert({ id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001',
       observedAt: input.observedAt, channel: input.channel, event }) : null;
+    if (review) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
+      return { kind: 'review', candidate };
+    }
+  }
+  // #238 (oracle D1): a purchase beside a refund note of another figure, which the pair proof above cannot read, reaches
+  // Review as that purchase (its figure and direction) instead of an amount-free credit or nothing. Retention, not
+  // authority: like the unaccepted pair above it is informational, so it is never posted, never income and never booked by
+  // one tap. UAE/Saudi: the regional parser's facts for the debit sentence; elsewhere the generic reading of it.
+  if (reason === null && !/https?:\/\/|www\./iu.test(input.source) && !hasPersonalMessagePrefix(input.source, input.sender)) {
+    const besideNoteMarket = detectLaunchMarketFromAlert(source, input.sender);
+    let debit: UniversalBankEvent | null = null;
+    if (besideNoteMarket) {
+      const parsed = withMarketPackForParsing(besideNoteMarket, () =>
+        debitBesideRefusedCreditNote(input.source, { sender: input.sender, observedAt: input.observedAt }));
+      debit = parsed ? parsedTransactionReviewEvent(parsed) : null;
+    } else {
+      const read = (clause: string) => inspectGenericBankEventForReview(clause, input.sender);
+      const postedDebit = (event: UniversalBankEvent | null) => event?.direction === 'debit' && event.status === 'posted' &&
+        event.amount.evidence === 'explicit' ? event : null;
+      const letters = (text: string) => text.replace(/[^\p{L}]/gu, '');
+      const pair = splitDebitBesideCredit(input.source, clause => !!postedDebit(read(clause)));
+      const event = pair ? postedDebit(read(pair.debit)) : null;
+      const note = pair ? read(pair.credit) : null;
+      // Every other part is the note, about other money: no dropped status sentence, no recap of this purchase.
+      if (pair && event && note?.amount.evidence === 'explicit' && note.amount.value?.minorUnits !== event.amount.value?.minorUnits &&
+        letters(input.source.replace(pair.debit, ' ')) === letters(pair.credit) &&
+        !/\b(?:this|the|your)\s+(?:transaction|purchase|payment)\b/iu.test(pair.credit)) debit = event;
+    }
+    const review = debit?.direction === 'debit' && debit.amount.evidence === 'explicit' ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001', sourceKey: 'capture_probe_key_001', observedAt: input.observedAt, channel: input.channel,
+      event: { ...debit, decision: 'review', status: 'informational',
+        issues: [...new Set([...debit.issues, 'unsettled-credit-not-posting'])] } }) : null;
     if (review) {
       const { id: _id, sourceKey: _sourceKey, ...candidate } = review;
       return { kind: 'review', candidate };

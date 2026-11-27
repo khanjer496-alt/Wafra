@@ -10134,6 +10134,75 @@ export function completedDebitBesideCredit(message: string, options?: ParseOptio
   return splitDebitBesideCredit(message, clause => prove(clause, true));
 }
 
+// A sentence of its own that states THIS movement did not stand: "Transaction declined.", "This transaction has been
+// reversed.", "Txn Status: REVERSED", "تم رفض العملية.", "تم عكس العملية.", "لم تتم العملية.", on a line of its own too. Only a
+// bare transaction, purchase, payment, charge or authorisation subject counts, with no figure of its own once a date or a
+// reference is set aside; a question ("Transaction cancelled? …"), a footer about declined transactions in general, a
+// declined refund request, "to dispute a transaction …" or a previous transaction's status does not.
+const OWN_MOVEMENT_STATUS_EN = /^(?:(?:the|this|your)\s+)?(?:card\s+|pos\s+)?(?:transaction|purchase|payment|txn|charge|authori[sz]ation)\s+(?:(?:has|have)\s+been\s+|was\s+|is\s+|got\s+)?(?:declined|failed|unsuccessful|rejected|cancell?ed|reversed|reverted|voided|not\s+(?:been\s+)?(?:completed|processed|successful|approved))(?=\s*$|\s+(?:due\s+to|because|by|as\s+per|at\s+the\s+request)\b)|^(?:(?:transaction|txn)\s+)?status\s*\|?\s*(?:declined|failed|unsuccessful|rejected|cancell?ed|reversed|reverted|voided)(?=\s*$|\s+(?:due\s+to|because|by|as\s+per|at\s+the\s+request)\b)/iu;
+const OWN_MOVEMENT_STATUS_AR = /^و?(?:قد\s+)?(?:تم|تمت)\s+(?:رفض|عكس|الغاء|استرجاع)\s+(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?:\s+(?:ال)?شراء)?(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?:\s+(?:ال)?شراء)?\s+(?:مرفوضه|ملغاه|ملغيه|معكوسه|فاشله|غير\s+(?:ناجحه|مكتمله)|لم\s+(?:تتم|تكتمل|تنجح))(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^لم\s+(?:تتم|تكتمل|تنجح)\s+(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^(?:فشلت|رفضت|الغيت)\s+(?:ال)?(?:عمليه|معامله)(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))/u;
+const STATUS_DATE_OR_REFERENCE_RE = /\b(?:on|dated)\s+\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b|\(?\s*\b(?:ref(?:erence)?|rrn|auth(?:ori[sz]ation)?\s+code)\b\.?\s*(?:no\.?|#)?\s*\|?\s*[a-z0-9-]+\s*\)?|بتاريخ\s+[\d/.-]+|(?:رقم\s+)?(?:المرجع|مرجع)\s*\|?\s*[\da-z-]+/giu;
+// The money will come back ("Transaction failed. The amount will be reversed within 7 days."): it has left the account.
+const PROMISED_RETURN_RE = /\b(?:will|shall)\s+(?:be\s+)?(?:reversed|refunded|returned|credited|reverted|released|reflect(?:ed)?|reverse|refund|return|credit)\b|(?<![ء-ي])(?:سيتم|سوف\s+يتم)\s+(?:ال)?(?:ارجاع|استرداد|عكس|اعاده|ايداع|استرجاع|رد)(?![ء-ي])|(?<![ء-ي])سيعاد(?![ء-ي])/iu;
+// Money received by the customer in its own sentence: a refund, a reversal or chargeback (verb or noun, a heading too), a
+// credit back, a deposit.
+const CREDITED_SENTENCE_RE = /\b(?:credited|refunded|returned|reverted|deposited|received|refunds?|reversals?|chargebacks?)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:استرداد|ايداع|اضافه|ارجاع|استرجاع|رد)(?![ء-ي])|(?<![ء-ي])(?:[بل]?ال|[بل])?(?:مسترد|استرداد|استرجاع)(?![ء-ي])/iu;
+// The debit's own figure: the purchase line of a refund heading ("Refund / AED 250.00 / Purchase at NOON.COM") names none.
+const STATED_MONEY_RE = /(?:\b[a-z]{3}|[$€£])\s?\d|\d[\d,]*\.\d{2}\b|\d\s*(?:درهم|دراهم|ريال)/iu;
+const USED_CARD_RE = /\b(?:was|has\s+been)\s+used\b|\bused\s+(?:at|for)\b/iu;
+function ownMovementStatus(message: string): { expense: boolean; income: boolean } {
+  // Questions are help lines, and a line break ends a sentence in the usual Gulf layout.
+  const text = message.slice(0, 4000).replace(/[^\n.!?؟]*[?؟]/gu, ' ').replace(/\s*\n+\s*/g, '. ');
+  const sentences = normalizeCreditText(text).split('||').map((part) => part.replace(/^[\s|]+/u, '').trim()).filter(Boolean);
+  const isStatus = (sentence: string) => {
+    const bare = sentence.replace(STATUS_DATE_OR_REFERENCE_RE, ' ').replace(/[\s|()]+$/u, '').trim();
+    return !/\d/u.test(bare) && (OWN_MOVEMENT_STATUS_EN.test(bare) || OWN_MOVEMENT_STATUS_AR.test(bare));
+  };
+  if (!sentences.some(isStatus) || sentences.some((sentence) => PROMISED_RETURN_RE.test(sentence))) return { expense: false, income: false };
+  const others = sentences.filter((sentence) => !isStatus(sentence));
+  const credited = others.filter((sentence) => CREDITED_SENTENCE_RE.test(sentence));
+  // The debit is stated by this alert, with its own figure, outside any refund or credit sentence ("AED 250.00 charged at
+  // NOON … has been credited back" and "Reversal of AED 250.00 for your purchase …" describe the credit, not a debit).
+  const debit = others.some((sentence) => !credited.includes(sentence) && STATED_MONEY_RE.test(sentence) &&
+    (CREDIT_SETTLEMENT_DEBIT_RE.test(sentence) || USED_CARD_RE.test(sentence)));
+  return { expense: debit, income: debit && credited.length === 0 };
+}
+/** A debit with its own decline, failure, cancellation or reversal in a separate sentence moved no money. */
+export const hasOwnMovementStatusSentence = (message: string): boolean => ownMovementStatus(message).expense;
+/**
+ * The veto for a reader's result. An expense never posts; nor does the income a reversal sentence alone would read
+ * from the same debit (a debit and its own reversal in one alert moved nothing). A body with a credit sentence of its
+ * own (a refund, a credit back) keeps that income.
+ */
+export function isVetoedByOwnMovementStatus(message: string, parsed: ParsedSms | null): boolean {
+  if (parsed?.kind !== 'transaction') return false;
+  const status = ownMovementStatus(message);
+  return parsed.type === 'expense' ? status.expense : status.income;
+}
+
+/**
+ * Review only, never a posting (#238). Beside a separate debit sentence, a credit note with a figure of its own (oracle D1)
+ * keeps the alert off the ledger. When completedDebitBesideCredit cannot prove that debit either (a nominal "Debit Card
+ * Purchase of …", "تمت عملية شراء …"), the purchase would reach neither the ledger nor Review. Returns the expense parseSms
+ * reads from that one debit sentence alone, so its Review item carries the purchase's figure and direction and the note
+ * stays context. Only when every other sentence is such a note with its own, different figure (or a balance line): a status
+ * sentence ("Transaction declined.", "تم رفض العملية."), a figure-less note or a recap of this purchase keeps it out.
+ */
+export function debitBesideRefusedCreditNote(message: string, options?: ParseOptions): ParsedSms | null {
+  if (completedDebitBesideCredit(message, options)) return null;
+  const sentences = settlementSentences(message);
+  if (besideDebit(message, sentences).kind !== 'refuse') return null;
+  const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0);
+  if (debits.length !== 1 || /\b(?:due|minimum|statement|outstanding)\b|مستحق|الحد\s+الادني|كشف/iu.test(debits[0].text)) return null;
+  const debitAmounts = creditAmounts(debits[0].text);
+  const notes = sentences.filter((s) => s !== debits[0] && s.text.replace(BALANCE_SEGMENT_RE, ' ').replace(/[^\p{L}]/gu, '') !== '');
+  // Every note names its own, different figure: a figure-less "This transaction has been reversed." is about the purchase.
+  if (notes.length === 0 || notes.some((s) => s.clauses.length === 0 || noteAmounts(s.text).length === 0 ||
+    creditAmounts(s.text).some((amount) => debitAmounts.includes(amount)))) return null;
+  const parsed = parseSms(debits[0].raw.trim(), undefined, options);
+  return parsed?.kind === 'transaction' && parsed.type === 'expense' ? parsed : null;
+}
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
@@ -10145,8 +10214,11 @@ export function parseSms(
   if (hasClickLinkPrompt(message) || hasLinkCallToAction(message)) return null;
   if (mentionsCredit(message) && hasConditionalDebitLead(message)) return null;
   const parsed = parseSmsCore(message, overrides, options);
+  // A debit whose own decline, failure, cancellation or reversal is stated in a separate sentence moved no money: no
+  // expense (read whole or recovered beside a credit note) and no income read from its reversal.
+  if (isVetoedByOwnMovementStatus(message, parsed)) return null;
   if (parsed?.kind === 'transaction' && parsed.type === 'expense') return parsed;
-  const pair = completedDebitBesideCredit(message, options);
+  const pair = hasOwnMovementStatusSentence(message) ? null : completedDebitBesideCredit(message, options);
   const reason = pair ? nonPostingReason(message) : null;
   if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
     !hasClickLinkPrompt(message) && !hasExplicitPersonalMoneyClaim(message) && !isBnplProviderSource(options?.sender)) {

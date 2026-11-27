@@ -20,7 +20,7 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { completedDebitBesideCredit, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, hasUnsettledPrincipal, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
+import { completedDebitBesideCredit, hasOwnMovementStatusSentence, isVetoedByOwnMovementStatus, moneyNoticeKind, nonPostingReason, hasOnlyUnsettledCredit, hasUnsettledPrincipal, parseSms, parseSmsBatch, withoutUncompletedRequestNotes, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { decideGulfNeighbourPosting, gulfNeighbourReadSource, isGulfNeighbourMarket } from '@/lib/gulf-neighbour-alerts';
@@ -1251,8 +1251,10 @@ export const createLaunchAlertSession = ({
     const holdCredit = hasUnsettledCreditToken(source);
     if (mentionsCredit(source) && hasConditionalDebitLead(source)) return null;
     const result = reader(source, sender, inspection, forcedMarket, observedAt);
+    // Every reader, semantic reconstruction included: a separate sentence that declines or reverses this movement.
+    if (isVetoedByOwnMovementStatus(source, result)) return null;
     if (result?.kind === 'transaction' && result.type === 'expense') return hasUnsettledPrincipal(source, result, true) ? null : result;
-    const pair = completedDebitBesideCredit(source, { sender });
+    const pair = hasOwnMovementStatusSentence(source) ? null : completedDebitBesideCredit(source, { sender });
     const reason = pair ? nonPostingReason(source) : null;
     // The regional grammar can preserve its known debit. A clipped fragment
     // must never upgrade an uncertified worldwide format's posting authority.

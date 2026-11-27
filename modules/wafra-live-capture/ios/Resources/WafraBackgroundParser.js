@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: 7132e38b3fba0f382829f2d0c3403656c2b8337686ff8c5df51e7b0c76ecd743
+// Generated from normal shipping TypeScript. Source SHA-256: a81333695244a6d53b6a40dbd2fb8d9dd820f516f6f8043057191a5cf9f01b28
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -4110,8 +4110,8 @@ exports.isRefundRequest = isRefundRequest;
 const CREDIT_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credit(?:ed|ing)?(?!\s+card)|salary|payroll|deposit(?:ed)?)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه|راتب)(?:ه|ها)?(?![ء-ي])/iu;
 const REFUND_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|chargeback)\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس)(?:ه|ها)?(?![ء-ي])/iu;
 const REVERSAL_NOTE_MENTION = /\b(?:refund(?:ed|ing)?|reversal|revers(?:e[ds]?|ing)|return(?:ed|ing)?|chargeback|disputes?|credited|crediting|credit(?!\s+(?:card|limit|account)))\b|(?<![ء-ي])و?(?:ب|ك|لل|ل)?(?:ال)?(?:استرداد|استرجاع|ارجاع|اعاده|عكس|اعتراض|ايداع|اضافه)(?:ه|ها)?(?![ء-ي])/iu;
-const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will)\b/iu;
-const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن)|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
+const UNSETTLED_EN = /\b(?:if|unless|subject|upon|provided|once|when|after|until|pending|awaiting|queued|queuing|queueing|scheduled|process|progress|review|request(?:s|ed)?|requir\w*|approval|approve|verification|verify|clearance|eligible|may|can|will|conditional(?:ly)?(?!\s+(?:cashback|offers?|rewards?|discounts?))|provisional(?:ly)?|(?:cheque|check|amount|credit|deposit|funds?)\s+(?:is|are)\s+under\s+(?:clearing|collection|reali[sz]ation))\b/iu;
+const UNSETTLED_AR = /(?<![ء-ي])(?:if_ar|[وف]?(?:اذا|لو|عند|بعد|فور|حين|شرط|بشرط|شريطه|رهن|مرهون|(?:في\s+|ب)?انتظار|قيد|جار[ي]?|طلب[ء-ي]*|يتطلب|تتطلب|موافقه|تحقق|تسويه|سوف|يمكن|(?:خاضع(?:ه)?|يخضع|تخضع)(?=(?:\s+[ء-ي]+){0,3}?\s+(?:(?:لل|ل|ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?عمليه\s+(?:ال)?(?:تحصيل|تحقق|تدقيق)|(?:لل|ل)?(?:موافقه|مراجعه)\s+(?:ال)?(?:تاجر|بنك))(?![ء-ي]))|مشروط(?:ه)?|مبديي(?:ه)?|تحت\s+(?:ال)?تحصيل|غير\s+متاح(?:ه)?\s+(?:حتي|لحين|الي\s+حين|بعد))|[وف]?(?:ال|بال|لل)(?:شرط|انتظار|طلب[ء-ي]*|موافقه|تحقق|تسويه))(?![ء-ي])/iu;
 const hasUnsettledCreditToken = (source) => {
     const original = normalizeCreditText(source);
     const futureArabic = /(?<![ء-ي])[وف]?س[يتنا][ء-ي]{2,}(?![ء-ي])/u.test(original);
@@ -9511,9 +9511,11 @@ const createLaunchAlertSession = ({ overrides, regionHint = null, pinnedCurrency
         if ((0, credit_settlement_guards_1.mentionsCredit)(source) && (0, credit_settlement_guards_1.hasConditionalDebitLead)(source))
             return null;
         const result = reader(source, sender, inspection, forcedMarket, observedAt);
+        if ((0, sms_parser_1.isVetoedByOwnMovementStatus)(source, result))
+            return null;
         if (result?.kind === 'transaction' && result.type === 'expense')
             return (0, sms_parser_1.hasUnsettledPrincipal)(source, result, true) ? null : result;
-        const pair = (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
+        const pair = (0, sms_parser_1.hasOwnMovementStatusSentence)(source) ? null : (0, sms_parser_1.completedDebitBesideCredit)(source, { sender });
         const reason = pair ? (0, sms_parser_1.nonPostingReason)(source) : null;
         if (pair && (pinnedCurrency === 'AED' || pinnedCurrency === 'SAR') &&
             (reason === null || reason === 'pending-processing' || reason === 'declined') && !(0, exports.hasPersonalMessagePrefix)(source, sender) &&
@@ -11408,7 +11410,7 @@ exports.hasLinkCallToAction = hasLinkCallToAction;
 "sms-parser":function(module,exports,require){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STRUCTURAL_TITLES = exports.isBnplProviderSource = exports.PARSER_BACKFILL_VERSION = exports.PARSER_VERSION = void 0;
+exports.hasOwnMovementStatusSentence = exports.STRUCTURAL_TITLES = exports.isBnplProviderSource = exports.PARSER_BACKFILL_VERSION = exports.PARSER_VERSION = void 0;
 exports.stripInvisible = stripInvisible;
 exports.foldOrthography = foldOrthography;
 exports.normalizeArabic = normalizeArabic;
@@ -11438,6 +11440,8 @@ exports.extractOutgoingTransferParties = extractOutgoingTransferParties;
 exports.parseForeignAwaitingRate = parseForeignAwaitingRate;
 exports.hasUnsettledPrincipal = hasUnsettledPrincipal;
 exports.completedDebitBesideCredit = completedDebitBesideCredit;
+exports.isVetoedByOwnMovementStatus = isVetoedByOwnMovementStatus;
+exports.debitBesideRefusedCreditNote = debitBesideRefusedCreditNote;
 exports.parseSms = parseSms;
 exports.parseSmsBatch = parseSmsBatch;
 const credit_settlement_guards_1 = require("@/lib/credit-settlement-guards");
@@ -15793,6 +15797,53 @@ function completedDebitBesideCredit(message, options) {
         return legacy;
     return (0, credit_settlement_guards_1.completedDebitBesideCredit)(message, clause => prove(clause, true));
 }
+const OWN_MOVEMENT_STATUS_EN = /^(?:(?:the|this|your)\s+)?(?:card\s+|pos\s+)?(?:transaction|purchase|payment|txn|charge|authori[sz]ation)\s+(?:(?:has|have)\s+been\s+|was\s+|is\s+|got\s+)?(?:declined|failed|unsuccessful|rejected|cancell?ed|reversed|reverted|voided|not\s+(?:been\s+)?(?:completed|processed|successful|approved))(?=\s*$|\s+(?:due\s+to|because|by|as\s+per|at\s+the\s+request)\b)|^(?:(?:transaction|txn)\s+)?status\s*\|?\s*(?:declined|failed|unsuccessful|rejected|cancell?ed|reversed|reverted|voided)(?=\s*$|\s+(?:due\s+to|because|by|as\s+per|at\s+the\s+request)\b)/iu;
+const OWN_MOVEMENT_STATUS_AR = /^و?(?:قد\s+)?(?:تم|تمت)\s+(?:رفض|عكس|الغاء|استرجاع)\s+(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?:\s+(?:ال)?شراء)?(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?:\s+(?:ال)?شراء)?\s+(?:مرفوضه|ملغاه|ملغيه|معكوسه|فاشله|غير\s+(?:ناجحه|مكتمله)|لم\s+(?:تتم|تكتمل|تنجح))(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^لم\s+(?:تتم|تكتمل|تنجح)\s+(?:هذه\s+)?(?:ال)?(?:عمليه|معامله)(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))|^(?:فشلت|رفضت|الغيت)\s+(?:ال)?(?:عمليه|معامله)(?=\s*$|\s+(?:بسبب|لعدم|من\s+قبل|بناء))/u;
+const STATUS_DATE_OR_REFERENCE_RE = /\b(?:on|dated)\s+\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b|\(?\s*\b(?:ref(?:erence)?|rrn|auth(?:ori[sz]ation)?\s+code)\b\.?\s*(?:no\.?|#)?\s*\|?\s*[a-z0-9-]+\s*\)?|بتاريخ\s+[\d/.-]+|(?:رقم\s+)?(?:المرجع|مرجع)\s*\|?\s*[\da-z-]+/giu;
+const PROMISED_RETURN_RE = /\b(?:will|shall)\s+(?:be\s+)?(?:reversed|refunded|returned|credited|reverted|released|reflect(?:ed)?|reverse|refund|return|credit)\b|(?<![ء-ي])(?:سيتم|سوف\s+يتم)\s+(?:ال)?(?:ارجاع|استرداد|عكس|اعاده|ايداع|استرجاع|رد)(?![ء-ي])|(?<![ء-ي])سيعاد(?![ء-ي])/iu;
+const CREDITED_SENTENCE_RE = /\b(?:credited|refunded|returned|reverted|deposited|received|refunds?|reversals?|chargebacks?)\b|(?<![ء-ي])(?:تم|تمت)\s+(?:ال)?(?:استرداد|ايداع|اضافه|ارجاع|استرجاع|رد)(?![ء-ي])|(?<![ء-ي])(?:[بل]?ال|[بل])?(?:مسترد|استرداد|استرجاع)(?![ء-ي])/iu;
+const STATED_MONEY_RE = /(?:\b[a-z]{3}|[$€£])\s?\d|\d[\d,]*\.\d{2}\b|\d\s*(?:درهم|دراهم|ريال)/iu;
+const USED_CARD_RE = /\b(?:was|has\s+been)\s+used\b|\bused\s+(?:at|for)\b/iu;
+function ownMovementStatus(message) {
+    const text = message.slice(0, 4000).replace(/[^\n.!?؟]*[?؟]/gu, ' ').replace(/\s*\n+\s*/g, '. ');
+    const sentences = (0, credit_settlement_guards_1.normalizeCreditText)(text).split('||').map((part) => part.replace(/^[\s|]+/u, '').trim()).filter(Boolean);
+    const isStatus = (sentence) => {
+        const bare = sentence.replace(STATUS_DATE_OR_REFERENCE_RE, ' ').replace(/[\s|()]+$/u, '').trim();
+        return !/\d/u.test(bare) && (OWN_MOVEMENT_STATUS_EN.test(bare) || OWN_MOVEMENT_STATUS_AR.test(bare));
+    };
+    if (!sentences.some(isStatus) || sentences.some((sentence) => PROMISED_RETURN_RE.test(sentence)))
+        return { expense: false, income: false };
+    const others = sentences.filter((sentence) => !isStatus(sentence));
+    const credited = others.filter((sentence) => CREDITED_SENTENCE_RE.test(sentence));
+    const debit = others.some((sentence) => !credited.includes(sentence) && STATED_MONEY_RE.test(sentence) &&
+        (CREDIT_SETTLEMENT_DEBIT_RE.test(sentence) || USED_CARD_RE.test(sentence)));
+    return { expense: debit, income: debit && credited.length === 0 };
+}
+const hasOwnMovementStatusSentence = (message) => ownMovementStatus(message).expense;
+exports.hasOwnMovementStatusSentence = hasOwnMovementStatusSentence;
+function isVetoedByOwnMovementStatus(message, parsed) {
+    if (parsed?.kind !== 'transaction')
+        return false;
+    const status = ownMovementStatus(message);
+    return parsed.type === 'expense' ? status.expense : status.income;
+}
+function debitBesideRefusedCreditNote(message, options) {
+    if (completedDebitBesideCredit(message, options))
+        return null;
+    const sentences = settlementSentences(message);
+    if (besideDebit(message, sentences).kind !== 'refuse')
+        return null;
+    const debits = sentences.filter((s) => s.clauses.length === 0 && CREDIT_SETTLEMENT_DEBIT_RE.test(s.text) && creditAmounts(s.text).length > 0);
+    if (debits.length !== 1 || /\b(?:due|minimum|statement|outstanding)\b|مستحق|الحد\s+الادني|كشف/iu.test(debits[0].text))
+        return null;
+    const debitAmounts = creditAmounts(debits[0].text);
+    const notes = sentences.filter((s) => s !== debits[0] && s.text.replace(BALANCE_SEGMENT_RE, ' ').replace(/[^\p{L}]/gu, '') !== '');
+    if (notes.length === 0 || notes.some((s) => s.clauses.length === 0 || noteAmounts(s.text).length === 0 ||
+        creditAmounts(s.text).some((amount) => debitAmounts.includes(amount))))
+        return null;
+    const parsed = parseSms(debits[0].raw.trim(), undefined, options);
+    return parsed?.kind === 'transaction' && parsed.type === 'expense' ? parsed : null;
+}
 function parseSms(message, overrides, options) {
     if ((0, principal_posting_guards_1.hasSelectedPendingTransaction)(message))
         return null;
@@ -15802,9 +15853,11 @@ function parseSms(message, overrides, options) {
     if ((0, credit_settlement_guards_1.mentionsCredit)(message) && (0, credit_settlement_guards_1.hasConditionalDebitLead)(message))
         return null;
     const parsed = parseSmsCore(message, overrides, options);
+    if (isVetoedByOwnMovementStatus(message, parsed))
+        return null;
     if (parsed?.kind === 'transaction' && parsed.type === 'expense')
         return parsed;
-    const pair = completedDebitBesideCredit(message, options);
+    const pair = (0, exports.hasOwnMovementStatusSentence)(message) ? null : completedDebitBesideCredit(message, options);
     const reason = pair ? nonPostingReason(message) : null;
     if (pair && (reason === null || reason === 'pending-processing' || reason === 'declined') && !hasActionableRefundRequest(message) &&
         !(0, principal_posting_guards_1.hasClickLinkPrompt)(message) && !(0, principal_posting_guards_1.hasExplicitPersonalMoneyClaim)(message) && !(0, bnpl_providers_1.isBnplProviderSource)(options?.sender)) {

@@ -415,6 +415,86 @@ const CONTROLS = [
   ...[
     'نود اعلامك، ان تم استرداد مبلغ 250.00 درهم إلى بطاقتك. في حال لم تقم بأي إجراء فسيتم إضافة المبلغ تلقائياً.',
   ].map((body) => [body, 'NO_POST', 'C29 a "لم تقم" condition about something other than this transaction answers ان']),
+  // 1.0.1 (#244 table, #238 second gap): a refund request accepted, "أنه إن …", a condition in the next sentence, and the
+  // trailing and pending credit forms (EN and AR, tashkeel included) never post; Arabic "subject to" (خاضع/يخضع), "conditional"
+  // (مشروط), "provisional" (مبدئي), "under collection" and English "conditional" / "under clearing" are conditions too.
+  ...[
+    'Refund request of AED 250.00 has been accepted and will reflect within 7 working days.',
+    'نود إعلامك أنه إن تم استرداد مبلغ 250.00 درهم إلى بطاقتك، ستصلك رسالة.',
+    'AED 250.00 has been credited to your account ending 1234. The cheque is subject to clearance.',
+    'AED 250.00 has been credited to your account ending 1234 subject to clearance.',
+    'AED 250.00 has been refunded to your card ending 1234 upon merchant confirmation.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234 عند التحقق.',
+    'إنْ تمَّ استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'نَوَدُّ إعلامَك، إنْ تمَّ استرداد مبلغ 250.00 درهم إلى بطاقتك ستصلك رسالة.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. الشيك خاضع للتحصيل.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234 خاضع للتحصيل.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. يخضع المبلغ لموافقة التاجر.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. الإيداع مشروط بتحصيل الشيك.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. هذا إيداع مبدئي.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. الشيك تحت التحصيل.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. المبلغ غير متاح حتى تحصيل الشيك.',
+    'AED 250.00 has been credited to your account ending 1234. This credit is conditional.',
+    'AED 250.00 has been credited to your account ending 1234. The cheque is under clearing.',
+  ].map((body) => [body, 'NO_POST', 'C30 a request accepted, an answered إن after أنه, or a credit subject to a condition (EN/AR)']),
+  ...[
+    'Cheque cleared: AED 250.00 has been credited to your account ending 1234.',
+    'Refund of AED 250.00 has been credited to your card ending 1234. Thank you for banking with us.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. الرصيد المتاح 900.00 درهم.',
+    'تم استرداد مبلغ 250.00 درهم إلى بطاقتك المنتهية بـ 1234. شكراً لتعاملكم معنا.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. للاستفسار يرجى الاتصال على 600540000.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234 بطلب من شركة الأمل.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234 لتسوية المطالبة رقم 5566.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. تخضع جميع الخدمات للشروط والأحكام.',
+    'تم إيداع مبلغ 250.00 درهم في حسابك المنتهي بـ 1234. خدمة الرسائل غير متاحة للرد.',
+    'AED 250.00 has been credited to your account ending 1234. Note: cheques under clearing are not included in your available balance.',
+  ].map((body) => [body, 'INCOME_REFUND', 'C30 a completed credit with a cleared, balance, courtesy, terms or "at the request of" line keeps its income']),
+  // #238 D1 with other debit wordings: the purchase beside a refund note of another figure reaches Review, never income.
+  ...[
+    'Debit Card Purchase of AED 250.00 at NOON.COM, card ending 1234. A refund of AED 100.00 has been credited to your card.',
+    'AED 250.00 has been deducted from your account ending 1234 at NOON.COM. Refund of AED 100.00 credited to your card.',
+    'تمت عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك المنتهية بـ 1234. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.',
+    'تم استخدام بطاقتك المنتهية بـ 1234 لشراء بمبلغ 250.00 درهم لدى NOON. تم إيداع مبلغ 100.00 درهم في حسابك.',
+    'عملية شراء بمبلغ 250.00 درهم لدى NOON بواسطة بطاقتك المنتهية بـ 1234. سيتم استرداد مبلغ 100.00 درهم خلال 7 أيام.',
+  ].map((body) => [body, 'REVIEW', 'C31 D1 with a nominal or other debit wording: a second figure beside the debit']),
+  ...[
+    'Debit Card Purchase of AED 250.00 at NOON.COM. Transaction declined due to insufficient funds. A refund of AED 100.00 has been credited to your card.',
+    'تمت عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك المنتهية بـ 1234. تم رفض العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.',
+  ].map((body) => [body, 'NO_POST', 'C31 a declined purchase beside a refund of another figure posts nothing']),
+  // 1.0.1 follow-up: a debit whose decline, failure, cancellation or reversal is its own sentence moved no money, as when
+  // the same words sit in the debit's sentence; with or without a refund note of another figure.
+  ...[
+    `${DEBIT_EN} Transaction declined. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} This transaction has been reversed. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} Transaction failed. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} Transaction cancelled. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} This transaction has been reversed.`,
+    `${DEBIT_EN} Transaction cancelled.`,
+    `${DEBIT_AR} تم رفض العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} تم عكس العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} لم تتم العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} تم عكس العملية.`,
+    `${DEBIT_AR} تم إلغاء العملية.`,
+  ].map((body) => [body, 'NO_POST', 'C32 a debit declined, failed, cancelled or reversed in a sentence of its own']),
+  ...[
+    `${DEBIT_EN} To dispute a transaction call 600540000.`,
+    `${DEBIT_EN} If this transaction was not made by you, call 600540000.`,
+    `${DEBIT_EN} Your refund request was declined.`,
+    `${DEBIT_AR} في حال لم تقم بهذه العملية يرجى الاتصال بنا.`,
+    `${DEBIT_AR} تمت العملية بنجاح.`,
+  ].map((body) => [body, 'EXPENSE', 'C32 an unrelated or other-subject sentence after the debit leaves it posted']),
+  // Review of the follow-up: money that will come back has left; a question or a status-like footer is a help line.
+  ...[
+    `${DEBIT_EN} Transaction failed. The amount will be reversed within 7 working days.`,
+    `${DEBIT_AR} لم تتم العملية. سيتم إرجاع المبلغ خلال 7 أيام عمل.`,
+    `${DEBIT_EN} Transaction cancelled? Refunds appear within 5 days.`,
+    `${DEBIT_AR} تم إلغاء العملية؟ تواصل مع التاجر.`,
+    `${DEBIT_EN} Payment reversed transactions are shown in the app.`,
+  ].map((body) => [body, 'EXPENSE', 'C33 a promised return, a question or a footer after the debit leaves it posted']),
+  ...[
+    `${DEBIT_EN.replace(/\.$/, '')}\nThis transaction has been reversed`,
+    `${DEBIT_AR.replace(/\.$/, '')}\nتم عكس العملية`,
+  ].map((body) => [body, 'NO_POST', 'C33 the status on a line of its own']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────
