@@ -31,6 +31,15 @@ prominent disclosure immediately before each Android permission prompt, a deny
 path that leaves manual entry usable, an approved historical scan, and a live
 supported bank alert creating one ledger entry.
 
+## Foreground service permissions declaration
+
+`modules/sms-reader` declares `FOREGROUND_SERVICE_DATA_SYNC` with
+`foregroundServiceType="dataSync"` for the user-started import of past SMS
+history, which must keep running while the user leaves the app. The Play
+Console declaration (App content → Foreground service permissions) was
+completed on 2026-11-06 and is listed as actioned. Update it if a new
+foreground service type is added.
+
 ## Data Safety draft
 
 Do **not** submit “No data collected” without reviewing the exact enabled SDKs
