@@ -18,6 +18,7 @@ const ok = (name, condition, detail = '') => {
 (async () => {
   const root = path.resolve(__dirname, '../..');
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-package-'));
+  const appVersion = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo.version;
   const malformedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-malformed-'));
   const assetsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-store-assets-'));
   const { prepareStorePackage } = await import('../lib/store-package.mjs');
@@ -51,7 +52,7 @@ const ok = (name, condition, detail = '') => {
       'utf8',
     ));
     const ascVersion = JSON.parse(fs.readFileSync(
-      path.join(output, 'apple/asc-metadata/version/1.0.0/en-US.json'),
+      path.join(output, 'apple/asc-metadata/version', appVersion, 'en-US.json'),
       'utf8',
     ));
     ok('canonical metadata generates only the required Apple launch locale',
@@ -72,7 +73,7 @@ const ok = (name, condition, detail = '') => {
       !fs.existsSync(path.join(output, 'apple/metadata/ar-SA')) &&
       !fs.existsSync(path.join(output, 'google/metadata/android/ar')));
     ok('generated manifest pins metadata to the configured App Store version',
-      manifest.appStoreVersion === '1.0.0', manifest.appStoreVersion);
+      manifest.appStoreVersion === appVersion, manifest.appStoreVersion);
     ok('metadata-only preparation never implies screenshots were reviewed',
       manifest.assetsIncluded === false);
     const sourcePricing = JSON.parse(fs.readFileSync(path.join(root, 'docs/store-pricing.json'), 'utf8'));
