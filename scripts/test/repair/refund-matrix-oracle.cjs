@@ -461,6 +461,40 @@ const CONTROLS = [
     'Debit Card Purchase of AED 250.00 at NOON.COM. Transaction declined due to insufficient funds. A refund of AED 100.00 has been credited to your card.',
     'تمت عملية شراء بمبلغ 250.00 درهم لدى NOON باستخدام بطاقتك المنتهية بـ 1234. تم رفض العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.',
   ].map((body) => [body, 'NO_POST', 'C31 a declined purchase beside a refund of another figure posts nothing']),
+  // 1.0.1 follow-up: a debit whose decline, failure, cancellation or reversal is its own sentence moved no money, as when
+  // the same words sit in the debit's sentence; with or without a refund note of another figure.
+  ...[
+    `${DEBIT_EN} Transaction declined. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} This transaction has been reversed. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} Transaction failed. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} Transaction cancelled. A refund of AED 100.00 has been credited to your card.`,
+    `${DEBIT_EN} This transaction has been reversed.`,
+    `${DEBIT_EN} Transaction cancelled.`,
+    `${DEBIT_AR} تم رفض العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} تم عكس العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} لم تتم العملية. تم استرداد مبلغ 100.00 درهم إلى بطاقتك.`,
+    `${DEBIT_AR} تم عكس العملية.`,
+    `${DEBIT_AR} تم إلغاء العملية.`,
+  ].map((body) => [body, 'NO_POST', 'C32 a debit declined, failed, cancelled or reversed in a sentence of its own']),
+  ...[
+    `${DEBIT_EN} To dispute a transaction call 600540000.`,
+    `${DEBIT_EN} If this transaction was not made by you, call 600540000.`,
+    `${DEBIT_EN} Your refund request was declined.`,
+    `${DEBIT_AR} في حال لم تقم بهذه العملية يرجى الاتصال بنا.`,
+    `${DEBIT_AR} تمت العملية بنجاح.`,
+  ].map((body) => [body, 'EXPENSE', 'C32 an unrelated or other-subject sentence after the debit leaves it posted']),
+  // Review of the follow-up: money that will come back has left; a question or a status-like footer is a help line.
+  ...[
+    `${DEBIT_EN} Transaction failed. The amount will be reversed within 7 working days.`,
+    `${DEBIT_AR} لم تتم العملية. سيتم إرجاع المبلغ خلال 7 أيام عمل.`,
+    `${DEBIT_EN} Transaction cancelled? Refunds appear within 5 days.`,
+    `${DEBIT_AR} تم إلغاء العملية؟ تواصل مع التاجر.`,
+    `${DEBIT_EN} Payment reversed transactions are shown in the app.`,
+  ].map((body) => [body, 'EXPENSE', 'C33 a promised return, a question or a footer after the debit leaves it posted']),
+  ...[
+    `${DEBIT_EN.replace(/\.$/, '')}\nThis transaction has been reversed`,
+    `${DEBIT_AR.replace(/\.$/, '')}\nتم عكس العملية`,
+  ].map((body) => [body, 'NO_POST', 'C33 the status on a line of its own']),
 ];
 
 // ── Case selection ───────────────────────────────────────────────────────────────────────────────────────────────────

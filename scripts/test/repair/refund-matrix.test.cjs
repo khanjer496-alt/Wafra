@@ -66,8 +66,10 @@ const NATIVE_IGNORED_CONTROL_ROWS = new Set(['CTL-05402', 'CTL-05403', 'CTL-0540
 // Row count and sha256 of the oracle's "id<TAB>expected<TAB>body" lines, joined by newlines (Reviewer, #217 Low 1; the
 // body since #225's review, so a row's text cannot be edited unseen). 1.0.1 (#238, #244) appends 34 control rows,
 // CTL-05587..05620 (C30 NO_POST and INCOME_REFUND, C31 REVIEW and NO_POST); rows 1..5586 keep their ids, labels and
-// bodies (their hash is still 8622534b…e205c7).
-const ORACLE_PIN = { rows: 5620, sha256: 'c3ddcc7d4101c72d43070d580964610a8c327110935d32f87b2e1b017b4aaa83' };
+// bodies (their hash is still 8622534b…e205c7). The 1.0.1 follow-up appends 23 more, CTL-05621..05643 (C32 and C33
+// NO_POST and EXPENSE: a debit declined or reversed in a sentence or line of its own, and its paired negatives); rows
+// 1..5620 keep their hash c3ddcc7d….
+const ORACLE_PIN = { rows: 5643, sha256: 'd49a589e22bb62ab22bdada80f2e22a255794d2b3b5e212367399fe48e822565' };
 
 const PATHS = ['parseSms', 'session', 'native'];
 // The synthetic completed receipts are dated Nov 12/13. Observe them after

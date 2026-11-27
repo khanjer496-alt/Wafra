@@ -30,6 +30,7 @@ import { isUnpostedCardBalanceClaim, isCompletedCardBalanceReceipt, blankWordLin
 import {
   completedDebitBesideCredit,
   debitBesideRefusedCreditNote,
+  hasOwnMovementStatusSentence,
   nonPostingReason,
   hasOnlyUnsettledCredit,
   parseForeignAwaitingRate,
@@ -1012,6 +1013,11 @@ function inspectSourceFreeRefusedAlertCore(input: {
   // money through an unparsed-template fallback. This is no ledger deletion.
   if (isUnpostedCardBalanceClaim(source)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(source);
+  // A debit whose own decline, failure, cancellation or reversal is a separate sentence did not stand. As for "… was
+  // declined" in one sentence there is nothing to review; another refusal reason keeps its own outcome.
+  if ((reason === null || reason === 'pending-processing' || reason === 'declined') && hasOwnMovementStatusSentence(input.source)) {
+    return { kind: 'declined', reason: 'declined' };
+  }
   if ((reason === null || reason === 'pending-processing' || reason === 'declined') &&
     completedDebitBesideCredit(input.source, { sender: input.sender }) && !/https?:\/\/|www\./iu.test(input.source)) {
     const accepted = input.acceptedExpense?.kind === 'transaction' && input.acceptedExpense.type === 'expense';
