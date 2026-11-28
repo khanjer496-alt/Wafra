@@ -19,6 +19,16 @@ const MERCHANTS: readonly (VerifiedMerchantIdentity & { aliases: readonly string
   { canonicalName: 'Starbucks', domain: 'starbucks.com', aliases: ['starbucks'] },
 ];
 
+// Merchants whose Brandfetch name match is a different company (checked by eye),
+// with no correct logo on any domain Brandfetch has. They keep their letter.
+const NO_RELIABLE_LOGO: readonly string[] = [
+  'keeta', 'keeta food', 'keeta delivery', // keeta.com on Brandfetch is not the food-delivery app
+];
+
+export function hasNoReliableLogo(candidate: string): boolean {
+  return NO_RELIABLE_LOGO.includes(candidate.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim());
+}
+
 export function verifiedMerchantIdentity(candidate: string): VerifiedMerchantIdentity | null {
   const key = candidate.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
   const identity = MERCHANTS.find(value => value.aliases.includes(key));

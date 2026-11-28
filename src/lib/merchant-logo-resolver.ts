@@ -1,5 +1,6 @@
 import { isLogoCacheGenerationCurrent, logoCacheGeneration, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
-import { brandfetchRequestHeaders, brandfetchSearchUrl, verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
+import { bankBrandForName } from '@/lib/markets';
+import { brandfetchRequestHeaders, brandfetchSearchUrl, hasNoReliableLogo, verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
 
 export interface RemoteMerchantLogo {
   readonly id: string;
@@ -67,6 +68,7 @@ const LOCATION_TAIL = /\s+(?:dubai|dxb|abu dhabi|sharjah|ajman|al ain|riyadh|jed
 const TERMINAL_TAIL = /\s+(?:store|branch|shop|terminal|kiosk|pos|t\d+|#?\d{3,12})$/iu;
 const PAYMENT_PREFIX = /^(?:(?:pos|purchase|card purchase|debit card purchase|credit card purchase|payment|paid to|spent at|transaction at|visa|mastercard|mada)\s*[:*\-]?\s*)+/iu;
 const PROCESSOR_PREFIX = /^(?:paypal|stripe|square|sq|sumup|adyen|opn|2c2p|tst|sp)\s*[*:/-]\s*/iu;
+const BANK_ROW = /\b(?:card|account|acct|bank|loan|savings|current|credit|debit|covered)\b/iu;
 const GENERIC_ONLY = /^(?:shop|store|market|restaurant|cafe|coffee|payment|purchase|merchant|online|retail|supermarket|grocery|food|services?|trading|general trading)$/iu;
 const NON_MERCHANT_ONLY = /^(?:(?:incoming|outgoing|bank|own|internal)?\s*(?:money\s+)?transfer|(?:atm|cash)\s+withdrawal|(?:credit\s+)?card\s+payment|payment\s+(?:received|sent)|salary|cash\s+deposit|refund|reversal)$/iu;
 const SAFE_BRAND_DESCRIPTOR_WORDS = new Set([
@@ -264,7 +266,13 @@ export async function resolveRemoteMerchantLogo(title: string): Promise<RemoteMe
   if (generation === null) return null;
   const candidate = merchantBrandCandidate(title);
   if (!candidate) return null;
-  const identity = candidate ? verifiedMerchantIdentity(candidate) : null;
+  // A card or account row ("ADCB Credit Card •2518") is its bank: use the bank's
+  // reviewed domain from the market table rather than searching the whole title.
+  const bank = BANK_ROW.test(title) || normalized(candidate) === normalized(bankBrandForName(candidate)?.name ?? '')
+    ? bankBrandForName(title) : null;
+  const identity = verifiedMerchantIdentity(candidate)
+    ?? (bank?.domain ? { canonicalName: bank.name, domain: bank.domain } : null);
+  if (!identity && hasNoReliableLogo(candidate)) return null;
   if (identity) {
     const logoUrl = verifiedLogoUrl(identity.domain);
     return logoUrl ? Object.freeze({

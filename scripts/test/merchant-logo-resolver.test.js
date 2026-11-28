@@ -102,6 +102,14 @@ const response = rows => ({ ok: true, json: async () => rows });
     assert.equal(m.merchantBrandCandidate(generic), null, `${generic} names no brand, so it is never searched`);
   }
   assert.equal(m.merchantBrandCandidate('Aster Pharmacy'), 'Aster Pharmacy', 'a named pharmacy is still looked up');
+  const callsBefore = calls.length;
+  for (const [title, domain] of [['ADCB Credit Card •2518', 'adcb.com'], ['FAB Credit Card', 'bankfab.com'], ['ADCB', 'adcb.com']]) {
+    const value = await m.resolveRemoteMerchantLogo(title);
+    assert.equal(value?.domain, domain, `${title} uses its bank's reviewed domain`);
+    assert.equal(value?.source, 'verified');
+  }
+  assert.equal(await m.resolveRemoteMerchantLogo('Keeta'), null, 'Keeta keeps its letter: Brandfetch has another company under that name');
+  assert.equal(calls.length, callsBefore, 'bank rows and blocked names never spend a search');
 
   const aseer = await m.resolveRemoteMerchantLogo('Payment: Aseer Time Dubai AED 55.00 card ****1234');
   assert.equal(aseer?.domain, 'aseertime.com');
