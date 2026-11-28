@@ -63,7 +63,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: Export and test upgraded consent with no external artwork requests
+      - name: Export and test online logos by default with Brandfetch stubbed
         run: |
           node node_modules/expo/bin/cli export --platform web --output-dir "$RUNNER_TEMP/artwork-web" --max-workers 1
           node scripts/e2e/serve.mjs "$RUNNER_TEMP/artwork-web" 18172 > "$RUNNER_TEMP/artwork-server.log" 2>&1 &
