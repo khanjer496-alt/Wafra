@@ -39,6 +39,8 @@ function harness(platform) {
   const data = new Map();
   const modules = new Map();
   let fetchCalls = 0;
+  // Set to a promise to hold Brand Search responses until a test releases them.
+  const searches = { gate: null };
   let storageReads = 0;
   let databaseDeletes = 0;
   const storage = {
@@ -58,6 +60,7 @@ function harness(platform) {
     'expo-crypto': {},
     'expo-secure-store': { async deleteItemAsync() {} },
     'expo-sqlite': { async deleteDatabaseAsync() { databaseDeletes++; } },
+    'expo-constants': { __esModule: true, default: { expoConfig: { extra: { privacyPolicyUrl: 'https://wafra-app-azg.pages.dev/privacy' } } } },
   };
   function load(name) {
     if (Object.hasOwn(dependencies, name)) return dependencies[name];
@@ -71,9 +74,10 @@ function harness(platform) {
     const exports = {};
     modules.set(name, exports);
     vm.runInNewContext(result.outputText, {
-      exports, require: load, process: { env: { EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID: 'fixture-client' } },
+      exports, require: load, process: { env: { EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID: 'fixture-client' } }, URL,
       fetch: async url => {
         fetchCalls++;
+        if (searches.gate) await searches.gate;
         if (String(url).includes('Aseer%20Time')) return {
           ok: true, json: async () => [{ name: 'Aseer Time', domain: 'aseertime.com', claimed: false }],
         };
@@ -89,7 +93,7 @@ function harness(platform) {
   load('@/lib/logo-cache-lifecycle').setLogoLookupsAllowed(true);
   const state = load(platform !== 'web' ? '@/lib/state-storage.native' : '@/lib/state-storage').stateStorage;
   return {
-    data, storage, state, load,
+    data, storage, state, load, searches,
     get databaseDeletes() { return databaseDeletes; },
     get storageReads() { return storageReads; },
     get fetchCalls() { return fetchCalls; },
@@ -113,50 +117,49 @@ for (const platform of ['web', 'native']) {
     assert.deepEqual([...h.data.keys()].sort(), ['other-app:key', 'wafra:bank-logo-preference', LEDGER + '-other'].sort());
   });
 
+  test(`${platform}: lookups keep results in session memory only and never touch device storage`, async () => {
+    const h = harness(platform);
+    const resolvers = h.resolvers();
+    for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
+    for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
+    assert.equal(h.fetchCalls, 2, 'one search per name per session');
+    assert.equal(h.storageReads, 0, 'Brand Search results are never read from storage');
+    assert.deepEqual([...h.data.keys()], [], 'Brand Search results are never written to storage');
+  });
+
   test(`${platform}: erase invalidates merchant and bank memory entries`, async () => {
     const h = harness(platform);
     const resolvers = h.resolvers();
-    for (const entry of resolvers) h.data.set(entry.key, entry.record);
-    for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
-    const reads = h.storageReads;
     for (const entry of resolvers) await entry.resolve(entry.name);
-    assert.equal(h.storageReads, reads, 'warm identities use memory');
+    assert.equal(h.fetchCalls, 2);
     await h.state.destroy(LEDGER);
     for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
-    assert.equal(h.storageReads, reads + 2, 'fresh post-erase identities must not reuse erased memory');
-    assert.equal(h.fetchCalls, 2, 'post-erase lookups search again after their caches are removed');
+    assert.equal(h.fetchCalls, 4, 'post-erase lookups search again: erased memory is not reused');
+  });
+
+  test(`${platform}: records persisted by older builds are ignored and not reused`, async () => {
+    const h = harness(platform);
+    h.data.set(MERCHANT_KEY, MERCHANT_RECORD);
+    h.data.set(BANK_KEY, BANK_RECORD);
+    for (const entry of h.resolvers()) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
+    assert.equal(h.fetchCalls, 2, 'a stored record is never a substitute for this session\'s search');
+    assert.equal(h.storageReads, 0);
   });
 
   for (const kind of [0, 1]) {
-    for (const cached of [false, true]) {
-      test(`${platform}: pending ${kind ? 'bank' : 'merchant'} ${cached ? 'cached identity' : 'cache miss'} cannot repopulate after erase`, async () => {
-        const h = harness(platform);
-        const entry = h.resolvers()[kind];
-        const read = deferred();
-        h.storage.getItem = () => read.promise;
-        const lookup = entry.resolve(entry.name);
-        await turn();
-        await h.state.destroy(LEDGER);
-        read.resolve(cached ? entry.record : null);
-        assert.equal(await lookup, null, 'an erased lookup must not publish its old result');
-        assert.equal(h.data.has(entry.key), false);
-        assert.equal(h.fetchCalls, 0);
-      });
-    }
-
-    test(`${platform}: erase drains an already-started ${kind ? 'bank' : 'merchant'} write before removing its key`, async () => {
+    test(`${platform}: a ${kind ? 'bank' : 'merchant'} search in flight during erase cannot publish or repopulate memory`, async () => {
       const h = harness(platform);
       const entry = h.resolvers()[kind];
-      const write = deferred();
-      const started = deferred();
-      h.storage.setItem = async (key, value) => { started.resolve(); await write.promise; h.data.set(key, value); };
+      const release = deferred();
+      h.searches.gate = release.promise;
       const lookup = entry.resolve(entry.name);
-      await started.promise;
-      const erase = h.state.destroy(LEDGER);
       await turn();
-      write.resolve();
-      await Promise.all([lookup, erase]);
-      assert.equal(h.data.has(entry.key), false, 'late storage completion must be removed');
+      await h.state.destroy(LEDGER);
+      release.resolve();
+      assert.equal(await lookup, null, 'an erased lookup must not publish its result');
+      h.searches.gate = null;
+      assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
+      assert.equal(h.fetchCalls, 2, 'the erased result was not kept in memory');
     });
   }
 
@@ -172,6 +175,17 @@ for (const platform of ['web', 'native']) {
     assert.equal(h.storageReads, 0);
     keys.resolve([]);
     await erase;
+  });
+
+  test(`${platform}: upgrade cleanup deletes stored search results from older builds, preserving unrelated keys`, async () => {
+    const h = harness(platform);
+    for (const key of [MERCHANT_KEY, 'wafra:merchant-logo:v1:old']) h.data.set(key, MERCHANT_RECORD);
+    for (const key of [BANK_KEY, 'wafra:bank-logo:v0:old']) h.data.set(key, BANK_RECORD);
+    for (const key of [LEDGER, 'other-app:key', 'wafra:bank-logo-preference']) h.data.set(key, 'keep');
+    await h.load('@/lib/logo-cache-lifecycle').removeStoredLogoSearchResults();
+    assert.deepEqual([...h.data.keys()].sort(), [LEDGER, 'other-app:key', 'wafra:bank-logo-preference'].sort());
+    h.storage.getAllKeys = async () => { throw new Error('storage unavailable'); };
+    await h.load('@/lib/logo-cache-lifecycle').removeStoredLogoSearchResults();
   });
 
   test(`${platform}: a failed cache removal rejects erase before deleting ledger data and supports retry`, async () => {
@@ -191,40 +205,37 @@ for (const platform of ['web', 'native']) {
     assert.equal(h.data.size, 0);
   });
 
-  test(`${platform}: a stale lookup finishing cannot remove a new generation's pending read`, async () => {
+  test(`${platform}: a stale lookup finishing cannot remove a new generation's pending search`, async () => {
     const h = harness(platform);
     const entry = h.resolvers()[0];
-    const oldRead = deferred();
-    const newRead = deferred();
-    let reads = 0;
-    h.storage.getItem = () => ++reads === 1 ? oldRead.promise : newRead.promise;
+    const oldSearch = deferred();
+    h.searches.gate = oldSearch.promise;
     const oldLookup = entry.resolve(entry.name);
     await turn();
     await h.state.destroy(LEDGER);
+    const newSearch = deferred();
+    h.searches.gate = newSearch.promise;
     const newLookup = entry.resolve(entry.name);
     await turn();
-    oldRead.resolve(entry.record);
+    oldSearch.resolve();
     assert.equal(await oldLookup, null);
     const sameNewLookup = entry.resolve(entry.name);
     await turn();
-    assert.equal(reads, 2, 'the new lookup must remain deduplicated');
-    newRead.resolve(null);
+    assert.equal(h.fetchCalls, 2, 'the new lookup must remain deduplicated');
+    newSearch.resolve();
     assert.equal((await newLookup).domain, entry.domain);
     assert.equal((await sameNewLookup).domain, entry.domain);
-    assert.equal(h.fetchCalls, 1, 'the new generation performs one fresh search after its empty cache read');
   });
 }
 
-test('Android resolves cached merchant and bank logos like iPhone', async () => {
+test('Android resolves merchant and bank logos like iPhone', async () => {
   const h = harness('android');
-  h.data.set(MERCHANT_KEY, MERCHANT_RECORD);
-  h.data.set(BANK_KEY, BANK_RECORD);
   assert.equal((await h.load('@/lib/merchant-logo-resolver').resolveRemoteMerchantLogo('Aseer Time')).domain, 'aseertime.com');
   assert.equal((await h.load('@/lib/bank-logo-resolver').resolveBankLogo('Bank of America')).domain, 'bankofamerica.com');
-  assert.equal(h.fetchCalls, 0, 'cached identities need no search');
+  assert.equal(h.fetchCalls, 2);
 });
 
-test('turning lookups off (local-only mode) on Android skips cache, known domains and searches', async () => {
+test('turning lookups off (local-only mode) on Android skips memory, known domains and searches', async () => {
   const h = harness('android');
   h.load('@/lib/logo-cache-lifecycle').setLogoLookupsAllowed(false);
   h.data.set(MERCHANT_KEY, MERCHANT_RECORD);

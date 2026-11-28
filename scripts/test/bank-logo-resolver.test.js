@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '../..');
+const APP_EXTRA = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo.extra;
 function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), data = new Map() } = {}) {
   const storage = {
     async getItem(k) { return data.get(k) ?? null; },
@@ -15,6 +16,8 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
   function requireModule(id) {
     if (id === 'react-native') return { Platform: { OS: 'ios' } };
     if (id === '@react-native-async-storage/async-storage') return storage;
+    // The real app.json `extra`, as expo-constants exposes it on device.
+    if (id === 'expo-constants') return { __esModule: true, default: { expoConfig: { extra: APP_EXTRA } } };
     if (modules.has(id)) return modules.get(id);
     assert.ok(id.startsWith('@/lib/'), id);
     const filename = path.join(root, 'src/lib', id.slice(6) + '.ts');
@@ -26,7 +29,7 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
     modules.set(id, exports);
     vm.runInNewContext(output, {
       exports, require: requireModule, process: { env: {} }, fetch: fetchImpl,
-      AbortController, setTimeout, clearTimeout, console,
+      AbortController, setTimeout, clearTimeout, console, URL,
     }, { filename });
     return exports;
   }
@@ -115,6 +118,11 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.match(calls[0], /\/v2\/search\/Bank%20of%20America\?c=1idPBg9EKr252UlBUPZ$/);
   assert.ok(inits.length > 0 && inits.every(init => init?.credentials === 'omit'),
     'Brandfetch search sends no cookies, so no cookie can become a per-device identifier');
+  // Brandfetch's terms: the request names the requesting site, and Brand Search results are never stored.
+  assert.ok(inits.every(init => init.headers?.Referer === 'https://wafra-app-azg.pages.dev/'),
+    'every search carries the Referer of Wafra\'s public site');
+  assert.equal(new URL(APP_EXTRA.privacyPolicyUrl).origin + '/', 'https://wafra-app-azg.pages.dev/');
+  assert.deepEqual([...data.keys()], [], 'no Brand Search result is written to device storage');
 
   const lloyds = await m.resolveBankLogo('Lloyds Bank');
   assert.equal(lloyds?.domain, 'lloydsbank.com');
@@ -126,7 +134,7 @@ const response = rows => ({ ok: true, json: async () => rows });
   const afterFirstPass = calls.length;
   assert.equal((await m.resolveBankLogo('Bank of America'))?.domain, 'bankofamerica.com');
   assert.equal(await m.resolveBankLogo('Chase Savings'), null);
-  assert.equal(calls.length, afterFirstPass, 'bank search hits and misses are cached');
+  assert.equal(calls.length, afterFirstPass, 'bank search hits and misses are kept for the session');
 
   for (const name of ['Household savings 1234', 'Card **8575', 'Bank\u202e', undefined]) {
     assert.equal(await m.resolveBankLogo(name), null, `unsafe/private account label: ${name}`);
@@ -139,13 +147,15 @@ const response = rows => ({ ok: true, json: async () => rows });
       logoUrl: 'https://attacker.invalid/account', source: 'search',
     },
   };
+  let cachedSearches = 0;
   const cachedResolver = load({
     data: new Map([['wafra:bank-logo:v2:bank%20of%20america', JSON.stringify(cached)]]),
-    fetchImpl: async () => { throw new Error('cache should satisfy this lookup'); },
+    fetchImpl: async () => { cachedSearches++; return response([{ name: 'Bank of America', domain: 'bankofamerica.com', claimed: true }]); },
   });
   assert.equal((await cachedResolver.resolveBankLogo('Bank of America')).logoUrl,
     'https://cdn.brandfetch.io/domain/bankofamerica.com?c=1idPBg9EKr252UlBUPZ',
-    'cached data cannot choose an arbitrary image host');
+    'a stored record from an older build cannot choose the image host');
+  assert.equal(cachedSearches, 1, 'a stored record from an older build is not used');
 
   let failures = 0;
   const failing = load({ fetchImpl: async () => { failures++; throw new Error('offline'); } });
@@ -161,7 +171,7 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.ok(cache.memoryEntries <= cache.memoryLimit, 'bank logo metadata cache is bounded');
   assert.equal(cache.memoryLimit, 64);
   assert.ok(cache.peakMemoryEntries <= cache.memoryLimit, 'bank logo cache never exceeds its ceiling even transiently');
-  assert.ok(cache.memoryEvictions > 0, 'older in-memory bank metadata is evicted while its durable cache remains');
+  assert.ok(cache.memoryEvictions > 0, 'older in-memory bank metadata is evicted; nothing is kept on disk');
 
   let releaseSaturated;
   const saturatedGate = new Promise(resolve => { releaseSaturated = resolve; });

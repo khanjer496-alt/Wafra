@@ -9,6 +9,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
+import { brandfetchImageSource } from '@/lib/verified-logo-identities';
 import { useOnlineLogosAllowed } from '@/lib/store';
 
 interface MerchantAvatarProps {
@@ -99,7 +100,8 @@ function LogoTile({ id, uri, title, size, plate = false }: {
           visible while the image loads instead of showing an empty tile. */}
       {!loaded && <View style={StyleSheet.absoluteFill}><MerchantMonogram title={title} size={size} /></View>}
       <Image
-        source={{ uri }}
+        // Hotlinked from Brandfetch's CDN with the Referer its terms require.
+        source={brandfetchImageSource(uri)}
         contentFit="contain"
         // Remote logos are decorative and can have very high cardinality on a
         // long ledger. On Android keep the durable disk cache but do not grow

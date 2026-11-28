@@ -9,6 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
 import { useOnlineLogosAllowed } from '@/lib/store';
+import { brandfetchImageSource } from '@/lib/verified-logo-identities';
 
 function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
@@ -66,7 +67,8 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
     {!imageReady && letter}
     <Image
       key={logoIdentity}
-      source={{ uri: logo.logoUrl }}
+      // Hotlinked from Brandfetch's CDN with the Referer its terms require.
+      source={brandfetchImageSource(logo.logoUrl)}
       contentFit="contain"
       cachePolicy={Platform.OS === 'android' ? 'disk' : 'memory-disk'}
       recyclingKey={logo.id}

@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '../..');
+const APP_EXTRA = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo.extra;
 function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), data = new Map() } = {}) {
   const storage = {
     async getItem(k) { return data.get(k) ?? null; },
@@ -15,6 +16,8 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
   function requireModule(id) {
     if (id === 'react-native') return { Platform: { OS: 'ios' } };
     if (id === '@react-native-async-storage/async-storage') return storage;
+    // The real app.json `extra`, as expo-constants exposes it on device.
+    if (id === 'expo-constants') return { __esModule: true, default: { expoConfig: { extra: APP_EXTRA } } };
     if (modules.has(id)) return modules.get(id);
     assert.ok(id.startsWith('@/lib/'), id);
     const filename = path.join(root, 'src/lib', id.slice(6) + '.ts');
@@ -26,7 +29,7 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
     modules.set(id, exports);
     vm.runInNewContext(output, {
       exports, require: requireModule, process: { env: {} }, fetch: fetchImpl,
-      AbortController, setTimeout, clearTimeout, console,
+      AbortController, setTimeout, clearTimeout, console, URL,
     }, { filename });
     return exports;
   }
@@ -106,6 +109,11 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.doesNotMatch(calls[0], /55|1234|Dubai/i, 'amount, account tail and location are removed before lookup');
   assert.ok(inits.length > 0 && inits.every(init => init?.credentials === 'omit'),
     'Brandfetch search sends no cookies, so no cookie can become a per-device identifier');
+  // Brandfetch's terms: the request names the requesting site, and Brand Search results are never stored.
+  assert.ok(inits.every(init => init.headers?.Referer === 'https://wafra-app-azg.pages.dev/'),
+    'every search carries the Referer of Wafra\'s public site');
+  assert.equal(new URL(APP_EXTRA.privacyPolicyUrl).origin + '/', 'https://wafra-app-azg.pages.dev/');
+  assert.deepEqual([...data.keys()], [], 'no Brand Search result is written to device storage');
 
   const payout = await m.resolveRemoteMerchantLogo('Talabat sales');
   assert.equal(payout?.domain, 'talabat.com', 'claimed brand may match a harmless transaction descriptor suffix');
@@ -134,7 +142,7 @@ const response = rows => ({ ok: true, json: async () => rows });
   const afterFirstPass = calls.length;
   assert.equal((await m.resolveRemoteMerchantLogo('Aseer Time'))?.domain, 'aseertime.com');
   assert.equal(await m.resolveRemoteMerchantLogo('Sesame Al Ja Qlub'), null);
-  assert.equal(calls.length, afterFirstPass, 'positive and negative results are cached');
+  assert.equal(calls.length, afterFirstPass, 'positive and negative results are kept for the session');
 
   for (const title of [
     '', 'Incoming transfer', 'ATM withdrawal', 'Credit card payment', 'Salary',
@@ -144,20 +152,22 @@ const response = rows => ({ ok: true, json: async () => rows });
   }
   assert.equal(calls.length, afterFirstPass, 'generic financial rows and unsafe strings never start a search');
 
-  // A persisted cache can never choose its own image host. The resolver rebuilds
-  // the artwork URL from the cached domain through Brandfetch's fixed CDN.
+  // Records persisted by older builds are never read: a new session searches
+  // again (session memory only), and upgrade cleanup deletes the old keys.
   const cached = {
     query: 'aseer time', expiresAt: Date.now() + 60_000, value: {
       id: 'brandfetch:aseertime.com', domain: 'aseertime.com', canonicalName: 'Aseer Time',
       logoUrl: 'https://attacker.invalid/private-name', confidence: 0.95, source: 'search',
     },
   };
+  let cachedSearches = 0;
   const cachedResolver = load({
     data: new Map([['wafra:merchant-logo:v4:aseer%20time', JSON.stringify(cached)]]),
-    fetchImpl: async () => { throw new Error('cache should satisfy this lookup'); },
+    fetchImpl: async () => { cachedSearches++; return response([{ name: 'Aseer Time', domain: 'aseertime.com', claimed: true }]); },
   });
   assert.equal((await cachedResolver.resolveRemoteMerchantLogo('Aseer Time')).logoUrl,
     'https://cdn.brandfetch.io/domain/aseertime.com?c=1idPBg9EKr252UlBUPZ');
+  assert.equal(cachedSearches, 1, 'a stored record from an older build is not used');
 
   let failures = 0;
   const failing = load({ fetchImpl: async () => { failures++; throw new Error('offline'); } });
@@ -175,7 +185,7 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.ok(cache.memoryEntries <= cache.memoryLimit, 'merchant logo metadata cache is bounded');
   assert.equal(cache.memoryLimit, 128);
   assert.ok(cache.peakMemoryEntries <= cache.memoryLimit, 'merchant logo cache never exceeds its ceiling even transiently');
-  assert.ok(cache.memoryEvictions > 0, 'older in-memory merchant metadata is evicted while its durable cache remains');
+  assert.ok(cache.memoryEvictions > 0, 'older in-memory merchant metadata is evicted; nothing is kept on disk');
 
   let releaseSaturated;
   const saturatedGate = new Promise(resolve => { releaseSaturated = resolve; });
@@ -192,5 +202,5 @@ const response = rows => ({ ok: true, json: async () => rows });
   releaseSaturated();
   await Promise.all(saturatedJobs);
 
-  console.log('✓ merchant logos search globally from cleaned names, reject ambiguous/non-merchant matches, cache results, and keep artwork on the Brandfetch CDN');
+  console.log('✓ merchant logos search globally from cleaned names, reject ambiguous/non-merchant matches, keep results for the session only, and keep artwork on the Brandfetch CDN');
 })().catch(error => { console.error(error); process.exitCode = 1; });

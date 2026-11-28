@@ -35,6 +35,7 @@ function loadMerchantAvatar(os) {
     '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
     '@/lib/store': { useOnlineLogosAllowed: () => true },
     '@/lib/merchant-logo-resolver': { resolveRemoteMerchantLogo: async () => remote },
+    '@/lib/verified-logo-identities': { brandfetchImageSource: uri => ({ uri, headers: { Referer: 'https://wafra-app-azg.pages.dev/' } }) },
   }, { requestIdleCallback: () => 1, cancelIdleCallback: () => {} }).MerchantAvatar;
 }
 const flat = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
@@ -50,6 +51,7 @@ for (const os of ['ios', 'android']) {
   assert.equal(placeholder.props.children.type.name, 'MerchantMonogram', 'the letter holds the tile while the image loads');
   assert.equal(image.type, 'Image');
   assert.equal(image.props.source.uri, remote.logoUrl, 'a CDN URL rebuilt from a validated domain');
+  assert.equal(image.props.source.headers.Referer, 'https://wafra-app-azg.pages.dev/', 'hotlinked with the Referer Brandfetch requires');
   assert.equal(image.props.contentFit, 'contain', 'preserve artwork proportions');
   assert.equal(image.props.recyclingKey, remote.id);
   assert.equal(image.props.transition, 0, 'no row animations or logo cross-fades while scrolling');
@@ -66,6 +68,31 @@ for (const os of ['ios', 'android']) {
   // A result for another title (a recycled row) is never drawn under the new name.
   assert.equal(MerchantAvatar({ title: 'Carrefour', category: 'groceries', size: 44 }).type.name, 'MerchantMonogram');
   assert.equal(flat(platedTile.props.children[1].props.style).width, 39);
+}
+
+// Brandfetch's terms require a Referer naming the requesting site. Native apps
+// send Wafra's public site (the origin of app.json's privacy link); browsers
+// send their own, and expo-image would fetch the image itself if given headers.
+const extra = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo.extra;
+for (const os of ['ios', 'android', 'web']) {
+  const publicLinks = load(path.join(root, 'src/lib/public-links.ts'), {
+    'expo-constants': { __esModule: true, default: { expoConfig: { extra } } },
+  }, { URL });
+  const identities = load(path.join(root, 'src/lib/verified-logo-identities.ts'), {
+    'react-native': { Platform: { OS: os } },
+    '@/lib/public-links': publicLinks,
+  }, { URL });
+  const logo = identities.verifiedLogoUrl('lulugroupinternational.com');
+  const source = identities.brandfetchImageSource(logo);
+  assert.equal(source.uri, logo);
+  if (os === 'web') {
+    assert.equal(source.headers, undefined, 'web keeps a plain <img> hotlink');
+    assert.deepEqual({ ...identities.brandfetchRequestHeaders() }, {});
+  } else {
+    assert.equal(source.headers.Referer, 'https://wafra-app-azg.pages.dev/', `${os}: image request names Wafra's site`);
+    assert.equal(identities.brandfetchRequestHeaders().Referer, 'https://wafra-app-azg.pages.dev/', `${os}: search request names Wafra's site`);
+    assert.equal(identities.brandfetchImageSource(logo).headers, source.headers, 'stable headers keep image sources stable');
+  }
 }
 
 const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');

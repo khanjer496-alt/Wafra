@@ -1,8 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { bankBrandForName } from '@/lib/markets';
-import { isLogoCacheGenerationCurrent, logoCacheGeneration, mutateLogoCache, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
-import { brandfetchSearchUrl, verifiedLogoUrl } from '@/lib/verified-logo-identities';
+import { isLogoCacheGenerationCurrent, logoCacheGeneration, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
+import { brandfetchRequestHeaders, brandfetchSearchUrl, verifiedLogoUrl } from '@/lib/verified-logo-identities';
 
 export interface ResolvedBankLogo {
   readonly id: string;
@@ -63,64 +61,25 @@ function cacheKey(name: string): string {
   return CACHE_PREFIX + encodeURIComponent(normalized(name));
 }
 
-function safeCachedValue(value: unknown): ResolvedBankLogo | null | undefined {
-  if (value === null) return null;
-  if (!value || typeof value !== 'object') return undefined;
-  const candidate = value as Partial<ResolvedBankLogo>;
-  if (candidate.source !== 'search' || typeof candidate.domain !== 'string' ||
-      typeof candidate.canonicalName !== 'string' || candidate.canonicalName.length > 160 ||
-      /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(candidate.canonicalName)) return undefined;
-  const logoUrl = verifiedLogoUrl(candidate.domain);
-  if (!logoUrl) return undefined;
-  return Object.freeze({
-    id: `bank:${candidate.domain}`,
-    domain: candidate.domain,
-    canonicalName: candidate.canonicalName,
-    logoUrl,
-    source: 'search' as const,
-  });
-}
-
-async function readCached(candidate: string, generation: number): Promise<ResolvedBankLogo | null | undefined> {
-  const query = normalized(candidate);
+/** Session memory only: Brandfetch's terms forbid storing Brand Search results. */
+function readCached(candidate: string): ResolvedBankLogo | null | undefined {
   const key = cacheKey(candidate);
   const hot = memory.get(key);
-  if (hot && hot.expiresAt > Date.now() && hot.query === query) {
+  if (hot && hot.expiresAt > Date.now() && hot.query === normalized(candidate)) {
     remember(key, hot);
-    return safeCachedValue(hot.value);
+    return hot.value;
   }
   if (hot) memory.delete(key);
-  try {
-    const raw = await AsyncStorage.getItem(key);
-    if (!isLogoCacheGenerationCurrent(generation) || !raw) return undefined;
-    const record = JSON.parse(raw) as CacheRecord;
-    const safe = record && record.query === query && record.expiresAt > Date.now()
-      ? safeCachedValue(record.value) : undefined;
-    if (safe === undefined) {
-      await mutateLogoCache(generation, () => AsyncStorage.removeItem(key)).catch(() => undefined);
-      return undefined;
-    }
-    remember(key, { query, value: safe, expiresAt: record.expiresAt });
-    return safe;
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
-async function writeCached(candidate: string, value: ResolvedBankLogo | null, generation: number): Promise<void> {
-  const record: CacheRecord = {
+function writeCached(candidate: string, value: ResolvedBankLogo | null, generation: number): void {
+  if (!isLogoCacheGenerationCurrent(generation)) return;
+  remember(cacheKey(candidate), {
     query: normalized(candidate),
     value,
     expiresAt: Date.now() + (value ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
-  };
-  try {
-    await mutateLogoCache(generation, async () => {
-      remember(cacheKey(candidate), record);
-      await AsyncStorage.setItem(cacheKey(candidate), JSON.stringify(record));
-    });
-  } catch {
-    // Optional artwork must not block the ledger when storage is unavailable.
-  }
+  });
 }
 
 function bankNameCore(value: string): string {
@@ -164,7 +123,7 @@ async function searchBrandfetch(candidate: string, generation: number): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { method: 'GET', credentials: 'omit', signal: controller.signal });
+    const response = await fetch(url, { method: 'GET', credentials: 'omit', headers: brandfetchRequestHeaders(), signal: controller.signal });
     if (!response.ok || !isLogoCacheGenerationCurrent(generation)) return undefined;
     const raw = await response.json();
     if (!Array.isArray(raw)) return undefined;
@@ -203,12 +162,11 @@ export async function resolveBankLogo(bankName: string | undefined): Promise<Res
     return null;
   }
   const request = (async () => {
-    const cached = await readCached(candidate, generation);
-    if (!isLogoCacheGenerationCurrent(generation)) return null;
+    const cached = readCached(candidate);
     if (cached !== undefined) return cached;
     const found = await searchBrandfetch(candidate, generation);
     if (!isLogoCacheGenerationCurrent(generation)) return null;
-    if (found !== undefined) await writeCached(candidate, found, generation);
+    if (found !== undefined) writeCached(candidate, found, generation);
     return isLogoCacheGenerationCurrent(generation) ? found ?? null : null;
   })().finally(() => {
     if (pending.get(key) === request) pending.delete(key);

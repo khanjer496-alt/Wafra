@@ -22,7 +22,7 @@ import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
 import { useOnlineLogosAllowed } from '@/lib/store';
-import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
+import { brandfetchImageSource, verifiedLogoUrl } from '@/lib/verified-logo-identities';
 import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap, onboardingNoAutomaticCapture } from '@/lib/onboarding';
 import type {
   OnboardingAlertDelivery,
@@ -127,7 +127,7 @@ function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
       ? <Icon name={fallbackIcon} size={Math.round(size * 0.46)} color={night.primary} />
       : <ThemedText allowFontScaling={false}
         style={[styles.logoInitials, { color: initialsColor, fontSize: Math.max(9, Math.round(size * 0.28)) }]}>{initials(name)}</ThemedText>)}
-    {showImage && <Image source={{ uri }} contentFit="contain" cachePolicy="memory-disk" transition={0}
+    {showImage && <Image source={brandfetchImageSource(uri)} contentFit="contain" cachePolicy="memory-disk" transition={0}
       onLoad={() => setLoaded(true)} onError={() => setFailed(true)}
       style={StyleSheet.absoluteFillObject} accessible={false} />}
   </View>;

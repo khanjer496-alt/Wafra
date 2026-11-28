@@ -13,10 +13,11 @@ on by default on iPhone and Android, with no switch and no consent step:
   `cdn.brandfetch.io`, rebuilt from a validated brand domain.
 - Lookups wait for the store to hydrate and run in an idle callback, so rows
   never wait on the network. A saved local-only preference turns them off.
-- Lookup results are cached on the phone (`wafra:merchant-logo:v4:`,
-  `wafra:bank-logo:v2:`) and images in expo-image's cache. **Erase all data**
-  removes the lookup cache before the ledger; images age out of expo-image's
-  cache.
+- Following Brandfetch's terms, search results are never stored: they live in
+  session memory only, and erase clears them. The first launch deletes any
+  `wafra:merchant-logo:` / `wafra:bank-logo:` records older builds stored.
+  Images are hotlinked from the CDN with Wafra's site as `Referer` on native;
+  only expo-image's normal HTTP cache keeps them.
 - A miss, an error or no network shows the merchant's letter
   (`MonogramAvatar`). Widgets always draw letters.
 

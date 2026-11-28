@@ -7,6 +7,7 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const turn = () => new Promise(resolve => setImmediate(resolve));
+const REFERER = Object.freeze({ Referer: 'https://wafra-app-azg.pages.dev/' });
 
 // 1.0.2: every merchant and bank logo comes from the online lookup, on by
 // default on iOS and Android, with no switch and no consent step. Only a
@@ -61,6 +62,7 @@ function harness(kind, { platform = 'ios', privateMode = false, hydrated = true 
     '@/components/ui/monogram-avatar': { MonogramAvatar: 'Monogram' },
     '@/lib/merchant-logo-resolver': { resolveRemoteMerchantLogo: resolve },
     '@/lib/bank-logo-resolver': { resolveBankLogo: resolve },
+    '@/lib/verified-logo-identities': { brandfetchImageSource: uri => ({ uri, headers: REFERER }) },
   };
   // Lookups are deferred to an idle turn on the phone; the harness runs the
   // callback immediately so `flush` still observes every effect.
@@ -109,7 +111,9 @@ for (const platform of ['ios', 'android']) for (const kind of ['merchant', 'bank
     h.render(); h.flush(); await turn();
     assert.equal(h.calls, 1, 'one lookup for the visible row');
     assert.equal(h.idle.scheduled, 1, 'the lookup waits for an idle turn, never the render');
-    assert.deepEqual(remoteSources(h.render()), [h.identity.logoUrl]);
+    const node = h.render();
+    assert.deepEqual(remoteSources(node), [h.identity.logoUrl]);
+    assert.equal(images(node)[0].props.source.headers, REFERER, 'the hotlinked image carries the Referer Brandfetch requires');
   });
 }
 

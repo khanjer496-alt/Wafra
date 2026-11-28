@@ -1,3 +1,7 @@
+import { Platform } from 'react-native';
+
+import { configuredPublicUrl } from '@/lib/public-links';
+
 /** Fast-path identities that do not need a Brandfetch name search. */
 interface VerifiedMerchantIdentity {
   readonly canonicalName: string;
@@ -23,6 +27,31 @@ export function verifiedMerchantIdentity(candidate: string): VerifiedMerchantIde
 
 function brandfetchClientId(): string {
   return process.env.EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID?.trim() || '1idPBg9EKr252UlBUPZ';
+}
+
+let requestHeaders: Readonly<Record<string, string>> | null = null;
+
+/**
+ * Brandfetch requires a Referer naming the requesting site. A native app has
+ * none, so search and logo requests name Wafra's public site (the origin of
+ * the configured privacy-policy link). A browser sends its own Referer and
+ * forbids setting one, so web sends none. Stable, so image sources do not change.
+ */
+export function brandfetchRequestHeaders(): Readonly<Record<string, string>> {
+  if (requestHeaders) return requestHeaders;
+  const site = Platform.OS === 'web' ? null : configuredPublicUrl('privacyPolicyUrl');
+  const headers: Record<string, string> = site ? { Referer: `${new URL(site).origin}/` } : {};
+  requestHeaders = Object.freeze(headers);
+  return requestHeaders;
+}
+
+/**
+ * A hotlinked Brandfetch image source. Headers only where they exist: on web,
+ * expo-image would otherwise fetch the image itself instead of using an <img>.
+ */
+export function brandfetchImageSource(uri: string): { uri: string; headers?: Readonly<Record<string, string>> } {
+  const headers = brandfetchRequestHeaders();
+  return headers.Referer ? { uri, headers } : { uri };
 }
 
 /** Build artwork only from a validated brand domain, never from an arbitrary URL. */

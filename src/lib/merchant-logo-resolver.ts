@@ -1,7 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { isLogoCacheGenerationCurrent, logoCacheGeneration, mutateLogoCache, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
-import { brandfetchSearchUrl, verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
+import { isLogoCacheGenerationCurrent, logoCacheGeneration, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
+import { brandfetchRequestHeaders, brandfetchSearchUrl, verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
 
 export interface RemoteMerchantLogo {
   readonly id: string;
@@ -20,9 +18,8 @@ type BrandfetchSearchResult = {
   claimed?: unknown;
   brandId?: unknown;
 };
-// v4 invalidates negative results produced by the old exact/core-only matcher.
-// Descriptors such as "Cloudflare San Francisco" used to be cached as misses
-// even when Brandfetch returned Cloudflare as the first claimed brand.
+// Session-memory keys only. Older builds persisted records under this prefix;
+// removeStoredLogoSearchResults deletes them after an upgrade.
 const CACHE_PREFIX = 'wafra:merchant-logo:v4:';
 const POSITIVE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -50,7 +47,6 @@ let saturatedResolutionDrops = 0;
 function remember(key: string, record: CacheRecord): void {
   // Map insertion order gives us a tiny allocation-free LRU. Touching a hit
   // moves it to the end; adding a new value evicts the oldest metadata only.
-  // The durable AsyncStorage copy remains available if that merchant reappears.
   memory.delete(key);
   memory.set(key, record);
   while (memory.size > MAX_MEMORY_CACHE_ENTRIES) {
@@ -154,67 +150,29 @@ function likelyLocationSuffix(query: string, brandName: string): boolean {
     /^[\p{L}][\p{L}'’-]*$/u.test(token) && !NON_LOCATION_SUFFIX_WORDS.has(token));
 }
 
-function safeCachedValue(value: unknown): RemoteMerchantLogo | null | undefined {
-  if (value === null) return null;
-  if (!value || typeof value !== 'object') return undefined;
-  const candidate = value as Partial<RemoteMerchantLogo>;
-  if (candidate.source !== 'search' || typeof candidate.domain !== 'string' ||
-      typeof candidate.canonicalName !== 'string' || candidate.canonicalName.length > 160 ||
-      /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(candidate.canonicalName) ||
-      typeof candidate.confidence !== 'number') return undefined;
-  const logoUrl = verifiedLogoUrl(candidate.domain);
-  if (!logoUrl || candidate.confidence < 0 || candidate.confidence > 1) return undefined;
-  return Object.freeze({
-    id: `brandfetch:${candidate.domain}`,
-    domain: candidate.domain,
-    canonicalName: candidate.canonicalName,
-    logoUrl,
-    confidence: candidate.confidence,
-    source: 'search' as const,
-  });
-}
-
-async function readCached(candidate: string, generation: number): Promise<RemoteMerchantLogo | null | undefined> {
-  const query = normalized(candidate);
+/**
+ * Brandfetch's terms forbid storing Brand Search results, so results live only
+ * in this session's memory: enough that a list does not search the same name
+ * twice, and gone when the app quits or the ledger is erased.
+ */
+function readCached(candidate: string): RemoteMerchantLogo | null | undefined {
   const key = cacheKey(candidate);
   const hot = memory.get(key);
-  if (hot && hot.expiresAt > Date.now() && hot.query === query) {
+  if (hot && hot.expiresAt > Date.now() && hot.query === normalized(candidate)) {
     remember(key, hot);
-    return safeCachedValue(hot.value);
+    return hot.value;
   }
   if (hot) memory.delete(key);
-  try {
-    const raw = await AsyncStorage.getItem(key);
-    if (!isLogoCacheGenerationCurrent(generation) || !raw) return undefined;
-    const record = JSON.parse(raw) as CacheRecord;
-    const safe = record && record.query === query && record.expiresAt > Date.now()
-      ? safeCachedValue(record.value) : undefined;
-    if (safe === undefined) {
-      await mutateLogoCache(generation, () => AsyncStorage.removeItem(key)).catch(() => undefined);
-      return undefined;
-    }
-    // Publish a reconstructed CDN URL, never an arbitrary URL from storage.
-    remember(key, { query, value: safe, expiresAt: record.expiresAt });
-    return safe;
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
-async function writeCached(candidate: string, value: RemoteMerchantLogo | null, generation: number): Promise<void> {
-  const record: CacheRecord = {
+function writeCached(candidate: string, value: RemoteMerchantLogo | null, generation: number): void {
+  if (!isLogoCacheGenerationCurrent(generation)) return;
+  remember(cacheKey(candidate), {
     query: normalized(candidate),
     value,
     expiresAt: Date.now() + (value ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
-  };
-  try {
-    await mutateLogoCache(generation, async () => {
-      remember(cacheKey(candidate), record);
-      await AsyncStorage.setItem(cacheKey(candidate), JSON.stringify(record));
-    });
-  } catch {
-    // Optional artwork must not block the ledger when storage is unavailable.
-  }
+  });
 }
 
 function scoredSearchResult(
@@ -280,7 +238,7 @@ async function searchBrandfetch(candidate: string, generation: number): Promise<
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     try {
-      const response = await fetch(url, { method: 'GET', credentials: 'omit', signal: controller.signal });
+      const response = await fetch(url, { method: 'GET', credentials: 'omit', headers: brandfetchRequestHeaders(), signal: controller.signal });
       if (!response.ok || !isLogoCacheGenerationCurrent(generation)) return undefined;
       const raw = await response.json();
       if (!Array.isArray(raw)) return undefined;
@@ -320,12 +278,11 @@ export async function resolveRemoteMerchantLogo(title: string): Promise<RemoteMe
     return null;
   }
   const request = (async () => {
-    const cached = await readCached(candidate, generation);
-    if (!isLogoCacheGenerationCurrent(generation)) return null;
+    const cached = readCached(candidate);
     if (cached !== undefined) return cached;
     const found = await searchBrandfetch(candidate, generation);
     if (!isLogoCacheGenerationCurrent(generation)) return null;
-    if (found !== undefined) await writeCached(candidate, found, generation);
+    if (found !== undefined) writeCached(candidate, found, generation);
     return isLogoCacheGenerationCurrent(generation) ? found ?? null : null;
   })().finally(() => {
     if (pending.get(key) === request) pending.delete(key);

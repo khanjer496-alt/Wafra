@@ -236,7 +236,7 @@ import {
   type StatementCoverageEntry,
 } from '@/lib/types';
 import { clearWidgetSnapshot, setAppPrivacy } from '../../modules/wafra-widgets';
-import { setLogoLookupsAllowed } from '@/lib/logo-cache-lifecycle';
+import { removeStoredLogoSearchResults, setLogoLookupsAllowed } from '@/lib/logo-cache-lifecycle';
 import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -2687,6 +2687,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Online logos are on by default on every platform; local-only mode stops
     // them. Revoke queued logo work before subscribers can schedule another request.
     setLogoLookupsAllowed(next.hydrated && !next.privateMode);
+    // Older builds persisted Brandfetch search results; their terms forbid that. Remove once per launch.
+    if (next.hydrated && !authoritativeState.current.hydrated) void removeStoredLogoSearchResults();
     if ((next.appLock && next.hideWidgetAmountsWhenLocked !== false) !==
         (authoritativeState.current.appLock && authoritativeState.current.hideWidgetAmountsWhenLocked !== false) || replacesLedger) {
       void invalidateWidgetSnapshotSync();
