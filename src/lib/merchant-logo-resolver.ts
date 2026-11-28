@@ -120,6 +120,9 @@ export function merchantBrandCandidate(title: string): string | null {
   if (value.length < 2 || value.length > 80 || GENERIC_ONLY.test(value)) return null;
   const key = normalized(value);
   if (key.length < 2 || /^\d+$/.test(key) || NON_MERCHANT_ONLY.test(key)) return null;
+  // A bare place-type word ("Pharmacy", "Clinic", "Gym") names no brand: a search for it
+  // would pick an arbitrary company's logo, so it keeps its letter.
+  if (NON_LOCATION_SUFFIX_WORDS.has(key)) return null;
   return value;
 }
 

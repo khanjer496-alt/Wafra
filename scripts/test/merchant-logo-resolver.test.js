@@ -98,6 +98,10 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.equal(calls.length, 0, 'known shortcuts stay local and do not spend search requests');
   assert.equal(m.merchantBrandCandidate('PAYPAL *Aseer Time'), 'Aseer Time',
     'known payment-processor prefixes are removed before brand lookup');
+  for (const generic of ['Pharmacy 330', 'Pharmacy', 'CLINIC', 'Gym 1234', 'Hospital Dubai']) {
+    assert.equal(m.merchantBrandCandidate(generic), null, `${generic} names no brand, so it is never searched`);
+  }
+  assert.equal(m.merchantBrandCandidate('Aster Pharmacy'), 'Aster Pharmacy', 'a named pharmacy is still looked up');
 
   const aseer = await m.resolveRemoteMerchantLogo('Payment: Aseer Time Dubai AED 55.00 card ****1234');
   assert.equal(aseer?.domain, 'aseertime.com');
