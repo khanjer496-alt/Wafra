@@ -94,6 +94,7 @@ export default function MarketingHome() {
       <Head>
         <title>{MARKETING_TITLE}</title>
         <meta name="description" content={MARKETING_DESCRIPTION} />
+        <meta name="google-site-verification" content="Nx3-Zg_nISE50fqDEAw94gfUo6yBKvoXqBLUtYFgHTk" />
         <meta name="robots" content="index, follow, max-image-preview:large" />
         <meta name="googlebot" content="index, follow, max-image-preview:large" />
         <meta
@@ -133,6 +134,7 @@ export default function MarketingHome() {
             <a href="#subscriptions">Bills</a>
             <a href="#privacy">Privacy</a>
             <a href="#questions">Questions</a>
+            <a href="/compare/">Compare</a>
           </div>
           <span className={styles.availability}>iPhone + Android</span>
         </nav>
@@ -147,6 +149,14 @@ export default function MarketingHome() {
             <div className={styles.heroActions}>
               <a
                 className={styles.primaryAction}
+                href={DOWNLOAD_PATHS.android}
+              >
+                <span className={styles.actionPlatform}>Android</span>
+                <span>Get it on Google Play</span>
+                <span className={styles.actionArrow} aria-hidden="true">↗</span>
+              </a>
+              <a
+                className={styles.primaryAction}
                 href={DOWNLOAD_PATHS.iphone}
                 target="_blank"
                 rel="noopener"
@@ -157,7 +167,7 @@ export default function MarketingHome() {
                 <span className={styles.actionArrow} aria-hidden="true">↗</span>
               </a>
             </div>
-            <p className={styles.betaNote}>Public iPhone beta on TestFlight. Android: Google Play coming soon.</p>
+            <p className={styles.betaNote}>Available on Google Play. Public iPhone beta on TestFlight.</p>
             <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 
@@ -357,7 +367,7 @@ export default function MarketingHome() {
           <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra</span></div>
           <div>
             <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
-            <p><a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a> · <a href="/support/">Support</a></p>
+            <p><a href="/compare/">Compare expense trackers</a> · <a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a> · <a href="/support/">Support</a></p>
           </div>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
         </footer>

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { comparisonRoutes } from './web-comparisons.mjs';
 
 const outputDir = path.resolve(process.argv[2] ?? 'dist');
 const rawSiteUrl = process.env.EXPO_PUBLIC_WAFRA_SITE_URL;
@@ -56,6 +57,7 @@ const description = index.match(/<meta[^>]+name="description"[^>]+content="([^"]
 
 check('descriptive title', title.length >= 30 && title.length <= 65, `${title.length} characters`);
 check('meta description', description.length >= 120 && description.length <= 160, `${description.length} characters`);
+check('public Search Console ownership tag', /name="google-site-verification" content="[\w-]{25,}"/.test(index));
 check('single H1', (index.match(/<h1(?:\s|>)/g) ?? []).length === 1);
 check('indexable public page', /name="robots" content="index, follow/.test(index));
 check('Open Graph metadata', /property="og:title"/.test(index) && /property="og:description"/.test(index));
@@ -84,11 +86,12 @@ check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-spending.
   .every((image) => index.includes(`src="${image}"`) && fs.existsSync(path.join(outputDir, image))));
 const redirects = fs.existsSync(path.join(outputDir, '_redirects')) ? read('_redirects') : '';
 check(
-  'public beta download links',
+  'public Android and iPhone beta download links',
   index.includes('href="/get/iphone"') &&
-    index.includes('Android: Google Play coming soon.') &&
+    index.includes('href="/get/android"') &&
+    !index.includes('Google Play coming soon') &&
     /^\/get\/iphone https:\/\/testflight\.apple\.com\/join\/jbwzCgZ6 302$/m.test(redirects) &&
-    !index.includes('/get/android') && !/^\/get\/android /m.test(redirects) &&
+    /^\/get\/android https:\/\/play\.google\.com\/store\/apps\/details\?id=app\.wafra\.android 302$/m.test(redirects) &&
     !/\.apk"/.test(index) && !index.includes('Download APK'),
 );
 check(
@@ -110,9 +113,11 @@ check('home product image', fs.existsSync(path.join(outputDir, 'wafra-app-home.p
 check('bills product image', fs.existsSync(path.join(outputDir, 'wafra-app-bills.png')));
 
 const publicPages = ['privacy/index.html', 'terms/index.html', 'support/index.html'];
+const comparisonFiles = comparisonRoutes.map((route) => `${route}/index.html`);
+const indexableFiles = [...publicPages, ...comparisonFiles];
 const readOptional = (file) => fs.existsSync(path.join(outputDir, file)) ? read(file) : '';
 const privatePages = findHtmlFiles(outputDir).filter((file) => file !== 'index.html' &&
-  file !== '404.html' && !publicPages.includes(file));
+  file !== '404.html' && !indexableFiles.includes(file));
 check(
   'dedicated public legal and support pages',
   publicPages.every((file) => /name="robots" content="index, follow"/.test(readOptional(file))),
@@ -136,6 +141,20 @@ check(
   readOptional('404.html').includes('That page is not here.') && readOptional('404.html').includes('href="/"') &&
   !/<script\b/i.test(readOptional('404.html')),
 );
+const comparisonHtml = comparisonFiles.map(readOptional);
+const comparisonTitles = comparisonHtml.map((html) => html.match(/<title>([^<]+)<\/title>/)?.[1] ?? '');
+check('comparison hub linked from homepage', index.includes('href="/compare/"'));
+check('comparison pages are static, indexable and link to Google Play', comparisonHtml.every((html) =>
+  (html.match(/<h1(?:\s|>)/g) ?? []).length === 1 &&
+  /name="robots" content="index, follow"/.test(html) && html.includes('href="/get/android"') &&
+  html.includes('property="og:title"') &&
+  (html.match(/<script\b[^>]*>[\s\S]*?<\/script>/g) ?? []).join('') === analyticsTag &&
+  (html.match(/name="description" content="([^"]+)"/)?.[1]?.length ?? 0) >= 120 &&
+  (html.match(/name="description" content="([^"]+)"/)?.[1]?.length ?? Infinity) <= 160));
+check('unique comparison titles', new Set(comparisonTitles).size === comparisonRoutes.length &&
+  comparisonTitles.every((title) => title.length >= 30 && title.length <= 65));
+check('comparison hub links to every article', comparisonRoutes.slice(1).every((route) =>
+  comparisonHtml[0].includes(`href="/${route}/"`)));
 check('no app screens are published', privatePages.length === 0, privatePages.slice(0, 3).join(', '));
 check('no app JavaScript is published', !fs.existsSync(path.join(outputDir, '_expo', 'static', 'js')));
 
@@ -145,11 +164,12 @@ if (siteUrl) {
   check('absolute social image', index.includes(`content="${siteUrl}/wafra-social.png"`));
   check('production sitemap', fs.existsSync(path.join(outputDir, 'sitemap.xml')));
   check('sitemap declared in robots', read('robots.txt').includes(`Sitemap: ${siteUrl}/sitemap.xml`));
-  check('public page canonicals', publicPages.every((file) =>
+  check('public page canonicals', indexableFiles.every((file) =>
     readOptional(file).includes(`rel="canonical" href="${siteUrl}/${file.replace('index.html', '')}"`)));
   const sitemapLocations = [...readOptional('sitemap.xml').matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
-  check('sitemap contains only the four public routes', sitemapLocations.length === 4 &&
-    ['/', '/privacy/', '/terms/', '/support/'].every((route) => sitemapLocations.includes(`${siteUrl}${route}`)));
+  const sitemapRoutes = ['/', ...indexableFiles.map((file) => `/${file.replace('index.html', '')}`)];
+  check('sitemap contains only public routes', sitemapLocations.length === sitemapRoutes.length &&
+    sitemapRoutes.every((route) => sitemapLocations.includes(`${siteUrl}${route}`)));
 }
 
 for (const result of checks) {

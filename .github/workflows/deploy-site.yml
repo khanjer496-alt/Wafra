@@ -1,6 +1,6 @@
 name: Deploy website
 
-# Builds the public website (landing, privacy, terms, support) from the branch
+# Builds the public website from the branch
 # it runs on and deploys it to the Cloudflare Pages project serving SITE_URL.
 # Manual only: publishing stays an explicit action. Before deploying it adds
 # the SITE_EVENTS Analytics Engine binding and sets Functions to fail open
@@ -98,7 +98,10 @@ jobs:
           expect /transactions 404
           expect /settings 404
           expect /get/iphone 302
-          expect /get/android 404
+          expect /get/android 302
+          expect /compare/ 200
+          expect /compare/wafra-vs-wallet-by-budgetbakers/ 200
+          expect /compare/wafra-vs-money-manager-realbyte/ 200
           # Only the Function sends this header; _redirects does not.
           if curl -sI "$site/get/iphone" | grep -qi '^referrer-policy: no-referrer'; then
             echo "/get/iphone is served by the counting Function"

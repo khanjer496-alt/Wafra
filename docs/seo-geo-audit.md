@@ -77,8 +77,8 @@ The SEO check verifies:
 - one H1 and semantic FAQ markup;
 - public indexability, the static 404 page, and that no app screen or app
   JavaScript is published;
-- the `/get/iphone` download link and its `_redirects` fallback, and that
-  no Android or GitHub download is published;
+- the `/get/android` and `/get/iphone` links, their store targets and static fallbacks;
+- comparison landing pages, unique metadata, internal links, and sitemap entries;
 - Open Graph and X/Twitter metadata;
 - both JSON-LD graphs;
 - image alt text;
@@ -90,7 +90,7 @@ The SEO check verifies:
 The public page requires no client-side behavior. Its anchors and FAQ controls
 are native HTML, so the production finalizer removes Expo's runtime scripts
 from `index.html` and deletes the app bundles. The only executable script on
-the four public pages is the already-deployed Minilytics loader. Page content,
+the public pages is the already-deployed Minilytics loader. Page content,
 navigation and FAQs work without it. Wafra's browser tests use a separate seeded export
 (`EXPO_PUBLIC_WAFRA_E2E_DEMO=1`, see `scripts/e2e/run.sh`) and never deploy it.
 Production images and CSS remain measurable assets; set budgets for them and
@@ -102,21 +102,19 @@ The website has two existing, separate measurement paths. The checked-in
 `public/minilytics-init.js` preserves the live loader retrieved from
 `https://wafra-app-azg.pages.dev/minilytics-init.js` on 7 November 2026
 (SHA-256 `586ce5d7c5bd46929be1aac5f57af8a25eba90b86a67da77014cf0c44eb70349`).
-The finalizer copies it unchanged and includes it once on each of the four
+The finalizer copies it unchanged and includes it once on each of the
 public pages. Its host allowlist, website IDs and Minilytics provider are
 unchanged; it does not activate on unknown preview hosts. Its cookies and
 retention remain described in the adopted Privacy Policy.
 
 The separate server-side funnel counts work as follows:
 
-- The download button links to first-party `/get/iphone`. There is no
-  Android download until public Play availability is verified; `/get/android`
-  returns the 404 page instead of serving an obsolete APK. The homepage states
-  that the Google Play release is coming soon.
+- Download buttons use first-party redirects to public Google Play and iPhone TestFlight.
+  The Android redirect records a comparison label from a known same-origin comparison page.
 - `functions/index.js` and `functions/get/[platform].js` are Cloudflare Pages
   Functions. They write one data point per landing view or download click to
   the Workers Analytics Engine dataset `wafra_site_events`, then serve the
-  static page or redirect to TestFlight
+  static page or redirect to the store
   (`src/marketing/site-events.mjs` holds the active destination).
 - Each data point holds only the event, target, Cloudflare country, referring
   hostname, campaign tag (`utm_source` or `ref`) and a browser/automated label.
@@ -125,6 +123,12 @@ The separate server-side funnel counts work as follows:
 - Without the binding, nothing is recorded and the site still works. If the
   output is ever served without Functions, `_redirects` keeps the download
   buttons working (Cloudflare ignores `_redirects` for Function routes).
+
+**Organic search.** In Search Console, add the canonical sitemap and use the
+Performance report's Page filter for `/compare/` to track impressions,
+search clicks and queries as the pages are indexed. Run
+`node scripts/site-funnel.mjs` with the existing Analytics Engine credentials
+to see Google Play clicks by comparison page. Use Play Console for real installs.
 
 **Deploying.** Run the **Deploy website** GitHub Actions workflow
 (`.github/workflows/deploy-site.yml`, manual only) from `main`. It uses the

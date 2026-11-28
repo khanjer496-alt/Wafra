@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { comparisonPages } from './web-comparisons.mjs';
 
 const escapeHtml = (value) => value
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -87,6 +88,10 @@ a{color:#1F6B52;text-underline-offset:3px}a:focus-visible{outline:2px solid #1F6
 .legal h1{font-size:clamp(38px,7vw,58px);letter-spacing:-.04em;margin:0 0 12px}.legal h2{border-top:1px solid #E3DED2;font-size:26px;margin:52px 0 18px;padding-top:38px}.legal h3{font-size:20px;margin-top:30px}
 .legal p,.legal li{color:#49443D;line-height:1.75}.legal li+li{margin-top:10px}.legal code{font-size:.9em}.notice{background:#E8E3D8;border-left:4px solid #1F6B52;line-height:1.65;margin:28px 0;padding:18px 20px}
 .eyebrow{color:#1F6B52;font-size:12px;letter-spacing:.08em;text-transform:uppercase}.supportGrid{display:grid;gap:18px;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:32px}.supportCard{border:1px solid #D6CFC1;padding:24px}.supportCard h2{border:0;font-size:21px;margin:0 0 12px;padding:0}.supportCard p{margin:0}.supportCard p+p{margin-top:12px}.back{display:inline-block;margin-top:48px;padding:12px 0}
+.download{display:inline-block;background:#1F6B52;color:#fff;border-radius:8px;padding:12px 16px;text-decoration:none;font-family:GeistSemi,sans-serif}.download:hover{background:#17513E}
+.compareTable{margin:28px 0;overflow:auto;border:1px solid #D6CFC1;border-radius:8px}.compareTable:focus-visible{outline:2px solid #1F6B52;outline-offset:4px}
+.compareTable table{border-collapse:collapse;width:100%;min-width:540px;text-align:left;line-height:1.55;font-size:14px}.compareTable th,.compareTable td{padding:12px;vertical-align:top;border-bottom:1px solid #E3DED2}.compareTable thead{background:#E8E3D8}.compareTable tr:last-child th,.compareTable tr:last-child td{border-bottom:0}.compareTable th[scope=row]{width:21%}
+.legal details{border-bottom:1px solid #E3DED2;padding:12px 0}.legal summary{cursor:pointer;font-family:GeistSemi,sans-serif}.compareNav{display:flex;flex-wrap:wrap;gap:12px 20px;margin-top:32px}
 @media(max-width:600px){.nav{align-items:flex-start;flex-wrap:wrap;gap:0 16px;position:static}.navlinks{flex-wrap:wrap}.legal{padding-top:44px}.supportGrid{grid-template-columns:1fr}}
 `;
 
@@ -98,11 +103,12 @@ export const writePublicPages = (outputDir, siteUrl) => {
   if (!contact) throw new Error('The privacy policy must supply the public support contact.');
   const contactLink = `<a href="mailto:${escapeHtml(contact[2])}">${escapeHtml(contact[1])}</a>`;
 
-  const shell = ({ title, description, canonicalPath, body, robots = 'index, follow' }) => `<!doctype html>
+  const shell = ({ title, description, canonicalPath, body, social = false, robots = 'index, follow' }) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="${robots}">
+${social ? `<meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:url" content="${escapeHtml(siteUrl + canonicalPath)}"><meta property="og:image" content="${escapeHtml(siteUrl + '/wafra-social.png')}"><meta name="twitter:card" content="summary_large_image">` : ''}
 <link rel="canonical" href="${escapeHtml(siteUrl + canonicalPath)}"><link rel="icon" href="/wafra-icon.svg" type="image/svg+xml"><style>${legalCss}</style></head>
-<body><a class="skip" href="#main">Skip to content</a><nav class="nav" aria-label="Site navigation"><a class="brand" href="/">Wafra · <span lang="ar" dir="rtl">وفرة</span></a><div class="navlinks"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/support/">Support</a></div></nav><main id="main" class="legal">${body}</main></body></html>`;
+<body><a class="skip" href="#main">Skip to content</a><nav class="nav" aria-label="Site navigation"><a class="brand" href="/">Wafra · <span lang="ar" dir="rtl">وفرة</span></a><div class="navlinks"><a href="/compare/">Compare</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/support/">Support</a></div></nav><main id="main" class="legal">${body}</main></body></html>`;
   const writePage = (route, options) => {
     fs.mkdirSync(path.join(outputDir, route), { recursive: true });
     fs.writeFileSync(path.join(outputDir, route, 'index.html'), shell({ ...options, canonicalPath: `/${route}/` }));
@@ -123,6 +129,48 @@ export const writePublicPages = (outputDir, siteUrl) => {
     description: 'Get help with Wafra, review privacy information, and find data deletion guidance.',
     body: `<p class="eyebrow">Wafra support</p><h1>How can we help?</h1><p>For help with Wafra, email ${contactLink}. Do not include bank message text, account numbers, card numbers, passwords or verification codes.</p><div class="supportGrid"><section class="supportCard"><h2>Privacy and data</h2><p>Read what Wafra processes, where data is stored, and the choices available in the app.</p><p><a href="/privacy/">Read the Privacy Policy</a></p></section><section class="supportCard"><h2>Delete Wafra data</h2><p>Use <strong>Settings → Data and help → Erase all data</strong> while online to erase local data and request deletion of relay registration and queued data. Exported files must be deleted where you saved them.</p><p><a href="/privacy/#your-choices-and-deletion">Read deletion details</a></p></section><section class="supportCard"><h2>Terms</h2><p>Review the terms and limits for the app before using it.</p><p><a href="/terms/">Read the Terms of Use</a></p></section><section class="supportCard"><h2>Billing</h2><p>Subscriptions are managed through the store where they were purchased. Wafra does not handle payment details.</p><p><a href="/terms/#wafra-pro-free-automatic-capture-and-billing">Read billing terms</a></p></section></div>${back}`,
   });
+  const comparisonLink = ({ slug, heading }) =>
+    `<a href="/compare/${escapeHtml(slug)}/">${escapeHtml(heading)}</a>`;
+  const androidLink = '<a class="download" href="/get/android">Get Wafra on Google Play</a>';
+
+  writePage('compare', {
+    title: 'Compare Android Budget and Expense Trackers | Wafra',
+    description: 'Compare Wafra with Wallet by BudgetBakers and Realbyte Money Manager. See how bank feeds, alert capture, manual entries and backups differ on Android.',
+    social: true,
+    body: `<h1>Compare Android expense trackers</h1>
+<p>Pick a budget app based on how you already handle your money. A bank feed helps when you want a connected account to supply transactions. Manual entry helps when you want to check each purchase. Optional alert capture can save work when your phone already receives useful notices.</p>
+<div class="supportGrid">${comparisonPages.map((page) => `<section class="supportCard"><h2>${comparisonLink(page)}</h2><p>${escapeHtml(page.summary)}</p></section>`).join('')}</div>
+<h2>What to try before switching</h2>
+<p>Take one normal week as a test. Record a cash expense, a card purchase, and a recurring bill. Check whether the app can show the category total you need, whether its automatic entries match the statement, and whether you can keep a copy of the records. Keep your existing backup while deciding.</p>
+<p>Wafra lets you track expenses on Android without connecting a bank account. You can start manually or paste an alert, then decide whether optional automatic capture is useful for your bank and message format.</p>
+<p>${androidLink}</p>`,
+  });
+
+  for (const page of comparisonPages) {
+    const { slug, title, heading, competitor, description, rows, article, faqs } = page;
+    const related = comparisonPages.filter((item) => item.slug !== slug).map(comparisonLink).join('');
+    writePage(`compare/${slug}`, {
+      title,
+      description,
+      social: true,
+      body: `<article>
+<p><a href="/compare/">All comparisons</a></p>
+<h1>${escapeHtml(heading)}</h1>
+<p>${escapeHtml(page.summary)}</p>
+<p>${androidLink}</p>
+<div class="compareTable" role="region" aria-label="Feature comparison" tabindex="0"><table>
+<thead><tr><th scope="col">What to compare</th><th scope="col">Wafra</th><th scope="col">${escapeHtml(competitor)}</th></tr></thead>
+<tbody>${rows.map(([label, wafra, other]) => `<tr><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(wafra)}</td><td>${escapeHtml(other)}</td></tr>`).join('')}</tbody>
+</table></div>
+${markdownToHtml(article)}
+<h2>Common questions</h2>
+${faqs.map(([question, answer]) => `<details><summary>${escapeHtml(question)}</summary><p>${escapeHtml(answer)}</p></details>`).join('')}
+<p>${androidLink}</p>
+<nav class="compareNav" aria-label="More comparisons"><a href="/compare/">All comparisons</a>${related}</nav>
+</article>`,
+    });
+  }
+
   // Cloudflare Pages serves this document for unknown URLs instead of its SPA
   // fallback. It must remain outside the sitemap and must not load the app.
   fs.writeFileSync(path.join(outputDir, '404.html'), shell({
