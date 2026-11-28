@@ -34,7 +34,7 @@ export const SITE_URL = getSiteUrl();
 // Pages Function counts the click and redirects to the destination in
 // site-events.mjs; the finalizer's _redirects file covers a static-only host.
 // Add an Android store destination only after public Play availability is verified.
-export const DOWNLOAD_PATHS = { iphone: '/get/iphone' } as const;
+export const DOWNLOAD_PATHS = { iphone: '/get/iphone', android: '/get/android' } as const;
 export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
 export const MARKETING_DESCRIPTION =
   'Track spending, budgets, bills and subscriptions anywhere without a bank login. Start manually or use optional supported imports.';

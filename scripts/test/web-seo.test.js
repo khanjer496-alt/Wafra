@@ -92,9 +92,8 @@ ok(
 ok(
   'download buttons use the counted first-party paths and keep a same-origin referrer',
   landing.includes('href={DOWNLOAD_PATHS.iphone}') && content.includes("iphone: '/get/iphone'") &&
-    landing.includes('Android: Google Play coming soon.') &&
-    // No Android download until public Play availability is verified.
-    !landing.includes('DOWNLOAD_PATHS.android') && !content.includes('/get/android') &&
+    landing.includes('href={DOWNLOAD_PATHS.android}') && content.includes("android: '/get/android'") &&
+    !landing.includes('Google Play coming soon') &&
     !/testflight\.apple\.com|releases\/download/.test(`${landing}\n${content}`) &&
     !landing.includes('rel="noreferrer"'),
 );
@@ -158,6 +157,7 @@ try {
   ok('a valid export finalizes successfully from another working directory', finalized.status === 0, finalized.stderr);
   const read = (file) => fs.existsSync(path.join(output, file)) ? fs.readFileSync(path.join(output, file), 'utf8') : '';
   const routes = ['privacy', 'terms', 'support'];
+  const comparisons = ['compare', 'compare/wafra-vs-wallet-by-budgetbakers', 'compare/wafra-vs-money-manager-realbyte'];
   const analyticsTag = '<script defer src="/minilytics-init.js"></script>';
   for (const route of routes) {
     const html = read(`${route}/index.html`);
@@ -204,17 +204,24 @@ try {
       '_expo/static/css/home.css', 'wafra-history-import.shortcut', 'robots.txt']
       .every((file) => fs.existsSync(path.join(output, file))));
   ok('static-host fallback redirects send each download path to its destination',
-    read('_redirects') === '/get/iphone https://testflight.apple.com/join/jbwzCgZ6 302\n');
+    read('_redirects') === '/get/iphone https://testflight.apple.com/join/jbwzCgZ6 302\n' +
+      '/get/android https://play.google.com/store/apps/details?id=app.wafra.android 302\n');
   const sitemap = read('sitemap.xml');
   ok('sitemap contains the public documents and excludes 404 and private routes',
-    routes.every((route) => sitemap.includes(`<loc>https://wafra-seo-fixture.dev/${route}/</loc>`)) &&
+    [...routes, ...comparisons].every((route) => sitemap.includes(`<loc>https://wafra-seo-fixture.dev/${route}/</loc>`)) &&
     !/404|settings/.test(sitemap));
   ok('repeated finalization keeps exactly one sitemap declaration',
     finalize().status === 0 && (read('robots.txt').match(/^Sitemap:/gm) || []).length === 1);
   ok('repeated finalization preserves the existing analytics loader once per public page',
-    ['index.html', ...routes.map((route) => `${route}/index.html`)].every((file) =>
+    ['index.html', ...[...routes, ...comparisons].map((route) => `${route}/index.html`)].every((file) =>
       (read(file).match(/src="\/minilytics-init\.js"/g) || []).length === 1) &&
       read('minilytics-init.js') === fs.readFileSync(path.join(root, 'public/minilytics-init.js'), 'utf8'));
+
+  ok('comparison articles survive route stripping and link back to the hub', comparisons.slice(1).every((route) => {
+    const html = read(`${route}/index.html`);
+    return html.includes('<th scope="row">') && html.includes('href="/compare/"') &&
+      html.includes('href="/get/android"') && html.includes('https://wafra-seo-fixture.dev/' + route + '/');
+  }));
 
   fs.mkdirSync(path.join(output, 'assets'));
   fs.writeFileSync(path.join(output, 'assets', 'kept.png'), 'png');
@@ -278,7 +285,12 @@ const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
   recordSiteEvent(env, request('https://wafra.dev/', {}, 'HEAD'), 'view', 'home');
   const click = downloadResponse(env, request('https://wafra.dev/get/iphone',
     { referer: 'https://wafra.dev/?utm_source=newsletter' }), 'iphone');
-  const android = downloadResponse(env, request('https://wafra.dev/get/android'), 'android');
+  const android = downloadResponse(env, request('https://wafra.dev/get/android',
+    { referer: 'https://wafra.dev/compare/' }), 'android');
+  downloadResponse(env, request('https://wafra.dev/get/android?utm_source=compare-hub',
+    { referer: 'https://wafra.dev/?ref=compare-hub' }), 'android');
+  downloadResponse(env, request('https://wafra.dev/get/android',
+    { referer: 'https://wafra.dev/compare/wafra-vs-unknown/' }), 'android');
   const unknown = downloadResponse(env, request('https://wafra.dev/get/windows'), 'windows');
   const inherited = downloadResponse(env, request('https://wafra.dev/get/toString'), 'toString');
   let unbound = 'not run';
@@ -289,7 +301,8 @@ const siteEvents = spawnSync(process.execPath, ['--input-type=module', '-e', `
     points, unbound, unknown, inherited, brokenStatus: broken.status,
     click: { status: click.status, location: click.headers.get('location'), referrer: click.headers.get('referrer-policy'),
       cache: click.headers.get('cache-control') },
-    iphone: DOWNLOAD_DESTINATIONS.iphone, android,
+    iphone: DOWNLOAD_DESTINATIONS.iphone,
+    android: { status: android.status, location: android.headers.get('location') },
   }));
 `], { cwd: root, encoding: 'utf8' });
 let events = {};
@@ -300,7 +313,7 @@ ok('a landing view records only coarse labels: campaign, referring site and coun
     indexes: ['view'], blobs: ['view', 'home', 'ae', 'instagram.com', 'instagrambio', 'browser'], doubles: [1],
   }));
 ok('automated clients are labelled, and prefetches and HEAD requests are not counted',
-  events.points?.length === 3 && events.points[1].blobs[5] === 'automated');
+  events.points?.length === 6 && events.points[1].blobs[5] === 'automated');
 ok('a download click carries the landing campaign and redirects without leaking it',
   JSON.stringify(events.points?.[2]?.blobs) === JSON.stringify(['download', 'iphone', 'ae', '', 'newsletter', 'browser']) &&
     events.click?.status === 302 && events.click.location === events.iphone &&
@@ -309,8 +322,12 @@ ok('no IP address, city, user agent, email or referrer path is written',
   !/203\.0\.113|dubai|mozilla|iphone os|googlebot|a@b|secret-post|igsh/i.test(JSON.stringify(events.points ?? [])));
 ok('unknown and inherited platform names fall through to the 404 page',
   events.unknown === null && events.inherited === null);
-ok('Android has no download before public Play availability is verified',
-  events.android === null);
+ok('Android download counts the comparison source and sends users to the public Play listing',
+  events.android?.status === 302 &&
+    events.android.location === 'https://play.google.com/store/apps/details?id=app.wafra.android' &&
+    JSON.stringify(events.points?.[3]?.blobs) === JSON.stringify(['download', 'google-play', 'ae', '', 'compare-hub', 'browser']));
+ok('comparison attribution rejects campaign labels and unknown comparison paths',
+  events.points?.[4]?.blobs?.[4] === '' && events.points?.[5]?.blobs?.[4] === '');
 ok('a missing or failing analytics binding never breaks the download',
   events.unbound === 302 && events.brokenStatus === 302);
 ok('Pages Functions route the home page and download paths through site events',
@@ -325,17 +342,18 @@ const funnel = spawnSync(process.execPath, ['--input-type=module', '-e', `
     { event: 'view', target: 'home', country: 'sa', referrer: '', campaign: '', client: 'browser', hits: 60 },
     { event: 'view', target: 'home', country: 'us', referrer: '', campaign: '', client: 'automated', hits: 500 },
     { event: 'download', target: 'iphone', country: 'ae', referrer: '', campaign: 'bio', client: 'browser', hits: 8 },
-    { event: 'download', target: 'android', country: 'sa', referrer: '', campaign: '', client: 'browser', hits: 2 },
+    { event: 'download', target: 'google-play', country: 'sa', referrer: '', campaign: 'compare-hub', client: 'browser', hits: 2 },
+    { event: 'download', target: 'android', country: 'sa', referrer: '', campaign: '', client: 'browser', hits: 1 },
   ]);
-  process.stdout.write(JSON.stringify({ text: renderFunnel(summary, 30, 17), query: funnelQuery(7) }));
+  process.stdout.write(JSON.stringify({ text: renderFunnel(summary, 30), query: funnelQuery(7) }));
 `], { cwd: root, encoding: 'utf8' });
 let report = {};
 try { report = JSON.parse(funnel.stdout); } catch { report = {}; }
-ok('the funnel report excludes automated clients and computes click-through from views',
-  funnel.status === 0 && /Landing views\s+100\n/.test(report.text) && /Download clicks\s+10 {2}\(10\.0% of views\)/.test(report.text) &&
+ok('the funnel report excludes automated clients and breaks out comparison download clicks',
+  funnel.status === 0 && /Landing views\s+100\n/.test(report.text) && /Download clicks\s+10\n/.test(report.text) &&
     /iPhone\/TestFlight\s+8\n/.test(report.text) && /500 automated requests excluded/.test(report.text) &&
-    report.text.includes('Top sources (campaign tag, views + clicks): (none) 62, bio 48') &&
-    report.text.includes('Top countries (views): SA 60, AE 40') && report.text.includes('(all time, any source): 17'),
+    report.text.includes('Top sources (campaign tag, views + clicks): (none) 61, bio 48, compare-hub 2') &&
+    report.text.includes('Top countries (views): SA 60, AE 40') && report.text.includes('Comparison pages (Google Play clicks): compare-hub 2') && report.text.includes('Legacy Android download clicks: 1'),
   funnel.stderr || report.text);
 ok('the funnel query reads the site events dataset for the requested window',
   /FROM wafra_site_events\nWHERE timestamp > NOW\(\) - INTERVAL '7' DAY/.test(report.query ?? ''));

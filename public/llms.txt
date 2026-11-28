@@ -4,7 +4,7 @@
 
 ## Product facts
 
-- Wafra has no bank login, no advertising and no third-party analytics.
+- Wafra does not require a bank login and has no in-app ads. See the Privacy Policy for details about the app and website.
 - Manual tracking works anywhere; users can choose their own currency and enter transactions without automatic bank-alert support.
 - The main ledger is encrypted in app storage on the user's device.
 - Android can process supported bank SMS and optional bank-app notifications on-device after the user enables access.
@@ -30,6 +30,7 @@
 - Automatic parsing can be wrong or miss an alert; the user's bank remains authoritative.
 - Worldwide storefront billing and worldwide bank-alert parsing are separate capabilities. Wafra does not claim worldwide bank parsing.
 
-## Canonical public page
+## Public pages
 
 - `/` — product overview, privacy summary and common questions
+- `/compare/` — Android expense tracker comparisons and Google Play download links

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { writePublicPages } from './public-web-pages.mjs';
+import { comparisonRoutes } from './web-comparisons.mjs';
 import { DOWNLOAD_DESTINATIONS } from '../src/marketing/site-events.mjs';
 
 const outputDir = path.resolve(process.argv[2] ?? 'dist');
@@ -73,13 +74,15 @@ const staticIndexHtml = indexHtml
 fs.writeFileSync(indexPath, staticIndexHtml);
 
 writePublicPages(outputDir, siteUrl);
+const publicRoutes = ['privacy', 'terms', 'support', ...comparisonRoutes];
+const publicPageFiles = publicRoutes.map((route) => path.join(route, 'index.html'));
 
 // Preserve the already-deployed Minilytics integration across source deploys.
 // The checked-in loader is byte-identical to the public 2026-11-07 version;
 // its existing host allowlist, website IDs and provider remain unchanged.
 const analyticsTag = '<script defer src="/minilytics-init.js"></script>';
 fs.copyFileSync(new URL('../public/minilytics-init.js', import.meta.url), path.join(outputDir, 'minilytics-init.js'));
-for (const file of ['index.html', 'privacy/index.html', 'terms/index.html', 'support/index.html']) {
+for (const file of ['index.html', ...publicPageFiles]) {
   const filePath = path.join(outputDir, file);
   const html = fs.readFileSync(filePath, 'utf8')
     .replace(/<script\b[^>]*\bsrc="\/minilytics-init\.js"[^>]*><\/script>/g, '');
@@ -93,8 +96,7 @@ for (const file of ['index.html', 'privacy/index.html', 'terms/index.html', 'sup
 // remove them from the production output: unknown URLs then get the static
 // 404 page. The seeded browser-test build (EXPO_PUBLIC_WAFRA_E2E_DEMO=1) is
 // exported separately and never runs this finalizer.
-const publicHtml = new Set(['index.html', '404.html', ...['privacy', 'terms', 'support']
-  .map((route) => path.join(route, 'index.html'))]);
+const publicHtml = new Set(['index.html', '404.html', ...publicPageFiles]);
 const removeAppRoutes = (directory, prefix = '') => {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const relativePath = path.join(prefix, entry.name);
@@ -140,6 +142,7 @@ const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>${siteUrl}/privacy/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
   <url><loc>${siteUrl}/terms/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
   <url><loc>${siteUrl}/support/</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+${comparisonRoutes.map((route) => `  <url><loc>${siteUrl}/${route}/</loc></url>`).join('\n')}
 </urlset>
 `;
 

@@ -11,11 +11,19 @@
 
 // Single source for the download destinations behind /get/<platform>. The
 // finalizer writes the same map into _redirects for a static-only deploy.
-// Android has no download until public Play availability is verified, so
-// /get/android falls through to the site's 404 page instead of an obsolete APK.
 export const DOWNLOAD_DESTINATIONS = Object.freeze({
   iphone: 'https://testflight.apple.com/join/jbwzCgZ6',
+  android: 'https://play.google.com/store/apps/details?id=app.wafra.android',
 });
+
+export const COMPARISON_SLUGS = Object.freeze({
+  wallet: 'wafra-vs-wallet-by-budgetbakers',
+  moneyManager: 'wafra-vs-money-manager-realbyte',
+});
+const comparisonCampaigns = new Map([
+  ['/compare', 'compare-hub'],
+  ...Object.values(COMPARISON_SLUGS).map((slug) => [`/compare/${slug}`, `compare-${slug}`]),
+]);
 
 export const SITE_EVENTS_DATASET = 'wafra_site_events';
 
@@ -24,7 +32,11 @@ const AUTOMATED_CLIENT =
 
 const label = (value, max) => String(value ?? '').toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, max);
 
-const campaignOf = (url) => url.searchParams.get('utm_source') ?? url.searchParams.get('ref');
+const campaignOf = (url) => {
+  const campaign = url.searchParams.get('utm_source') ?? url.searchParams.get('ref');
+  // Reserve comparison labels for same-origin page attribution.
+  return campaign && !label(campaign, 40).startsWith('compare-') ? campaign : null;
+};
 
 const isPrefetch = (headers) =>
   /prefetch|prerender/i.test(`${headers.get('sec-purpose') ?? ''} ${headers.get('purpose') ?? ''}`);
@@ -38,8 +50,12 @@ export const describeVisit = (request, event, target) => {
     const from = new URL(request.headers.get('referer') ?? '');
     // A download click's referrer is the landing page itself; carry its
     // campaign tag forward instead of recording our own hostname.
-    if (from.host === url.host) campaign ??= campaignOf(from);
-    else referrer = from.hostname.replace(/^www\./, '');
+    if (from.origin === url.origin) {
+      const comparison = event === 'download' && target === 'google-play'
+        ? comparisonCampaigns.get(from.pathname.replace(/\/$/, ''))
+        : undefined;
+      campaign = comparison ?? campaign ?? campaignOf(from);
+    } else referrer = from.hostname.replace(/^www\./, '');
   } catch {
     // No referrer, or not a URL.
   }
@@ -71,7 +87,7 @@ export const recordSiteEvent = (env, request, event, target) => {
 /** Redirect a known platform to its download, or return null for next(). */
 export const downloadResponse = (env, request, platform) => {
   if (!Object.hasOwn(DOWNLOAD_DESTINATIONS, platform)) return null;
-  recordSiteEvent(env, request, 'download', platform);
+  recordSiteEvent(env, request, 'download', platform === 'android' ? 'google-play' : platform);
   return new Response(null, {
     status: 302,
     headers: {

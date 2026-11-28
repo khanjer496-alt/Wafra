@@ -77,8 +77,8 @@ The SEO check verifies:
 - one H1 and semantic FAQ markup;
 - public indexability, the static 404 page, and that no app screen or app
   JavaScript is published;
-- the `/get/iphone` download link and its `_redirects` fallback, and that
-  no Android or GitHub download is published;
+- the `/get/android` and `/get/iphone` links, their store targets and static fallbacks;
+- comparison landing pages, unique metadata, internal links, and sitemap entries;
 - Open Graph and X/Twitter metadata;
 - both JSON-LD graphs;
 - image alt text;
@@ -90,7 +90,7 @@ The SEO check verifies:
 The public page requires no client-side behavior. Its anchors and FAQ controls
 are native HTML, so the production finalizer removes Expo's runtime scripts
 from `index.html` and deletes the app bundles. The only executable script on
-the four public pages is the already-deployed Minilytics loader. Page content,
+the public pages is the already-deployed Minilytics loader. Page content,
 navigation and FAQs work without it. Wafra's browser tests use a separate seeded export
 (`EXPO_PUBLIC_WAFRA_E2E_DEMO=1`, see `scripts/e2e/run.sh`) and never deploy it.
 Production images and CSS remain measurable assets; set budgets for them and
@@ -102,21 +102,19 @@ The website has two existing, separate measurement paths. The checked-in
 `public/minilytics-init.js` preserves the live loader retrieved from
 `https://wafra-app-azg.pages.dev/minilytics-init.js` on 7 November 2026
 (SHA-256 `586ce5d7c5bd46929be1aac5f57af8a25eba90b86a67da77014cf0c44eb70349`).
-The finalizer copies it unchanged and includes it once on each of the four
+The finalizer copies it unchanged and includes it once on each of the
 public pages. Its host allowlist, website IDs and Minilytics provider are
 unchanged; it does not activate on unknown preview hosts. Its cookies and
 retention remain described in the adopted Privacy Policy.
 
 The separate server-side funnel counts work as follows:
 
-- The download button links to first-party `/get/iphone`. There is no
-  Android download until public Play availability is verified; `/get/android`
-  returns the 404 page instead of serving an obsolete APK. The homepage states
-  that the Google Play release is coming soon.
+- Download buttons use first-party redirects to public Google Play and iPhone TestFlight.
+  The Android redirect records a comparison label from a known same-origin comparison page.
 - `functions/index.js` and `functions/get/[platform].js` are Cloudflare Pages
   Functions. They write one data point per landing view or download click to
   the Workers Analytics Engine dataset `wafra_site_events`, then serve the
-  static page or redirect to TestFlight
+  static page or redirect to the store
   (`src/marketing/site-events.mjs` holds the active destination).
 - Each data point holds only the event, target, Cloudflare country, referring
   hostname, campaign tag (`utm_source` or `ref`) and a browser/automated label.
@@ -126,8 +124,15 @@ The separate server-side funnel counts work as follows:
   output is ever served without Functions, `_redirects` keeps the download
   buttons working (Cloudflare ignores `_redirects` for Function routes).
 
+**Organic search.** The Wafra site is verified in Google Search Console and the
+canonical sitemap has been submitted. Check the Sitemaps report for processing
+status. Use the Performance report's Page filter for `/compare/` to track
+impressions, search clicks and queries as the pages are indexed. Run
+`node scripts/site-funnel.mjs` with the existing Analytics Engine credentials
+to see Google Play clicks by comparison page. Use Play Console for real installs.
+
 **Deploying.** Run the **Deploy website** GitHub Actions workflow
-(`.github/workflows/deploy-site.yml`, manual only) from `main`. It uses the
+(`.github/workflows/deploy-site.yml`, manual only) against the branch with the approved website source. It uses the
 repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, which
 need **Cloudflare Pages: Edit**. It builds and checks the site, then runs
 `scripts/pages-site-config.mjs`. That script finds the Pages project serving
@@ -164,12 +169,12 @@ Read the funnel with an API token that has **Account Analytics: Read**:
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/site-funnel.mjs 30
 ```
 
-It reports browser landing views, iPhone and Android download clicks,
-click-through, top campaign tags, referring sites and countries, plus the APK's
-all-time GitHub download count. TestFlight installs come from App Store Connect.
-Tag outbound links (for example `?utm_source=instagram`) to see which channels
-bring visitors. The Workers Free plan includes 100,000 Analytics Engine data
-points a day, and data is kept for three months.
+It reports browser landing views, TestFlight and Google Play clicks,
+Google Play clicks by comparison page, and top campaign tags, referring sites
+and countries. Use the store consoles for installs. Tag links to the website
+(for example `?utm_source=instagram`) to see which channels bring visitors.
+The Workers Free plan includes 100,000 Analytics Engine data points a day,
+and data is kept for three months.
 
 To check the Functions locally, serve a finalized export with
 `server/node_modules/.bin/wrangler pages dev <export> --compatibility-date 2026-08-01`
@@ -191,19 +196,16 @@ The site is live at `https://wafra-app-azg.pages.dev`, which the store
 metadata and `app.json` already use for the privacy, terms and support URLs.
 These items cannot be completed honestly from repository code alone:
 
-1. Run the **Deploy website** workflow from `main`. It binds `SITE_EVENTS`,
-   sets Fail open, deploys, and checks that `/get/iphone` is served by the
-   counting Function.
-2. Submit `/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
+1. Check Google Search Console for sitemap processing and search performance.
+2. Submit `/sitemap.xml` in Bing Webmaster Tools when that property is set up.
 3. Decide whether to move to a custom domain. A `pages.dev` address works, but
    a domain Wafra owns can be kept if hosting changes. If it changes, update
    `EXPO_PUBLIC_WAFRA_SITE_URL`, `app.json`, `docs/store-metadata.json` and the
    hosted Shortcut URL checks together, and redirect the old address.
 4. Have counsel finish the launch-draft privacy policy and terms, including
    the governing-law placeholder, before a store launch.
-5. Point `DOWNLOAD_DESTINATIONS` at the App Store and Google Play listings when
-   they are live. Use campaign links there (App Store `pt`/`ct`, Play
-   `referrer`) so store dashboards attribute installs to the website.
+5. Switch the iPhone link from TestFlight to the App Store listing when it goes
+   live. Store campaign links can support install attribution.
 6. Establish field Core Web Vitals monitoring after the site has real traffic.
    A local score is not field evidence.
 

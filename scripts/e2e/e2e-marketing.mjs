@@ -1,5 +1,5 @@
 /**
- * Exercise the finalized, zero-JavaScript landing page, not the Expo dev server.
+ * Exercise the finalized landing page with JavaScript disabled.
  * BASE=http://localhost:8186 PLAYWRIGHT_CHANNEL=chrome node scripts/e2e/e2e-marketing.mjs
  * Serve with `wrangler pages dev <export>` and EXPECT_REDIRECTS=1 to follow downloads.
  * OUT is optional; generated evidence belongs outside shipping source.
@@ -31,7 +31,8 @@ try {
     assert.equal(response.status(), 200);
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.locator('h1').count(), 1);
-    assert.equal(await page.locator('script:not([type="application/ld+json"])').count(), 0);
+    assert.equal(await page.locator('script[src="/minilytics-init.js"][defer]').count(), 1);
+    assert.equal(await page.locator('script:not([type="application/ld+json"]):not([src="/minilytics-init.js"])').count(), 0);
     assert.equal(await page.locator('article').count(), 3);
     assert.equal((await page.locator('h1').innerText()).replace(/\s+/g, ' '), 'Know your spending. Plan what comes next.');
 
@@ -94,12 +95,16 @@ try {
     // cannot follow them; under `wrangler pages dev` set EXPECT_REDIRECTS=1.
     assert.equal(await page.getByRole('link', { name: 'Join the Wafra beta on Apple TestFlight', exact: true })
       .getAttribute('href'), '/get/iphone');
-    // No Android download while the source repository is private.
-    assert.equal(await page.locator('a[href="/get/android"], a[href$=".apk"]').count(), 0);
+    assert.equal(await page.getByRole('link', { name: 'Android Get it on Google Play', exact: true })
+      .getAttribute('href'), '/get/android');
+    assert.equal(await page.locator('a[href$=".apk"]').count(), 0);
     if (process.env.EXPECT_REDIRECTS === '1') {
       const iphone = await page.request.get(`${base}/get/iphone`, { maxRedirects: 0 });
       assert.equal(iphone.status(), 302);
       assert.equal(iphone.headers().location, 'https://testflight.apple.com/join/jbwzCgZ6');
+      const android = await page.request.get(`${base}/get/android`, { maxRedirects: 0 });
+      assert.equal(android.status(), 302);
+      assert.equal(android.headers().location, 'https://play.google.com/store/apps/details?id=app.wafra.android');
     }
     const tour = page.locator('#inside-wafra');
     assert.equal(await tour.getByRole('heading', { name: 'Home', exact: true }).count(), 1);
@@ -108,7 +113,7 @@ try {
     assert.match(await tour.innerText(), /category’s share of total spending/);
     assert.match(await tour.innerText(), /Subscriptions and utilities in separate sections/);
     results.push({ width, pass: true, ...metrics });
-    console.log(`PASS ${width}px: layout, fonts, app previews, navigation, keyboard FAQs, downloads; no page JavaScript`);
+    console.log(`PASS ${width}px: layout, fonts, app previews, navigation, keyboard FAQs, and downloads with JavaScript disabled`);
   }
 
   assert.deepEqual(failures, [], 'all landing assets should load');

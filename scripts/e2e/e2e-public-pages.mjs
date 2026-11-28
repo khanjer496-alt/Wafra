@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { COMPARISON_SLUGS } from '../../src/marketing/site-events.mjs';
 
 const base = process.env.BASE ?? 'http://127.0.0.1:8194';
 const out = process.env.OUT;
@@ -20,6 +21,7 @@ const launchOptions = process.env.CHROMIUM_PATH
   : process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {};
 const browser = await chromium.launch({ ...launchOptions, headless: true });
 const results = [];
+const comparisonRoutes = Object.values(COMPARISON_SLUGS).map((slug) => `compare/${slug}/`);
 
 try {
   const context = await browser.newContext({ javaScriptEnabled: false, reducedMotion: 'reduce' });
@@ -31,13 +33,15 @@ try {
   });
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const route of ['privacy/', 'terms/', 'support/', '404.html']) {
+    for (const route of ['privacy/', 'terms/', 'support/', 'compare/', ...comparisonRoutes, '404.html']) {
       const response = await page.goto(`${base}/${route}`, { waitUntil: 'networkidle' });
       assert.equal(response.status(), 200, `generated document ${route} is served`);
       await page.evaluate(() => document.fonts.ready);
       assert.equal(await page.locator('h1').count(), 1);
       assert.equal(await page.locator('main').count(), 1);
-      assert.equal(await page.locator('script').count(), 0);
+      const analyticsCount = route === '404.html' ? 0 : 1;
+      assert.equal(await page.locator('script').count(), analyticsCount);
+      assert.equal(await page.locator('script[src="/minilytics-init.js"][defer]').count(), analyticsCount);
       assert.equal(await page.locator('html').getAttribute('lang'), 'en');
       const metrics = await page.evaluate(() => ({
         overflow: document.documentElement.scrollWidth > innerWidth,
@@ -68,6 +72,16 @@ try {
         assert.doesNotMatch(terms, /\[\[GOVERNING LAW/);
       } else if (route === 'support/') {
         assert.equal(await page.getByRole('link', { name: 'naser@nasidaapps.com' }).getAttribute('href'), 'mailto:naser@nasidaapps.com');
+      } else if (route === 'compare/') {
+        for (const comparisonRoute of comparisonRoutes) {
+          assert.equal(await page.locator(`main a[href="/${comparisonRoute}"]`).count(), 1);
+        }
+        assert.equal(await page.getByRole('link', { name: 'Get Wafra on Google Play' }).getAttribute('href'), '/get/android');
+      } else if (comparisonRoutes.includes(route)) {
+        const table = page.getByRole('region', { name: 'Feature comparison' });
+        assert.equal(await table.getAttribute('tabindex'), '0');
+        assert.equal(await table.getByRole('table').count(), 1);
+        assert.equal(await page.locator('main a[href="/get/android"]').count(), 2);
       } else {
         assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow, noarchive');
         assert.match(await page.locator('h1').innerText(), /That page is not here/);
