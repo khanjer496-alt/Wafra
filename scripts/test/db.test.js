@@ -566,7 +566,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // Native widget bridge: clearAll only asks it to drop the widget summary.
     '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {}, setAppPrivacy: async () => {} },
-    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {} },
+    '@/lib/logo-cache-lifecycle': { setLogoLookupsAllowed() {}, removeStoredLogoSearchResults: async () => {} },
     '@/lib/widget-sync': { invalidateWidgetSnapshotSync: async () => {}, requestWidgetSnapshotSync: () => ({ done: Promise.resolve('unchanged') }) },
     // The real selector helpers (dependency-free).
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),

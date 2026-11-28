@@ -5,15 +5,20 @@ const loadTs = require('./load-typescript.cjs');
 const load = require('../../universal-test/load-ts.cjs').createLoader();
 
 for (const os of ['ios', 'android']) {
-  test(`${os}: logo networking requires explicit consent and revocation invalidates queued jobs`, () => {
+  test(`${os}: logo networking waits for the hydrated store and local-only mode invalidates queued jobs`, () => {
     const logos = loadTs(path.resolve(__dirname, '../../../src/lib/logo-cache-lifecycle.ts'), {
       '@react-native-async-storage/async-storage': {}, 'react-native': { Platform: { OS: os } },
     });
-    assert.equal(logos.logoCacheGeneration(), null, 'fresh and upgraded installs start offline');
+    assert.equal(logos.logoCacheGeneration(), null, 'no lookup before the store hydrates');
     logos.setLogoLookupsAllowed(true);
-    assert.equal(logos.logoCacheGeneration(), null, 'retired artwork stays offline even with old opt-in');
-    assert.equal(logos.isLogoCacheGenerationCurrent(0), false);
-
+    const generation = logos.logoCacheGeneration();
+    assert.equal(typeof generation, 'number');
+    assert.equal(logos.isLogoCacheGenerationCurrent(generation), true);
+    logos.setLogoLookupsAllowed(false);
+    assert.equal(logos.logoCacheGeneration(), null);
+    assert.equal(logos.isLogoCacheGenerationCurrent(generation), false, 'queued search/cache results lose authority');
+    logos.setLogoLookupsAllowed(true);
+    assert.notEqual(logos.logoCacheGeneration(), generation, 'old request cannot regain authority when lookups resume');
   });
 }
 
@@ -61,7 +66,7 @@ test('store re-clears the native widget copy only when the effective guard chang
   assert.match(store, /if \(changed\) await invalidateWidgetSnapshotSync\(\);/);
   assert.ok(!/\n\s*await invalidateWidgetSnapshotSync\(\);\s*\n\s*if \(cancelled\) return;\s*\n\s*const current = authoritativeState\.current;/.test(store));
   const scenes = fs.readFileSync(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), 'utf8');
-  assert.doesNotMatch(scenes, /verifiedLogoUrl|expo-image|useOnlineLogosAllowed/);
+  assert.match(scenes, /const uri = allowRemote && domain \? verifiedLogoUrl\(domain\) : null;/);
 });
 
 test('iOS privacy cover observes UIApplication notifications and registers at launch (UIScene-safe)', () => {

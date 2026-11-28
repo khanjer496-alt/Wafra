@@ -1,4 +1,4 @@
-// Generated from normal shipping TypeScript. Source SHA-256: a81333695244a6d53b6a40dbd2fb8d9dd820f516f6f8043057191a5cf9f01b28
+// Generated from normal shipping TypeScript. Source SHA-256: d25a7d7acdf374e9c6e91dd1d942e7bee4a709584218d02ff73647341443f526
 (function(){'use strict';
 const factories={
 "alert-draft":function(module,exports,require){
@@ -6072,8 +6072,8 @@ const S = {
     hideLockedWidgetAmountsTitle: { en: 'Hide widget amounts with App Lock', ar: 'إخفاء مبالغ الودجات مع قفل التطبيق' },
     hideLockedWidgetAmountsDetail: { en: 'While App Lock is on, amounts stay hidden on Home Screen widgets, even after you unlock Wafra. Names and dates remain visible.', ar: 'عند تشغيل قفل التطبيق تبقى المبالغ مخفية في ودجات الشاشة الرئيسية حتى بعد فتح وفرة. تبقى الأسماء والتواريخ ظاهرة.' },
     privacyLogosBody: {
-        en: 'Online logos are off by default. On iPhone you can turn them on in Settings to share names with Brandfetch; Android does not use online logos in this version. Bundled logos appear locally. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
-        ar: 'الشعارات المتصلة متوقفة افتراضياً. على آيفون يمكنك تفعيلها في الإعدادات لمشاركة الأسماء مع Brandfetch، ولا يستخدمها أندرويد في هذا الإصدار. تظهر الشعارات المضمنة محلياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+        en: 'Merchant and bank logos load online. To find a logo, Wafra sends only a cleaned merchant or bank name — not the amount, account or card number, or bank message — to Brandfetch, a logo service, then loads the matching logo. Brandfetch can see that name, the brand’s web address and your network address. Logos are kept on this phone after the first load. If no logo is found or you are offline, Wafra shows the name’s first letter. A saved local-only preference turns online logos off.',
+        ar: 'تُحمَّل شعارات التجّار والبنوك عبر الإنترنت. وللعثور على الشعار ترسل وفرة اسماً منظّفاً للتاجر أو البنك فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch، وهي خدمة شعارات، ثم تحمّل الشعار المطابق. ويمكن لـ Brandfetch رؤية هذا الاسم وعنوان موقع العلامة وعنوان اتصالك بالشبكة. وتُحفظ الشعارات على هذا الهاتف بعد تحميلها أول مرة. وإذا لم يُعثر على شعار أو كنت غير متصل بالإنترنت، تعرض وفرة الحرف الأول من الاسم. وإذا كان تفضيل المعالجة المحلية محفوظاً، تتوقف الشعارات المتصلة.',
     },
     privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
     privacyLegacyBody: {
@@ -6083,8 +6083,8 @@ const S = {
     privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
     privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
     privacyResumeBody: {
-        en: 'This restores reference exchange-rate requests and online logos only if you separately enabled them, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
-        ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات المتصلة فقط إذا فعّلتها بشكل منفصل، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+        en: 'This turns online logos back on, restores reference exchange-rate requests only if you separately enabled them, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+        ar: 'يعيد هذا تشغيل الشعارات المتصلة، ويستأنف طلبات أسعار الصرف المرجعية فقط إذا فعّلتها بشكل منفصل، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
     },
     privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
     privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },

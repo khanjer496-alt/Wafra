@@ -236,6 +236,7 @@ import {
   type StatementCoverageEntry,
 } from '@/lib/types';
 import { clearWidgetSnapshot, setAppPrivacy } from '../../modules/wafra-widgets';
+import { removeStoredLogoSearchResults, setLogoLookupsAllowed } from '@/lib/logo-cache-lifecycle';
 import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -2683,6 +2684,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
       cancelLocalSemanticBackgroundWork();
     }
+    // Online logos are on by default on every platform; local-only mode stops
+    // them. Revoke queued logo work before subscribers can schedule another request.
+    setLogoLookupsAllowed(next.hydrated && !next.privateMode);
+    // Older builds persisted Brandfetch search results; their terms forbid that. Remove once per launch.
+    if (next.hydrated && !authoritativeState.current.hydrated) void removeStoredLogoSearchResults();
     if ((next.appLock && next.hideWidgetAmountsWhenLocked !== false) !==
         (authoritativeState.current.appLock && authoritativeState.current.hideWidgetAmountsWhenLocked !== false) || replacesLedger) {
       void invalidateWidgetSnapshotSync();
@@ -4284,7 +4290,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <MoneyLocaleProvider localeKey={moneyLocaleKey}>
-      <OnlineLogosContext.Provider value={false}>
+      <OnlineLogosContext.Provider value={state.hydrated && !state.privateMode}>
       <PrivateModeContext.Provider value={state.privateMode}>
         <StoreHandleContext.Provider value={handle}>
           <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

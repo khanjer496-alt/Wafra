@@ -282,15 +282,18 @@ refreshes.
 
 ## Other network activity
 
-- **Merchant and bank logos:** this version ships no third-party merchant or
-  bank artwork and makes no online logo requests on iPhone, Android or the
-  widgets. Transactions and accounts show a letter or a generic icon drawn on
-  the device, so no merchant or bank name is sent anywhere to find a logo.
-  Earlier builds could look up logos online through Brandfetch after an
-  opt-in; this version has no such setting, and a saved opt-in from an earlier
-  build cannot turn lookups back on. **Erase all data** removes any logo cache
-  an earlier build left. Restoring a backup keeps this device's widget-amount
-  privacy choice; the file cannot change it.
+- **Merchant and bank logos:** from version 1.0.2, to show a merchant's or
+  bank's logo, Wafra sends only a cleaned merchant or bank name, never the
+  amount, account or card number, or bank message, to Brandfetch, a logo
+  service, and then loads that brand's logo from Brandfetch. Brandfetch can see
+  the name, the brand's web address and your network address; no account,
+  device or user identifier is sent. This is on by default on iPhone and
+  Android. A saved local-only preference from an earlier version turns it off.
+  Wafra does not store the lookup results: they are kept only while the app is
+  open. Logo images load directly from Brandfetch, and your phone's image cache
+  may keep a copy for a while. If no logo is found or you are offline, Wafra
+  shows the name's first letter. Widgets show letters only. Restoring a backup
+  keeps this device's widget-amount privacy choice; the file cannot change it.
 
 - **Exchange rates for foreign-currency spending:** when a purchase is in a
   currency other than the ledger's (travel, online shopping) and the bank alert

@@ -7,12 +7,10 @@ const resetters = new Set<() => void>();
 let generation = 0;
 let lookupsAllowed = false;
 
-/** Retired compatibility API: old opt-in values cannot enable artwork in 1.0. */
+/** Off until the store has hydrated, and whenever local-only (private) mode is on. */
 export function setLogoLookupsAllowed(allowed: boolean): void {
-  // Artwork networking is retired for 1.0 on every platform.
-  void allowed;
-  if (!lookupsAllowed) return;
-  lookupsAllowed = false;
+  if (lookupsAllowed === allowed) return;
+  lookupsAllowed = allowed;
   generation += 1;
   for (const reset of resetters) reset();
 }
@@ -30,7 +28,7 @@ export function registerLogoCacheReset(reset: () => void): void {
   resetters.add(reset);
 }
 
-/** No caller can obtain authority to resolve or persist artwork in 1.0. */
+/** Both platforms skip cache, search and CDN resolution while lookups are not allowed. */
 export function logoCacheGeneration(): number | null {
   return !lookupsAllowed || erasesInProgress > 0 ? null : generation;
 }
@@ -39,15 +37,19 @@ export function isLogoCacheGenerationCurrent(started: number): boolean {
   return lookupsAllowed && erasesInProgress === 0 && started === generation;
 }
 
+async function removeOwnedKeys(): Promise<void> {
+  const keys = await AsyncStorage.getAllKeys();
+  const owned = keys.filter(key => CACHE_PREFIXES.some(prefix => key.startsWith(prefix)));
+  if (owned.length > 0) await AsyncStorage.multiRemove(owned);
+}
+
 /**
- * Queue persistent mutations so erase also waits for writes already handed to
- * AsyncStorage. Checking an epoch before setItem alone cannot stop such writes
- * from landing after multiRemove has finished.
+ * Brandfetch's terms forbid storing Brand Search results, and 1.0.2 keeps them
+ * in memory only. Builds before 1.0 persisted them under these prefixes; the
+ * store calls this once per launch after hydration to delete any left behind.
  */
-export async function mutateLogoCache(started: number, task: () => Promise<void>): Promise<void> {
-  await serialiseMutation(async () => {
-    if (isLogoCacheGenerationCurrent(started)) await task();
-  });
+export async function removeStoredLogoSearchResults(): Promise<void> {
+  await serialiseMutation(removeOwnedKeys).catch(() => undefined);
 }
 
 /**
@@ -61,11 +63,7 @@ export async function withLogoCacheErase<T>(eraseLedger: () => Promise<T>): Prom
   erasesInProgress += 1;
   for (const reset of resetters) reset();
   try {
-    await serialiseMutation(async () => {
-      const keys = await AsyncStorage.getAllKeys();
-      const owned = keys.filter(key => CACHE_PREFIXES.some(prefix => key.startsWith(prefix)));
-      if (owned.length > 0) await AsyncStorage.multiRemove(owned);
-    });
+    await serialiseMutation(removeOwnedKeys);
     return await eraseLedger();
   } finally {
     erasesInProgress -= 1;

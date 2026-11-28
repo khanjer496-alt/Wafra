@@ -1293,6 +1293,7 @@ export default function SettingsScreen() {
             t(Platform.OS === 'ios' ? 'privacyBuiltInBodyIos' : 'privacyBuiltInBody'),
             t('privacyRetentionExact'),
             t(Platform.OS === 'ios' ? 'privacySecurityExactIos' : 'privacySecurityExact'),
+            t('privacyLogosBody'),
           ].map((body) => {
             const [lead, ...points] = privacySentences(body);
             return <View key={lead} style={styles.privacySection}>
